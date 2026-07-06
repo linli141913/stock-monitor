@@ -1,5 +1,15 @@
+import os
+os.environ['http_proxy'] = ''
+os.environ['https_proxy'] = ''
+os.environ['all_proxy'] = ''
+
 import akshare as ak
 import pandas as pd
+import os
+os.environ['http_proxy'] = ''
+os.environ['https_proxy'] = ''
+os.environ['all_proxy'] = ''
+
 from typing import Dict, Any
 
 class RealDataFetcher:
@@ -7,19 +17,23 @@ class RealDataFetcher:
         pass
 
     def get_stock_quote(self, symbol: str) -> Dict[str, Any]:
-        """Fetch basic stock info and latest daily quote (Mocked fallback if akshare fails)."""
+        """Fetch basic stock info and latest daily quote (using Tencent API directly)."""
         try:
-            # We assume symbol is like '000021'
-            stock_zh_a_spot_em_df = ak.stock_zh_a_spot_em()
-            row = stock_zh_a_spot_em_df[stock_zh_a_spot_em_df['代码'] == symbol]
-            if not row.empty:
-                return {
-                    "name": row.iloc[0]['名称'],
-                    "price": row.iloc[0]['最新价'],
-                    "change_pct": row.iloc[0]['涨跌幅'],
-                    "volume_ratio": row.iloc[0]['量比'],
-                    "turnover_rate": row.iloc[0]['换手率']
-                }
+            import requests
+            prefix = "sh" if symbol.startswith('6') else "sz"
+            url = f"http://qt.gtimg.cn/q={prefix}{symbol}"
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200:
+                data = resp.text
+                if len(data) > 30:
+                    v = data.split('~')
+                    return {
+                        "name": v[1],
+                        "price": float(v[3]),
+                        "change_pct": float(v[32]),
+                        "volume_ratio": float(v[49]) if len(v) > 49 and v[49] else 1.0,
+                        "turnover_rate": float(v[38]) if len(v) > 38 and v[38] else 1.0
+                    }
         except Exception as e:
             print(f"Error fetching quote for {symbol}: {e}")
         
@@ -37,9 +51,15 @@ class RealDataFetcher:
         try:
             news_df = ak.stock_news_em(symbol=symbol)
             if not news_df.empty:
-                # Get top 3 news titles
-                titles = news_df.head(3)['新闻标题'].tolist()
-                return "；".join(titles)
+                # Get top 3 news items
+                news_items = []
+                for _, row in news_df.head(3).iterrows():
+                    title = row.get('新闻标题', '')
+                    time = row.get('发布时间', '')
+                    source = row.get('文章来源', '东方财富网')
+                    url = row.get('新闻链接', '')
+                    news_items.append(f"【{time}】{title} (来源: {source}, 链接: {url})")
+                return "\n".join(news_items)
         except Exception as e:
             print(f"Error fetching news for {symbol}: {e}")
             
