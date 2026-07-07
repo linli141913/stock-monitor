@@ -44,7 +44,63 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     }
   };
 
-      useEffect(() => {
+      
+  // Custom mobile touch logic (Long press to inspect, release to hide)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+  const timerRef = useRef<any>(null);
+  const isInspectingRef = useRef(false);
+  const startPosRef = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const chart = echartsRef.current?.getEchartsInstance();
+    if (!chart) return;
+
+    const zr = chart.getZr();
+
+    const onMouseDown = (e: any) => {
+      startPosRef.current = { x: e.offsetX, y: e.offsetY };
+      timerRef.current = setTimeout(() => {
+        isInspectingRef.current = true;
+        chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
+      }, 300); // 300ms for long press
+    };
+
+    const onMouseMove = (e: any) => {
+      if (isInspectingRef.current) {
+        chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
+      } else {
+        const dx = e.offsetX - startPosRef.current.x;
+        const dy = e.offsetY - startPosRef.current.y;
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+          clearTimeout(timerRef.current);
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      clearTimeout(timerRef.current);
+      if (isInspectingRef.current) {
+        chart.dispatchAction({ type: 'hideTip' });
+        isInspectingRef.current = false;
+      }
+    };
+
+    zr.on('mousedown', onMouseDown);
+    zr.on('mousemove', onMouseMove);
+    zr.on('mouseup', onMouseUp);
+    zr.on('globalout', onMouseUp);
+
+    return () => {
+      zr.off('mousedown', onMouseDown);
+      zr.off('mousemove', onMouseMove);
+      zr.off('mouseup', onMouseUp);
+      zr.off('globalout', onMouseUp);
+      clearTimeout(timerRef.current);
+    };
+  }, [data, isMobile]);
+
+  useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
