@@ -196,3 +196,28 @@
   padding: 16px;
   min-width: 0; /* Prevents flexbox overflow */
 }
+
+
+@media (max-width: 768px) {
+  .chartGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .chartRow {
+    flex-direction: column;
+  }
+  .meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+

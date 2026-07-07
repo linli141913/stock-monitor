@@ -102,3 +102,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+
+@media (max-width: 768px) {
+  .card {
+    padding: var(--space-md);
+  }
+}
+

@@ -236,3 +236,32 @@
   font-weight: 500;
   text-align: center;
 }
+
+
+@media (max-width: 768px) {
+  .topRow {
+    flex-direction: column;
+  }
+  .gaugeContainer, .summaryContainer {
+    width: 100%;
+  }
+  .evidenceGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .judgmentHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+

@@ -170,3 +170,32 @@
 .itemSentiment {
   font-weight: 500;
 }
+
+
+@media (max-width: 768px) {
+  .tabList {
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabBtn {
+    padding: var(--space-md) var(--space-md);
+    flex: none;
+  }
+  .financeGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-md);
+  }
+  .content {
+    padding: var(--space-md);
+  }
+  .label {
+    width: 80px;
+  }
+}
+@media (max-width: 480px) {
+  .financeGrid {
+    grid-template-columns: 1fr;
+  }
+}
+

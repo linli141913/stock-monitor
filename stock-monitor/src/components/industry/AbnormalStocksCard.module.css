@@ -107,3 +107,15 @@
   color: var(--color-text-muted);
   text-align: right;
 }
+
+
+@media (max-width: 768px) {
+  .card {
+    padding: var(--space-md);
+  }
+  .tableWrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+

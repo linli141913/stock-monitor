@@ -69,3 +69,32 @@
   border-top-left-radius: 3px;
   border-top-right-radius: 3px;
 }
+
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 var(--space-md);
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-sm);
+    padding-top: var(--space-sm);
+    padding-bottom: var(--space-sm);
+  }
+  .nav {
+    width: 100%;
+    justify-content: center;
+    gap: var(--space-md);
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .logoText {
+    font-size: 18px;
+  }
+  .navItem {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+}
+
