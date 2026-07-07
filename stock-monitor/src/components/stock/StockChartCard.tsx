@@ -258,6 +258,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       {
         name: 'K线',
         type: 'candlestick',
+        dimensions: ['date', '开盘', '收盘', '最低', '最高'],
         data: values,
         itemStyle: {
           color: upColor,
