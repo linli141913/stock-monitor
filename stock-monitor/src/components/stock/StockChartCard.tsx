@@ -25,6 +25,7 @@ const periodKeys: PeriodType[] = ['day', 'week', 'month', 'year'];
 
 export default function StockChartCard({ data, period, loading, onPeriodChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const echartsRef = useRef<any>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSimulatedFullscreen, setIsSimulatedFullscreen] = useState(false);
   const zoomRef = useRef({ start: 50, end: 100 });
@@ -42,6 +43,21 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       if (z.end !== undefined) zoomRef.current.end = z.end;
     }
   };
+
+    useEffect(() => {
+    const handleRelease = () => {
+      echartsRef.current?.getEchartsInstance()?.dispatchAction({ type: 'hideTip' });
+    };
+    const el = containerRef.current;
+    if (el) {
+      el.addEventListener('touchend', handleRelease);
+      el.addEventListener('mouseup', handleRelease);
+      return () => {
+        el.removeEventListener('touchend', handleRelease);
+        el.removeEventListener('mouseup', handleRelease);
+      };
+    }
+  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -97,7 +113,9 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     animation: false,
     tooltip: {
       trigger: 'axis',
-      triggerOn: 'click',
+      triggerOn: 'mousemove',
+      hideDelay: 0,
+      transitionDuration: 0,
       axisPointer: { type: 'cross' },
       borderWidth: 1,
       borderColor: '#ccc',
@@ -260,6 +278,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       
       <div className={styles.chartContainer} style={{ height: (isFullscreen || isSimulatedFullscreen) ? 'calc(100% - 60px)' : '400px', width: '100%' }}>
         <ReactECharts 
+          ref={echartsRef}
           option={option} 
           style={{ height: '100%', width: '100%' }}
           notMerge={false}
