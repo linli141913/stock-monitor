@@ -94,3 +94,14 @@
   .list { margin: 0 -12px; padding: 0 12px; overflow-x: auto; }
   .item { min-width: max-content; }
 }
+
+.content {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+
+.table th, .table td {
+  white-space: nowrap;
+}
