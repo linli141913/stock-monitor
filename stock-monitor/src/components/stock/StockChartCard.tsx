@@ -44,22 +44,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     }
   };
 
-    useEffect(() => {
-    const handleRelease = () => {
-      echartsRef.current?.getEchartsInstance()?.dispatchAction({ type: 'hideTip' });
-    };
-    const el = containerRef.current;
-    if (el) {
-      el.addEventListener('touchend', handleRelease);
-      el.addEventListener('mouseup', handleRelease);
-      return () => {
-        el.removeEventListener('touchend', handleRelease);
-        el.removeEventListener('mouseup', handleRelease);
-      };
-    }
-  }, []);
-
-  useEffect(() => {
+      useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
@@ -113,14 +98,20 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     animation: false,
     tooltip: {
       trigger: 'axis',
-      triggerOn: 'mousemove',
-      hideDelay: 0,
-      transitionDuration: 0,
+      triggerOn: (typeof window !== 'undefined' && window.innerWidth <= 768) ? 'click' : 'mousemove|click',
       axisPointer: { type: 'cross' },
       borderWidth: 1,
       borderColor: '#ccc',
       padding: 10,
-      textStyle: { color: '#000' }
+      textStyle: { color: '#000' },
+      position: function (pos: any, params: any, el: any, elRect: any, size: any) {
+        if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+          // 固定 Y 轴位置（如顶部往下 40px），X 轴跟随触摸点但避开手指
+          let x = pos[0] < size.viewSize[0] / 2 ? pos[0] + 20 : pos[0] - size.contentSize[0] - 20;
+          return [x, 40];
+        }
+        return undefined;
+      }
     },
     axisPointer: {
       link: [{ xAxisIndex: 'all' }],
