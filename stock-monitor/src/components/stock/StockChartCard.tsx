@@ -97,6 +97,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     animation: false,
     tooltip: {
       trigger: 'axis',
+      triggerOn: 'click',
       axisPointer: { type: 'cross' },
       borderWidth: 1,
       borderColor: '#ccc',
@@ -249,10 +250,10 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
           <span style={{ color: '#8b5cf6' }}>MA20</span>
           <button 
             onClick={toggleFullscreen} 
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#666' }}
-            title={isFullscreen ? "退出全屏" : "全屏查看"}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#666', fontSize: '13px', fontWeight: 500 }}
+            title={isFullscreen ? "退出全屏" : "横屏放大"}
           >
-            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            {isFullscreen || isSimulatedFullscreen ? '[ 退出全屏 ]' : '[ 横屏放大 ]'}
           </button>
         </div>
       </div>
