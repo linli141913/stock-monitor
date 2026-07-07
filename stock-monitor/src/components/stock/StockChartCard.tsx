@@ -45,31 +45,37 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
   };
 
       
-  // Custom mobile touch logic (Long press to inspect, release to hide)
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
+  
+  // Custom mobile touch logic: Long-press to inspect, Release to hide
   const timerRef = useRef<any>(null);
   const isInspectingRef = useRef(false);
   const startPosRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
+    const isMobile = typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent);
     if (!isMobile) return;
     const chart = echartsRef.current?.getEchartsInstance();
     if (!chart) return;
 
     const zr = chart.getZr();
 
-    const onMouseDown = (e: any) => {
+    const onTouchStart = (e: any) => {
       startPosRef.current = { x: e.offsetX, y: e.offsetY };
       timerRef.current = setTimeout(() => {
         isInspectingRef.current = true;
+        // Enable tooltip explicitly
+        chart.setOption({ tooltip: { show: true, triggerOn: 'mousemove' } });
         chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
-      }, 300); // 300ms for long press
+      }, 350); // 350ms long press
     };
 
-    const onMouseMove = (e: any) => {
+    const onTouchMove = (e: any) => {
       if (isInspectingRef.current) {
+        // Already inspecting, update tooltip
         chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
       } else {
+        // Not inspecting yet, if moved significantly, cancel long press
         const dx = e.offsetX - startPosRef.current.x;
         const dy = e.offsetY - startPosRef.current.y;
         if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
@@ -78,27 +84,32 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       }
     };
 
-    const onMouseUp = () => {
+    const onTouchEnd = () => {
       clearTimeout(timerRef.current);
       if (isInspectingRef.current) {
         chart.dispatchAction({ type: 'hideTip' });
+        // Disable tooltip to restore panning
+        chart.setOption({ tooltip: { show: false, triggerOn: 'none' } });
         isInspectingRef.current = false;
       }
     };
 
-    zr.on('mousedown', onMouseDown);
-    zr.on('mousemove', onMouseMove);
-    zr.on('mouseup', onMouseUp);
-    zr.on('globalout', onMouseUp);
+    // Initialize mobile tooltip state
+    chart.setOption({ tooltip: { show: false, triggerOn: 'none' } });
+
+    zr.on('mousedown', onTouchStart);
+    zr.on('mousemove', onTouchMove);
+    zr.on('mouseup', onTouchEnd);
+    zr.on('globalout', onTouchEnd);
 
     return () => {
-      zr.off('mousedown', onMouseDown);
-      zr.off('mousemove', onMouseMove);
-      zr.off('mouseup', onMouseUp);
-      zr.off('globalout', onMouseUp);
+      zr.off('mousedown', onTouchStart);
+      zr.off('mousemove', onTouchMove);
+      zr.off('mouseup', onTouchEnd);
+      zr.off('globalout', onTouchEnd);
       clearTimeout(timerRef.current);
     };
-  }, [data, isMobile]);
+  }, [data]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -153,18 +164,18 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
   const option = {
     animation: false,
     tooltip: {
+      show: true, // will be dynamically toggled on mobile
       trigger: 'axis',
-      triggerOn: (typeof window !== 'undefined' && window.innerWidth <= 768) ? 'click' : 'mousemove|click',
+      triggerOn: (typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent)) ? 'none' : 'mousemove|click',
       axisPointer: { type: 'cross' },
       borderWidth: 1,
       borderColor: '#ccc',
       padding: 10,
       textStyle: { color: '#000' },
       position: function (pos: any, params: any, el: any, elRect: any, size: any) {
-        if (typeof window !== 'undefined' && window.innerWidth <= 768) {
-          // 固定 Y 轴位置（如顶部往下 40px），X 轴跟随触摸点但避开手指
-          let x = pos[0] < size.viewSize[0] / 2 ? pos[0] + 20 : pos[0] - size.contentSize[0] - 20;
-          return [x, 40];
+        if (typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+          // 固定在图表左上角，彻底避免跳动和截断
+          return ['2%', '2%'];
         }
         return undefined;
       }
