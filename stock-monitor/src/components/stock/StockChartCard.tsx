@@ -64,21 +64,18 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       startPosRef.current = { x: e.offsetX, y: e.offsetY };
       timerRef.current = setTimeout(() => {
         isInspectingRef.current = true;
-        // Enable tooltip explicitly
-        chart.setOption({ tooltip: { show: true, triggerOn: 'mousemove' } });
         chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
-      }, 350); // 350ms long press
+      }, 200); 
     };
 
     const onTouchMove = (e: any) => {
       if (isInspectingRef.current) {
-        // Already inspecting, update tooltip
+        if (e.event) e.event.preventDefault(); 
         chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
       } else {
-        // Not inspecting yet, if moved significantly, cancel long press
         const dx = e.offsetX - startPosRef.current.x;
         const dy = e.offsetY - startPosRef.current.y;
-        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
           clearTimeout(timerRef.current);
         }
       }
@@ -88,14 +85,9 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       clearTimeout(timerRef.current);
       if (isInspectingRef.current) {
         chart.dispatchAction({ type: 'hideTip' });
-        // Disable tooltip to restore panning
-        chart.setOption({ tooltip: { show: false, triggerOn: 'none' } });
         isInspectingRef.current = false;
       }
     };
-
-    // Initialize mobile tooltip state
-    chart.setOption({ tooltip: { show: false, triggerOn: 'none' } });
 
     zr.on('mousedown', onTouchStart);
     zr.on('mousemove', onTouchMove);
@@ -118,6 +110,20 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    if (isSimulatedFullscreen) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, [isSimulatedFullscreen]);
 
     const toggleFullscreen = () => {
     if (isSimulatedFullscreen) {
@@ -164,7 +170,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
   const option = {
     animation: false,
     tooltip: {
-      show: true, // will be dynamically toggled on mobile
+      show: true,
       trigger: 'axis',
       triggerOn: (typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent)) ? 'none' : 'mousemove|click',
       axisPointer: { type: 'cross' },
@@ -172,6 +178,37 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       borderColor: '#ccc',
       padding: 10,
       textStyle: { color: '#000' },
+      formatter: function (params: any) {
+        if (!params || !params.length) return '';
+        let html = params[0].axisValueLabel + '<br/>';
+        params.forEach((param: any) => {
+          if (param.seriesType === 'candlestick') {
+            const raw = param.data;
+            let o, c, l, h;
+            if (Array.isArray(raw)) {
+              o = raw[0]; c = raw[1]; l = raw[2]; h = raw[3];
+            } else {
+              o = param.value[1]; c = param.value[2]; l = param.value[3]; h = param.value[4];
+            }
+            html += `${param.marker} ${param.seriesName}<br/>`;
+            html += `&nbsp;&nbsp;开盘: ${o}<br/>`;
+            html += `&nbsp;&nbsp;收盘: ${c}<br/>`;
+            html += `&nbsp;&nbsp;最低: ${l}<br/>`;
+            html += `&nbsp;&nbsp;最高: ${h}<br/>`;
+          } else {
+            let val = param.value;
+            if (Array.isArray(val)) {
+                val = val[1] !== undefined ? val[1] : val[0];
+            } else if (typeof val === 'object' && val !== null) {
+                val = val.value || 0;
+            }
+            if (val !== '-' && val !== undefined && val !== null) {
+              html += `${param.marker} ${param.seriesName}: ${val}<br/>`;
+            }
+          }
+        });
+        return html;
+      },
       position: function (pos: any, params: any, el: any, elRect: any, size: any) {
         if (typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
           let viewW = size.viewSize[0] || window.innerWidth;
@@ -179,16 +216,10 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
           let boxW = size.contentSize[0] || 150;
           let boxH = size.contentSize[1] || 150;
           
-          // 放在十字线触点旁边
-          let x = pos[0] + 15;
-          let y = pos[1] + 15;
+          let x = pos[0] + 15; 
+          let y = (viewH - boxH) / 2;
           
-          // 如果右侧溢出，放左侧
           if (x + boxW > viewW) x = pos[0] - boxW - 15;
-          // 如果下方溢出，放上方
-          if (y + boxH > viewH) y = pos[1] - boxH - 15;
-          
-          // 强制不越界
           if (x < 0) x = 5;
           if (y < 0) y = 5;
           
