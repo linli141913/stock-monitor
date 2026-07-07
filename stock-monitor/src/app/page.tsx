@@ -1,5 +1,7 @@
 'use client';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import styles from './page.module.css';
 
@@ -19,7 +21,6 @@ import { mockCompanyInfo, mockFinancialSummary, mockAnnouncements, mockNews, moc
 import { mockIndustryMonitor } from '@/mock/industryMock';
 import { mockAlertRule } from '@/mock/alertMock';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
 const AUTO_REFRESH_INTERVAL = 5 * 1000; // 5秒高频自动刷新行情
 
 export default function Home() {

@@ -2444,3 +2444,816 @@ INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
 EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
 INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55686 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55711 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:55689 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55711 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55686 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+EastMoney Anti-spider triggered, using related-stock derivation fallback: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     127.0.0.1:59082 - "GET /api/stock/industry/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/batch_overview?symbols=000021,601138,002475,600584,002241,601231 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/abnormal_peers/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59082 - "GET /api/stock/overview/000021 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59079 - "GET /api/stock/kline/000021?period=day HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59080 - "GET /api/stock/company/000021 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [95698]
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

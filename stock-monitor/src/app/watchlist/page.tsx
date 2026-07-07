@@ -1,12 +1,13 @@
 'use client';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
+
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWatchlist, WatchlistItem } from '@/hooks/useWatchlist';
 import styles from './page.module.css';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
 
 interface StockLiveData {
   stockCode: string;

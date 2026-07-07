@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
 import React, { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import styles from './FinancialSummaryTab.module.css';
