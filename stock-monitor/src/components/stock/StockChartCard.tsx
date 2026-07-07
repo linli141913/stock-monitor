@@ -26,6 +26,7 @@ const periodKeys: PeriodType[] = ['day', 'week', 'month', 'year'];
 export default function StockChartCard({ data, period, loading, onPeriodChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSimulatedFullscreen, setIsSimulatedFullscreen] = useState(false);
   const zoomRef = useRef({ start: 50, end: 100 });
   const prevPeriodRef = useRef(period);
 
@@ -50,13 +51,24 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else {
+    const toggleFullscreen = () => {
+    if (isSimulatedFullscreen) {
+      setIsSimulatedFullscreen(false);
+      return;
+    }
+    
+    if (document.fullscreenElement) {
       document.exitFullscreen();
+    } else {
+      if (containerRef.current?.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable fullscreen: ${err.message}`);
+          setIsSimulatedFullscreen(true);
+        });
+      } else {
+        // Fallback for iOS
+        setIsSimulatedFullscreen(true);
+      }
     }
   };
 
@@ -212,7 +224,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
   };
 
   return (
-    <div className={styles.card} ref={containerRef} style={isFullscreen ? { backgroundColor: '#fff', padding: '20px', overflow: 'hidden' } : {}}>
+    <div className={`${styles.card} ${isSimulatedFullscreen ? styles.simulatedFullscreen : ''}`} ref={containerRef} style={isFullscreen ? { backgroundColor: '#fff', padding: '20px', overflow: 'hidden' } : {}}>
       <div className={styles.header}>
         <div className={styles.tabs}>
           <button
@@ -245,7 +257,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
         </div>
       </div>
       
-      <div className={styles.chartContainer} style={{ height: isFullscreen ? 'calc(100vh - 80px)' : '400px', width: '100%' }}>
+      <div className={styles.chartContainer} style={{ height: (isFullscreen || isSimulatedFullscreen) ? 'calc(100% - 60px)' : '400px', width: '100%' }}>
         <ReactECharts 
           option={option} 
           style={{ height: '100%', width: '100%' }}

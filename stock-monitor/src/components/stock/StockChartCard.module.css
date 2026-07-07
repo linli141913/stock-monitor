@@ -71,3 +71,49 @@
   .filterBtn { padding: 6px 10px; font-size: 14px; }
   .chartContainer { height: 300px !important; }
 }
+
+.fsText { display: none; }
+@media (max-width: 768px) {
+  .fsText { display: inline; margin-left: 4px; font-size: 14px; }
+  .mobileFullscreenText { 
+    background-color: var(--color-primary-light); 
+    color: var(--color-primary); 
+    padding: 4px 10px; 
+    border-radius: 4px; 
+    border: none;
+    display: flex;
+    align-items: center;
+  }
+}
+
+.simulatedFullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 99999 !important;
+  background: white !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 768px) {
+  .simulatedFullscreen {
+    /* To force landscape on mobile, we can rotate the container */
+    transform: rotate(90deg);
+    transform-origin: top left;
+    width: 100vh !important;
+    height: 100vw !important;
+    left: 100vw !important;
+    top: 0 !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .simulatedFullscreen .chartContainer {
+    height: calc(100% - 60px) !important;
+  }
+}

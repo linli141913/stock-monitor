@@ -189,46 +189,31 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         </div>
       </div>
 
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        background: 'linear-gradient(145deg, #ffffff 0%, #f9fafb 100%)', 
-        border: '1px solid #e5e7eb', 
-        borderRadius: '16px', 
-        padding: '32px 40px', 
-        marginBottom: '32px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
-      }}>
-        <div style={{ flex: 1, maxWidth: '400px' }}>
+      <div className={styles.gaugeCard}>
+        <div className={styles.gaugeChart}>
           <ReactECharts option={getGaugeOption()} style={{ height: '180px', width: '100%' }} />
         </div>
-        <div style={{ flex: 1, paddingLeft: '40px', borderLeft: '1px solid #e5e7eb' }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: '1.2rem', color: '#374151', fontWeight: 600 }}>
+        <div className={styles.gaugeInfo}>
+          <h3 className={styles.gaugeInfoTitle}>
             机构综合逻辑健康度
           </h3>
-          <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '16px' }}>
-            <span style={{ fontSize: '3.5rem', fontWeight: 800, color: statusColor, lineHeight: 1 }}>
+          <div className={styles.gaugeScoreArea}>
+            <span className={styles.gaugeScoreNum} style={{ color: statusColor }}>
               {score}
             </span>
-            <span style={{ fontSize: '1.2rem', color: '#6b7280', marginLeft: '4px', fontWeight: 500 }}>
+            <span className={styles.gaugeScoreUnit}>
               分
             </span>
-            <span style={{ 
-              marginLeft: '20px', 
-              padding: '6px 16px', 
+            <span className={styles.gaugeScoreTag} style={{ 
               backgroundColor: statusBg, 
               color: statusColor, 
-              borderRadius: '999px', 
-              fontSize: '1rem', 
-              fontWeight: 600,
               border: `1px solid ${statusColor}40`
             }}>
               {statusText}
             </span>
           </div>
-          <p style={{ margin: 0, fontSize: '0.95rem', color: '#6b7280', lineHeight: 1.6 }}>
-            该评分由 AI 引擎基于<strong style={{ color: '#4b5563' }}>主力资金流向</strong>、<strong style={{ color: '#4b5563' }}>最新基本面</strong>、<strong style={{ color: '#4b5563' }}>行业板块热度</strong>以及<strong style={{ color: '#4b5563' }}>核心资讯</strong>多维综合计算得出。分数越高代表多头共振越强。
+          <p className={styles.gaugeInfoDesc}>
+            该评分由 AI 引擎基于<strong>主力资金流向</strong>、<strong>最新基本面</strong>、<strong>行业板块热度</strong>以及<strong>核心资讯</strong>多维综合计算得出。分数越高代表多头共振越强。
           </p>
         </div>
       </div>

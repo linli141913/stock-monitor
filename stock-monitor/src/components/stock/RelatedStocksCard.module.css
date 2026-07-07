@@ -86,3 +86,11 @@
   }
 }
 
+
+@media (max-width: 768px) {
+  .row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .stockName { white-space: nowrap; }
+  .stockCode { white-space: nowrap; }
+  .list { margin: 0 -12px; padding: 0 12px; overflow-x: auto; }
+  .item { min-width: max-content; }
+}
