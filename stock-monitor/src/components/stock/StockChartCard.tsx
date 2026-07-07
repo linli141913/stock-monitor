@@ -174,8 +174,25 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       textStyle: { color: '#000' },
       position: function (pos: any, params: any, el: any, elRect: any, size: any) {
         if (typeof window !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
-          // 固定在图表左上角，彻底避免跳动和截断
-          return ['2%', '2%'];
+          let viewW = size.viewSize[0] || window.innerWidth;
+          let viewH = size.viewSize[1] || window.innerHeight;
+          let boxW = size.contentSize[0] || 150;
+          let boxH = size.contentSize[1] || 150;
+          
+          // 放在十字线触点旁边
+          let x = pos[0] + 15;
+          let y = pos[1] + 15;
+          
+          // 如果右侧溢出，放左侧
+          if (x + boxW > viewW) x = pos[0] - boxW - 15;
+          // 如果下方溢出，放上方
+          if (y + boxH > viewH) y = pos[1] - boxH - 15;
+          
+          // 强制不越界
+          if (x < 0) x = 5;
+          if (y < 0) y = 5;
+          
+          return [x, y];
         }
         return undefined;
       }
@@ -258,7 +275,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       {
         name: 'K线',
         type: 'candlestick',
-        dimensions: ['date', '开盘', '收盘', '最低', '最高'],
+        dimensions: ['开盘', '收盘', '最低', '最高'],
         data: values,
         itemStyle: {
           color: upColor,
