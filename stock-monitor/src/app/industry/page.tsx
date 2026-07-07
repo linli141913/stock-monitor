@@ -1,3 +1,4 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '${API_BASE}';
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -28,7 +29,7 @@ export default function IndustryInsightPage() {
       let endpoint = `/${tabId}`;
       if (tabId === 'latest') endpoint = '/latest?category=all';
       if (tabId === 'semi') endpoint = '/latest?category=semi';
-      const res = await fetch(`http://localhost:8001/api/semiconductor-news${endpoint}`);
+      const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('获取资讯失败');
       const data = await res.json();
       setNewsList(data);

@@ -52,7 +52,7 @@ export default function Home() {
     if (!isSilent) setOverviewLoading(true);
     setOverviewError('');
     try {
-      const res = await fetch(`${API_BASE}/api/stock/overview/${stockCode}`);
+      const res = await fetch(`${API_BASE}/api/stock/overview/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `行情请求失败 (${res.status})`);
@@ -115,7 +115,7 @@ export default function Home() {
     setKlineLoading(true);
     setKlineError('');
     try {
-      const res = await fetch(`${API_BASE}/api/stock/kline/${stockCode}?period=${period}`);
+      const res = await fetch(`${API_BASE}/api/stock/kline/${stockCode}?period=${period}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `K 线请求失败 (${res.status})`);
@@ -137,7 +137,7 @@ export default function Home() {
   // ── 获取公司信息和公告 ─────────────────────
   const fetchCompanyInfo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/stock/company/${stockCode}`);
+      const res = await fetch(`${API_BASE}/api/stock/company/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res.ok) {
         const data = await res.json();
         setCompanyData(data);
@@ -153,7 +153,7 @@ export default function Home() {
   // ── 批量获取相关股票真实价格 ─────────────────────
   const fetchRelatedPrices = useCallback(async (sym: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/stock/related/${sym}`);
+      const res = await fetch(`${API_BASE}/api/stock/related/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) {
@@ -170,11 +170,11 @@ export default function Home() {
   // ── 获取行业资金与异常推荐 ─────────────────────
   const fetchIndustryAndPeers = useCallback(async (sym: string) => {
     try {
-      const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}`);
+      const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res1.ok) {
         setIndustryMonitorData(await res1.json());
       }
-      const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}`);
+      const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res2.ok) {
         const json2 = await res2.json();
         let fetchedData = json2.data || [];

@@ -46,7 +46,7 @@ export default function WatchlistPage() {
     setRefreshing(true);
     const symbols = watchlist.map(i => i.stockCode).join(',');
     try {
-      const res = await fetch(`${API_BASE}/api/stock/batch_overview?symbols=${symbols}`);
+      const res = await fetch(`${API_BASE}/api/stock/batch_overview?symbols=${symbols}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('fetch failed');
       const json = await res.json();
       const map: Record<string, any> = {};

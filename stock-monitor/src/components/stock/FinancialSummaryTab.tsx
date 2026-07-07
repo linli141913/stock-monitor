@@ -1,3 +1,4 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '${API_BASE}';
 import React, { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import styles from './FinancialSummaryTab.module.css';
@@ -38,7 +39,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:8001/api/stock/finance/${stockCode}`);
+      const res = await fetch(`${API_BASE}/api/stock/finance/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) {
         throw new Error('暂无真实财报数据或拉取失败');
       }

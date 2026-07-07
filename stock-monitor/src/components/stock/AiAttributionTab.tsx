@@ -1,3 +1,4 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '${API_BASE}';
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -56,7 +57,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     setError('');
     setLoadingText('正在初始化 AI 推理引擎...');
     try {
-      const res = await fetch(`http://localhost:8001/api/stock/ai_attribution/${stockCode}`);
+      const res = await fetch(`${API_BASE}/api/stock/ai_attribution/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('无法获取归因分析数据');
       const json = await res.json();
       setData(json);
