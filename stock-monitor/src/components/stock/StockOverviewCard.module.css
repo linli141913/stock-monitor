@@ -1,0 +1,119 @@
+.card {
+  background-color: var(--color-card);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-card);
+  margin-bottom: var(--space-md);
+}
+
+.header {
+  margin-bottom: var(--space-md);
+}
+
+.titleArea {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.name {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.code {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+  font-family: monospace;
+}
+
+.tag {
+  font-size: 12px;
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: var(--space-xs);
+}
+
+.mainInfo {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-lg);
+}
+
+.priceArea {
+  display: flex;
+  flex-direction: column;
+}
+
+.latestPrice {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.changeArea {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.updateTime {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-sm);
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--space-md) var(--space-xl);
+  flex: 1;
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--space-xl);
+}
+
+.metricItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metricLabel {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.metricValue {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bottomMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-md);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.bottomMetricItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.metricValueBold {
+  font-size: 18px;
+  font-weight: 600;
+}
