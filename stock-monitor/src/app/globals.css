@@ -80,3 +80,13 @@ button, input {
 .bg-fall {
   background-color: var(--color-fall);
 }
+
+
+@media (max-width: 768px) {
+  .table th, .table td {
+    white-space: nowrap;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+}
+

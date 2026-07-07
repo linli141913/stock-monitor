@@ -109,13 +109,15 @@
 }
 
 
-@media (max-width: 768px) {
-  .card {
-    padding: var(--space-md);
-  }
-  .tableWrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-}
 
+@media (max-width: 768px) {
+  .card { padding: 12px; margin-bottom: 8px; border-radius: 8px; }
+  .header { margin-bottom: 12px; padding-bottom: 8px; }
+  .tableWrapper { 
+    margin: 0 -12px; 
+    padding: 0 12px; 
+    overflow-x: auto; 
+    -webkit-overflow-scrolling: touch; 
+  }
+  .table th, .table td { white-space: nowrap; padding: 10px 8px; font-size: 13px; }
+}

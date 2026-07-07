@@ -59,3 +59,15 @@
 .chartContainer {
   width: 100%;
 }
+
+
+
+@media (max-width: 768px) {
+  .card { padding: 12px; margin-bottom: 8px; border-radius: 8px; }
+  .header { flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+  .controls { width: 100%; justify-content: flex-start; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+  .controls::-webkit-scrollbar { display: none; }
+  .timeFilters, .maFilters { gap: 6px; }
+  .filterBtn { padding: 6px 10px; font-size: 14px; }
+  .chartContainer { height: 300px !important; }
+}

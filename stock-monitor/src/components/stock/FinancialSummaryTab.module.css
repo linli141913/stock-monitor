@@ -198,26 +198,23 @@
 }
 
 
-@media (max-width: 768px) {
-  .chartGrid {
-    grid-template-columns: 1fr;
-  }
-}
-
-
 
 @media (max-width: 768px) {
-  .grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
+  .grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .card { padding: 12px; }
+  .cardValue { font-size: 16px; }
+  .cardTitle { font-size: 12px; margin-bottom: 4px; }
+  
+  .chartRow { flex-direction: column; gap: 16px; margin-bottom: 24px; }
+  .chartCard { padding: 12px 0; border: none; }
+  
+  .tableWrapper { 
+    margin: 0; 
+    padding: 0; 
+    border-radius: 6px; 
+    overflow-x: auto; 
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #e5e7eb;
   }
-  .chartRow {
-    flex-direction: column;
-  }
-  .meta {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
+  .table th, .table td { white-space: nowrap; padding: 10px; font-size: 12px; }
 }
-
