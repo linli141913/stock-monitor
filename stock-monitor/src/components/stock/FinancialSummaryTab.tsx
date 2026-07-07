@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
 import React, { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import styles from './FinancialSummaryTab.module.css';
