@@ -290,7 +290,14 @@
 
 .itemFooter {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.itemTime {
+  font-size: 11px;
+  color: var(--color-text-secondary);
 }
 
 .itemSource {

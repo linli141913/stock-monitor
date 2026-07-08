@@ -18,11 +18,6 @@ export default function IndustryMonitorCard({ data }: Props) {
     return (
       <div className={styles.dynamicsList}>
         {items.map((item, index) => {
-          const impactClass = item.impact === '利好' 
-            ? styles.impactRise 
-            : item.impact === '利空' 
-              ? styles.impactFall 
-              : styles.impactNeutral;
           return (
             <div key={index} className={styles.dynamicsItem}>
               <div className={styles.itemHeader}>
@@ -36,10 +31,9 @@ export default function IndustryMonitorCard({ data }: Props) {
                     <span className={styles.itemTitle}>{item.title}</span>
                   )}
                 </div>
-                <span className={`${styles.impactBadge} ${impactClass}`}>{item.impact}</span>
               </div>
-              <div className={styles.itemDesc}>{item.desc}</div>
               <div className={styles.itemFooter}>
+                <span className={styles.itemTime}>{item.time}</span>
                 <span className={styles.itemSource}>来源：{item.source}</span>
               </div>
             </div>

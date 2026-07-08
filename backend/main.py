@@ -678,102 +678,12 @@ def get_company_info(symbol: str):
         "news": []
     }
 
-DYNAMICS_CACHE = {}
-
-def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
-    import time
-    now = time.time()
-    if symbol in DYNAMICS_CACHE:
-        cache_entry = DYNAMICS_CACHE[symbol]
-        if now - cache_entry["time"] < 3600:
-            return cache_entry["data"]
-
-    from real_data_fetcher import RealDataFetcher
-    fetcher = RealDataFetcher()
-    news_text = fetcher.get_industry_news_dehydrated(symbol)
-    
-    api_key = os.getenv("LLM_API_KEY", "").strip()
-    if not api_key:
-        fallback = {
-            "policies": [
-                {"title": "半导体与集成电路产业国产替代支持力度加大", "source": "工信部", "url": "", "impact": "利好", "desc": "国家政策继续倾斜关键设备与材料研发补贴，中长期支撑行业技术升级。"}
-            ],
-            "upstreamDownstream": [
-                {"title": "上游多晶硅及靶材等原材料价格高位持稳", "source": "行业协会", "url": "", "impact": "中性", "desc": "原材料端价格相对可控，利于保障中游封测/制造厂家的毛利率底盘。"},
-                {"title": "下游消费电子与车载智能终端出货缓慢复苏", "source": "IDC研究", "url": "", "impact": "利好", "desc": "汽车电子与中高端手机屏幕需求见底回升，面板及芯片需求有支撑。"}
-            ]
-        }
-        return fallback
-
-    try:
-        from openai import OpenAI
-        client = OpenAI(
-            api_key=api_key,
-            base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
-        )
-        model_name = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
-        
-        prompt = f"""
-        你是一个半导体与电子行业的顶尖分析助理。请根据以下抓取到的真实行业新闻列表，提炼并输出：
-        1. 与该行业 ({industry_name}) 以及股票代码 {symbol} 相关的“产业政策/国内政策/海外法规动态”信息（最多3条，如果新闻中没有政策，可结合你自身的行业知识生成相关的最新真实政策动态）。
-        2. 与该股票产业链相关的“上游原材料/设备供应商重大动态”和“下游核心客户/终端消费市场需求”信息（最多3条，若新闻无直接内容，可基于 {symbol} 的产业链关系生成相关的最新真实动态）。
-
-        【行业新闻输入】
-        {news_text}
-
-        请严格返回如下的 JSON 格式，不要包含任何 markdown 标记(如```json)，只需纯净的 JSON 字符串：
-        {{
-            "policies": [
-                {{
-                    "title": "政策标题",
-                    "source": "工信部/发改委等权威来源",
-                    "url": "新闻对应的来源链接，如果没有则留空",
-                    "impact": "利好 / 利空 / 中性",
-                    "desc": "一句话影响度提炼，说明该政策对本股/本板块有什么核心影响"
-                }}
-            ],
-            "upstreamDownstream": [
-                {{
-                    "title": "动态标题",
-                    "source": "来源机构/相关企业公告/分析机构",
-                    "url": "新闻链接，如果没有则留空",
-                    "impact": "利好 / 利空 / 中性",
-                    "desc": "一句话解读，说明该上下游动态对本股业绩或需求的传导影响"
-                }}
-            ]
-        }}
-        """
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": "你是一个严格返回JSON格式的行业动态分析API。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            response_format={"type": "json_object"}
-        )
-        content = response.choices[0].message.content
-        import json
-        res = json.loads(content)
-        DYNAMICS_CACHE[symbol] = {"time": now, "data": res}
-        return res
-    except Exception as e:
-        print(f"Error fetching industry dynamics via LLM: {e}")
-        fallback = {
-            "policies": [
-                {"title": "半导体产业国产替代支持力度持续加大", "source": "工信部", "url": "", "impact": "利好", "desc": "国家政策支持半导体关键设备与核心材料国产替代，长期利好板块估值。"}
-            ],
-            "upstreamDownstream": [
-                {"title": "上游多晶硅及偏光片价格近期持稳", "source": "行业协会", "url": "", "impact": "中性", "desc": "原材料端价格波动温和，中游厂商成本端压力相对平稳。"},
-                {"title": "下游智能手机及车载芯片需求温和复苏", "source": "IDC", "url": "", "impact": "利好", "desc": "消费电子与新能源车显示需求边际改善，订单预期改善。"}
-            ]
-        }
-        return fallback
+from ai_analysis import fetch_real_industry_dynamics
 
 @app.get("/api/stock/industry/{symbol}")
 def get_industry_monitor(symbol: str):
     """
-    抓取东方财富板块资金流，展示真实的主力监控，并融入AI上下游与政策动态
+    抓取东方财富板块资金流，展示真实的主力监控，并融入AI上下游与政策动态（自选限制）
     """
     # 1. 先获取这只股票的所属行业
     company_data = get_company_info(symbol)
@@ -822,14 +732,46 @@ def get_industry_monitor(symbol: str):
     flow_val = fallback_flow
     flow_str = f"净流入 {flow_val} 亿元" if flow_val > 0 else f"净流出 {abs(flow_val)} 亿元"
     
-    # 2. 获取AI解析的政策和上下游具体条目
+    # 2. 检查是否在自选监测列表中，若不在则不调用大模型筛选，展示说明文字，防额度消耗
+    if not database.is_in_watchlist(symbol):
+        return {
+            "industryName": industry_name,
+            "heatScore": fallback_heat,
+            "sectorChangePercent": sector_change,
+            "fundFlow": flow_str,
+            "policySummary": "💡 本股票未加入监测列表，政策监控已休眠",
+            "upstreamStatus": "💡 本股票未加入监测列表",
+            "downstreamStatus": "上下游监控已休眠",
+            "policies": [
+                {
+                    "title": "💡 本股票未加入监测列表，政策大模型监控已休眠",
+                    "source": "系统提示",
+                    "url": "",
+                    "time": "实时"
+                }
+            ],
+            "upstreamDownstream": [
+                {
+                    "title": "💡 本股票未加入监测列表，上下游大模型监控已休眠",
+                    "source": "系统提示",
+                    "url": "",
+                    "time": "实时"
+                }
+            ],
+            "updateTime": "已休眠",
+            "refreshInterval": "静态"
+        }
+    
+    # 3. 如果在监测列表中，则获取共享缓存的AI大模型提炼条目
     dynamics = fetch_real_industry_dynamics(symbol, industry_name)
     
     # 提炼一句话总结，保证老接口的兼容性
-    p_summary = dynamics.get("policies", [{}])[0].get("title", "系统实时监测该板块相关政策")
-    up_down = dynamics.get("upstreamDownstream", [])
-    up_status = up_down[0].get("title", "上游动态监控中") if len(up_down) > 0 else "上游动态监控中"
-    down_status = up_down[1].get("title", "下游动态监控中") if len(up_down) > 1 else ("主力资金加持" if flow_val > 0 else "抛压较重")
+    policies_list = dynamics.get("policies", [])
+    p_summary = policies_list[0].get("title", "系统实时监测该板块相关政策") if policies_list else "系统实时监测该板块相关政策"
+    
+    upstream_downstream_list = dynamics.get("upstreamDownstream", [])
+    up_status = upstream_downstream_list[0].get("title", "上游动态监控中") if len(upstream_downstream_list) > 0 else "上游动态监控中"
+    down_status = upstream_downstream_list[1].get("title", "下游动态监控中") if len(upstream_downstream_list) > 1 else ("主力资金加持" if flow_val > 0 else "抛压较重")
 
     return {
         "industryName": industry_name,

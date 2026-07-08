@@ -2,8 +2,9 @@ export interface DynamicsItem {
   title: string;
   source: string;
   url?: string;
-  impact: '利好' | '利空' | '中性';
-  desc: string;
+  impact?: '利好' | '利空' | '中性';
+  desc?: string;
+  time?: string;
 }
 
 export interface IndustryMonitor {

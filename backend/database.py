@@ -54,6 +54,11 @@ def get_watchlist():
     conn.close()
     return results
 
+def is_in_watchlist(symbol: str) -> bool:
+    watchlist = get_watchlist()
+    watchlist_codes = {item["stockCode"].strip().lower() for item in watchlist}
+    return symbol.strip().lower() in watchlist_codes
+
 def add_to_watchlist(symbol: str) -> bool:
     """添加股票到监测列表，如果已满 10 个则返回 False"""
     conn = sqlite3.connect(DB_PATH)
@@ -278,6 +283,36 @@ def get_all_analysis_history(symbol: str) -> list:
         
     conn.close()
     return results
+
+
+def get_cached_dynamics(symbol: str) -> dict:
+    """获取缓存的行业动态新闻及时间，如果不存在或超过 1 小时则返回 None"""
+    import time
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS dynamics_cache (symbol TEXT PRIMARY KEY, last_updated REAL, news_json TEXT)")
+    cursor.execute("SELECT last_updated, news_json FROM dynamics_cache WHERE symbol=?", (symbol,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        last_updated, news_json = row
+        if time.time() - last_updated < 3600:
+            try:
+                return json.loads(news_json)
+            except:
+                pass
+    return None
+
+def save_cached_dynamics(symbol: str, data: dict):
+    """将大模型筛选出的新闻数据缓存入库"""
+    import time
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS dynamics_cache (symbol TEXT PRIMARY KEY, last_updated REAL, news_json TEXT)")
+    cursor.execute("INSERT OR REPLACE INTO dynamics_cache (symbol, last_updated, news_json) VALUES (?, ?, ?)",
+                   (symbol, time.time(), json.dumps(data, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
 
 # 初始化
 init_db()
