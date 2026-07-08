@@ -2,7 +2,8 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import styles from './page.module.css';
 
 // Components
@@ -20,17 +21,17 @@ import DataSourceCard from '@/components/common/DataSourceCard';
 
 const AUTO_REFRESH_INTERVAL = 5 * 1000; // 5秒高频自动刷新行情
 
-export default function Home() {
-  const [stockCode, setStockCode] = useState('000021');
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const codeParam = searchParams.get('code');
+  const [stockCode, setStockCode] = useState(codeParam || '000021');
   const [period, setPeriod] = useState<'day'|'week'|'month'|'year'>('day');
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (code) {
-      setStockCode(code);
+    if (codeParam) {
+      setStockCode(codeParam);
     }
-  }, []);
+  }, [codeParam]);
 
   const [overviewData, setOverviewData] = useState<any>(null);
   const [klineData, setKlineData] = useState<any[]>([]);
@@ -310,5 +311,13 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div style={{ padding: '24px', textAlign: 'center' }}>加载中...</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }

@@ -18,6 +18,11 @@ def init_db():
     )
     ''')
     
+    try:
+        cursor.execute("ALTER TABLE watchlist ADD COLUMN name TEXT")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+    
     # AI 分析历史表
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS ai_analysis_history (
@@ -38,8 +43,14 @@ def init_db():
 def get_watchlist():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT symbol FROM watchlist")
-    results = [row[0] for row in cursor.fetchall()]
+    cursor.execute("SELECT symbol, name, added_at FROM watchlist")
+    results = []
+    for row in cursor.fetchall():
+        results.append({
+            "stockCode": row[0],
+            "stockName": row[1] or "",
+            "addedAt": row[2] or ""
+        })
     conn.close()
     return results
 
@@ -70,16 +81,20 @@ def remove_from_watchlist(symbol: str):
     conn.commit()
     conn.close()
     
-def replace_watchlist(symbols: list[str]) -> bool:
+def replace_watchlist(items: list) -> bool:
     """全量替换监测列表，超过 5 只直接截断"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM watchlist")
     
-    limited_symbols = symbols[:5]
-    for sym in limited_symbols:
-        cursor.execute("INSERT INTO watchlist (symbol, added_at) VALUES (?, ?)", 
-                       (sym, datetime.now().isoformat()))
+    limited_items = items[:5]
+    for item in limited_items:
+        sym = item.get("stockCode", "")
+        name = item.get("stockName", "")
+        added = item.get("addedAt", datetime.now().isoformat())
+        if sym:
+            cursor.execute("INSERT INTO watchlist (symbol, name, added_at) VALUES (?, ?, ?)", 
+                           (sym, name, added))
     conn.commit()
     conn.close()
     return True

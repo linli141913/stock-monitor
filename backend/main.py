@@ -37,8 +37,10 @@ app.include_router(news_router)
 # ── 后台定时追踪任务 ──────────────────────────────────────────────
 async def auto_analyze_watchlist():
     print(f"[{datetime.now()}] 触发后台自动分析追踪任务...")
-    symbols = database.get_watchlist()
-    for symbol in symbols:
+    items = database.get_watchlist()
+    for item in items:
+        symbol = item.get("stockCode")
+        if not symbol: continue
         try:
             print(f"[{datetime.now()}] 开始自动分析 {symbol}...")
             # We call the ai_attribution endpoint internally via requests to trigger full pipeline including history injection
@@ -107,7 +109,7 @@ def calc_ma(closes: list[float], window: int) -> list:
 # ── 接口实现 ──────────────────────────────────────────────────
 
 class WatchlistRequest(BaseModel):
-    symbols: list[str]
+    items: list[dict]
 
 @app.get("/api/watchlist")
 def get_watchlist():
@@ -115,7 +117,7 @@ def get_watchlist():
 
 @app.post("/api/watchlist")
 def update_watchlist(req: WatchlistRequest):
-    success = database.replace_watchlist(req.symbols)
+    success = database.replace_watchlist(req.items)
     if not success:
         raise HTTPException(status_code=400, detail="保存监测列表失败")
     return {"message": "success", "data": database.get_watchlist()}
