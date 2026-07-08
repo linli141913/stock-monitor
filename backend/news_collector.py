@@ -44,6 +44,9 @@ def fetch_sina_roll_news() -> list:
             ctime_raw = item.get("ctime")
             media_name = item.get("media_name", "新浪财经")
             
+            if "财联社" in media_name or "财联社" in title:
+                media_name = "财联社电报"
+                
             if not title or not link:
                 continue
                 
@@ -234,13 +237,23 @@ def fetch_cninfo_announcements(search_key: str, symbol_rel: str = "") -> list:
             print(f"Found new Cninfo Announcement: {title}, downloading PDF...")
             content_summary = parse_cninfo_pdf(pdf_link)
             
+            # Determine source based on exchange
+            ann_source = "巨潮公告"
+            if sec_code:
+                if sec_code.startswith(('60', '68', '90', '7')):
+                    ann_source = "上交所公告"
+                elif sec_code.startswith(('00', '30', '20')):
+                    ann_source = "深交所公告"
+                elif sec_code.startswith(('43', '83', '87', '88')):
+                    ann_source = "北交所公告"
+            
             results.append({
                 "id": unique_id,
                 "symbol": symbol_rel or sec_code,
                 "title": title,
                 "url": pdf_link,
                 "ctime": ctime,
-                "source": "巨潮公告",
+                "source": ann_source,
                 "content": content_summary,
                 "category": "policy" if "公告" in title or "决定" in title else "industry"
             })
