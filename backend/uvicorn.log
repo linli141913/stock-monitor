@@ -17312,3 +17312,124 @@ INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
 INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
 INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
 INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63609 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553020269 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/ai_history/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/kline/000725?period=day HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/company/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553020269 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/ai_history/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553020901 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/kline/000725?period=day HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/company/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553020901 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553021661 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553021661 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553075532 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/ai_history/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/kline/000725?period=day HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553075532 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553076027 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553076027 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/company/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553084552 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/batch_overview?symbols=000725,000519&_t=1783553084558 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553084552 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/batch_overview?symbols=000725,000519&_t=1783553084558 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/batch_overview?symbols=000725,000519&_t=1783553084938 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/batch_overview?symbols=000725,000519&_t=1783553084938 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553088435 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/ai_history/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/company/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/kline/000725?period=day HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553088435 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553088741 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553088741 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/watchlist?_t=1783553089556 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/watchlist?_t=1783553089556 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/abnormal_peers/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'news_api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [21275]
+INFO:     Started server process [21538]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+后台自动化追踪与资讯采集调度器已启动。
+[2026-07-09 07:26:10.810294] 触发定时多源资讯采集任务...
+[2026-07-09T07:26:10.832918] Starting news collection pipeline...
+Fetching Sina Roll News...
+Fetching EastMoney Research Reports...
+  0%|          | 0/3 [00:00<?, ?it/s] 67%|██████▋   | 2/3 [00:00<00:00, 10.47it/s]                                             Fetching Cninfo: 行业公告关键词 (半导体)...
+Fetching Cninfo: 个股公告 (京东方Ａ / 000725)...
+Fetching Cninfo: 个股公告 (中兵红箭 / 000519)...
+Saving 90 aggregated news items to SQLite database...
+News collection pipeline completed successfully.
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/semiconductor-news/latest?category=all HTTP/1.1" 200 OK

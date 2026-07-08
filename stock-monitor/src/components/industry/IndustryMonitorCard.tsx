@@ -10,7 +10,6 @@ interface Props {
 export default function IndustryMonitorCard({ data }: Props) {
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
-  const [allNewsOpen, setAllNewsOpen] = useState(true);
 
   const getSourceClass = (source: string) => {
     if (source.includes('巨潮')) return styles.sourceCninfo;
@@ -142,31 +141,6 @@ export default function IndustryMonitorCard({ data }: Props) {
           {dynamicsOpen && (
             <div className={styles.accordionContent}>
               {renderList(data?.upstreamDownstream)}
-            </div>
-          )}
-        </div>
-
-        {/* 实时多源资讯 Accordion */}
-        <div className={styles.accordionGroup}>
-          <button 
-            className={`${styles.accordionHeader} ${allNewsOpen ? styles.headerActive : ''}`}
-            onClick={() => setAllNewsOpen(!allNewsOpen)}
-          >
-            <div className={styles.headerLabelArea}>
-              <BarChart3 size={16} className={styles.headerIcon} />
-              <span>实时多源资讯 ({data?.allNews?.length || 0})</span>
-            </div>
-            <div className={styles.headerRightArea}>
-              <span className={styles.summaryText}>最新去重全景资讯池</span>
-              <ChevronDown 
-                size={16} 
-                className={`${styles.chevron} ${allNewsOpen ? styles.chevronRotate : ''}`} 
-              />
-            </div>
-          </button>
-          {allNewsOpen && (
-            <div className={styles.accordionContentScroll}>
-              {renderList(data?.allNews)}
             </div>
           )}
         </div>

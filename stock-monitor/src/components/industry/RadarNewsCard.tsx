@@ -35,17 +35,28 @@ export default function RadarNewsCard({ news }: Props) {
 
   const isVerified = news.ai_verification_status.includes('✅');
 
+  const getSourceClass = (source: string) => {
+    if (source.includes('巨潮')) return styles.sourceCninfo;
+    if (source.includes('财联社')) return styles.sourceCls;
+    if (source.includes('东财') || source.includes('东方财富') || source.includes('研报')) return styles.sourceEastmoney;
+    if (source.includes('新浪')) return styles.sourceSina;
+    if (source.includes('报') || source.includes('央视') || source.includes('21世纪') || source.includes('报道')) return styles.sourcePress;
+    return styles.sourceDefault;
+  };
+
   return (
     <div className={styles.card}>
       <div className={styles.header}>
         <div className={styles.titleWrapper}>
           <h3 className={styles.title}>
+            <span className={`${styles.sourceBadge} ${getSourceClass(news.source)}`}>
+              {news.source}
+            </span>
             <a href={news.original_link} target="_blank" rel="noopener noreferrer" className={styles.titleLink}>
               {news.title}
             </a>
           </h3>
           <div className={styles.meta}>
-            <span className={styles.source}>{news.source}</span>
             <span className={styles.time}>{news.publish_time}</span>
           </div>
         </div>
