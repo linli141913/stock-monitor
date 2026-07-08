@@ -354,7 +354,9 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           <div style={{ fontSize: '24px' }}>💡</div>
           <div>
             <div style={{ fontWeight: 'bold', color: '#0958d9', marginBottom: '4px', fontSize: '0.9rem' }}>大白话总结</div>
-            <div style={{ color: '#1677ff', fontSize: '1.2rem', fontWeight: 600 }}>{data.plainEnglishSummary}</div>
+            <div style={{ color: '#1677ff', fontSize: '1.2rem', fontWeight: 600 }}>
+              {data.plainEnglishSummary ? data.plainEnglishSummary.replace(/^【[^】]+】\s*/, '') : ''}
+            </div>
           </div>
         </div>
       )}
