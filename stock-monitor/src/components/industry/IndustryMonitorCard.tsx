@@ -1,5 +1,6 @@
-import { IndustryMonitor } from '@/types/industry';
-import { BarChart3 } from 'lucide-react';
+import { useState } from 'react';
+import { IndustryMonitor, DynamicsItem } from '@/types/industry';
+import { BarChart3, ChevronDown, FileText, Layers, ExternalLink } from 'lucide-react';
 import styles from './IndustryMonitorCard.module.css';
 
 interface Props {
@@ -7,6 +8,47 @@ interface Props {
 }
 
 export default function IndustryMonitorCard({ data }: Props) {
+  const [policiesOpen, setPoliciesOpen] = useState(false);
+  const [dynamicsOpen, setDynamicsOpen] = useState(false);
+
+  const renderList = (items?: DynamicsItem[]) => {
+    if (!items || items.length === 0) {
+      return <div className={styles.emptyList}>暂无最新动态数据</div>;
+    }
+    return (
+      <div className={styles.dynamicsList}>
+        {items.map((item, index) => {
+          const impactClass = item.impact === '利好' 
+            ? styles.impactRise 
+            : item.impact === '利空' 
+              ? styles.impactFall 
+              : styles.impactNeutral;
+          return (
+            <div key={index} className={styles.dynamicsItem}>
+              <div className={styles.itemHeader}>
+                <div className={styles.itemTitleArea}>
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className={styles.itemLink}>
+                      {item.title}
+                      <ExternalLink size={12} className={styles.linkIcon} />
+                    </a>
+                  ) : (
+                    <span className={styles.itemTitle}>{item.title}</span>
+                  )}
+                </div>
+                <span className={`${styles.impactBadge} ${impactClass}`}>{item.impact}</span>
+              </div>
+              <div className={styles.itemDesc}>{item.desc}</div>
+              <div className={styles.itemFooter}>
+                <span className={styles.itemSource}>来源：{item.source}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.card}>
       <div className={styles.header}>
@@ -45,16 +87,56 @@ export default function IndustryMonitorCard({ data }: Props) {
           </div>
         </div>
 
-        <div className={styles.row}>
-          <div className={styles.label}>相关政策</div>
-          <div className={styles.textValue}>{data?.policySummary || '-'}</div>
+        {/* 相关政策 Accordion */}
+        <div className={styles.accordionGroup}>
+          <button 
+            className={`${styles.accordionHeader} ${policiesOpen ? styles.headerActive : ''}`}
+            onClick={() => setPoliciesOpen(!policiesOpen)}
+          >
+            <div className={styles.headerLabelArea}>
+              <FileText size={16} className={styles.headerIcon} />
+              <span>相关政策</span>
+            </div>
+            <div className={styles.headerRightArea}>
+              <span className={styles.summaryText}>{data?.policySummary || '暂无数据'}</span>
+              <ChevronDown 
+                size={16} 
+                className={`${styles.chevron} ${policiesOpen ? styles.chevronRotate : ''}`} 
+              />
+            </div>
+          </button>
+          {policiesOpen && (
+            <div className={styles.accordionContent}>
+              {renderList(data?.policies)}
+            </div>
+          )}
         </div>
 
-        <div className={styles.row}>
-          <div className={styles.label}>上游/下游动态</div>
-          <div className={styles.textValue}>
-            {data?.upstreamStatus || '-'}；{data?.downstreamStatus || '-'}
-          </div>
+        {/* 上下游动态 Accordion */}
+        <div className={styles.accordionGroup}>
+          <button 
+            className={`${styles.accordionHeader} ${dynamicsOpen ? styles.headerActive : ''}`}
+            onClick={() => setDynamicsOpen(!dynamicsOpen)}
+          >
+            <div className={styles.headerLabelArea}>
+              <Layers size={16} className={styles.headerIcon} />
+              <span>上下游动态</span>
+            </div>
+            <div className={styles.headerRightArea}>
+              <span className={styles.summaryText}>
+                {data?.upstreamStatus ? `${data.upstreamStatus} | ${data.downstreamStatus}` : '暂无数据'}
+              </span>
+              <ChevronDown 
+                size={16} 
+                className={`${styles.chevron} ${dynamicsOpen ? styles.chevronRotate : ''}`} 
+              />
+            </div>
+          </button>
+          {dynamicsOpen && (
+            <div className={styles.accordionContent}>
+              {renderList(data?.upstreamDownstream)}
+            </div>
+          )}
         </div>
       </div>
     </div>
