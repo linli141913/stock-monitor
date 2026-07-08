@@ -3,7 +3,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import styles from './page.module.css';
 
 // Components
@@ -22,16 +22,17 @@ import DataSourceCard from '@/components/common/DataSourceCard';
 const AUTO_REFRESH_INTERVAL = 5 * 1000; // 5秒高频自动刷新行情
 
 function HomeContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const codeParam = searchParams.get('code');
-  const [stockCode, setStockCode] = useState(codeParam || '000021');
+  const stockCode = codeParam || '000021';
+  
+  const [isMounted, setIsMounted] = useState(false);
   const [period, setPeriod] = useState<'day'|'week'|'month'|'year'>('day');
 
   useEffect(() => {
-    if (codeParam) {
-      setStockCode(codeParam);
-    }
-  }, [codeParam]);
+    setIsMounted(true);
+  }, []);
 
   const [overviewData, setOverviewData] = useState<any>(null);
   const [klineData, setKlineData] = useState<any[]>([]);
@@ -49,7 +50,7 @@ function HomeContent() {
   const handleSearch = (keyword: string) => {
     const code = keyword.match(/(?:hk)?\d{5,6}/i);
     if (code) {
-      setStockCode(code[0].toLowerCase());
+      router.push(`/?code=${code[0].toLowerCase()}`);
     } else {
       alert('请输入 6 位 A 股股票代码 或 5 位港股代码，如：000021 / hk00700');
     }
@@ -91,7 +92,7 @@ function HomeContent() {
 
       // 如果后端做了代码纠偏（比如港股多输了0），同步更新前端的统一搜索状态
       if (data.code && data.code.toLowerCase() !== stockCode.toLowerCase()) {
-        setStockCode(data.code.toLowerCase());
+        router.push(`/?code=${data.code.toLowerCase()}`);
       }
 
       // 实时更新 K 线的最后一根蜡烛（产生“动态呼吸感”）
@@ -234,7 +235,11 @@ function HomeContent() {
     };
   }, [fetchOverview, fetchRelatedPrices]);
 
-  // ── 渲染 ─────────────────────────────────────────────────
+  // ── 渲染 ──────────────────────────────────────────────────
+  if (!isMounted) {
+    return <div style={{ padding: '24px', textAlign: 'center' }}>加载中...</div>;
+  }
+
   return (
     <div className={styles.container}>
       <SearchMonitorBar onSearch={handleSearch} />
