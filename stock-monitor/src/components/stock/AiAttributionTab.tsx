@@ -47,6 +47,76 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [fetchingAllHistory, setFetchingAllHistory] = useState(false);
   const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
+  
+  const [calendarYear, setCalendarYear] = useState<number>(2026);
+  const [calendarMonth, setCalendarMonth] = useState<number>(6); // 0-indexed
+  const [selectedDateStr, setSelectedDateStr] = useState<string>('');
+
+  const getDaysInMonthGrid = (year: number, month: number) => {
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const prevMonthTotalDays = new Date(year, month, 0).getDate();
+    
+    const days: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
+    
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+      const prevDay = prevMonthTotalDays - i;
+      const prevMonth = month === 0 ? 11 : month - 1;
+      const prevYear = month === 0 ? year - 1 : year;
+      days.push({
+        dateStr: `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(prevDay).padStart(2, '0')}`,
+        dayNum: prevDay,
+        isCurrentMonth: false
+      });
+    }
+    
+    for (let i = 1; i <= totalDays; i++) {
+      days.push({
+        dateStr: `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`,
+        dayNum: i,
+        isCurrentMonth: true
+      });
+    }
+    
+    const totalGridCells = 42;
+    const remainingCells = totalGridCells - days.length;
+    for (let i = 1; i <= remainingCells; i++) {
+      const nextMonth = month === 11 ? 0 : month + 1;
+      const nextYear = month === 11 ? year + 1 : year;
+      days.push({
+        dateStr: `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`,
+        dayNum: i,
+        isCurrentMonth: false
+      });
+    }
+    
+    return days;
+  };
+
+  useEffect(() => {
+    if (showHistoryModal && allHistoryList.length > 0) {
+      const latestWithTarget = allHistoryList.find(item => item.full_json?.stockCode === stockCode || item.timestamp);
+      // Let's find any item that has target_date
+      const targetItem = allHistoryList.find(item => (item as any).target_date);
+      if (targetItem && (targetItem as any).target_date) {
+        const parts = (targetItem as any).target_date.split('-');
+        if (parts.length === 3) {
+          const y = parseInt(parts[0]);
+          const m = parseInt(parts[1]) - 1;
+          setCalendarYear(y);
+          setCalendarMonth(m);
+          setSelectedDateStr((targetItem as any).target_date);
+          return;
+        }
+      }
+      
+      // Fallback
+      const today = new Date();
+      setCalendarYear(today.getFullYear());
+      setCalendarMonth(today.getMonth());
+      setSelectedDateStr(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
+    }
+  }, [showHistoryModal, allHistoryList, stockCode]);
 
   const formatBoundsDate = (dateStr?: string) => {
     if (!dateStr) return '';
@@ -408,36 +478,188 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       )}
       
       {showHistoryModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', width: '90%', maxWidth: '600px', maxHeight: '80vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>{stockCode} 历史深度复盘记录</h3>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '850px', maxHeight: '90vh', borderRadius: '16px', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: '#0f172a' }}>{stockCode} 历史深度复盘记录</h3>
               <button onClick={() => setShowHistoryModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b' }}>&times;</button>
             </div>
-            <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
-              {fetchingAllHistory ? (
-                <div style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>加载中...</div>
-              ) : allHistoryList.length === 0 ? (
-                <div style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>暂无历史记录</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {allHistoryList.map((item, idx) => (
-                    <div 
-                      key={idx}
-                      onClick={() => { handleTimelineClick(item); setShowHistoryModal(false); }}
-                      style={{ padding: '12px', border: '1px solid #cbd5e1', borderRadius: '8px', cursor: 'pointer', background: '#f8fafc' }}
+            
+            {fetchingAllHistory ? (
+              <div style={{ textAlign: 'center', color: '#64748b', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>加载中...</div>
+            ) : allHistoryList.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#64748b', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>暂无历史记录</div>
+            ) : (
+              <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: '450px' }}>
+                
+                {/* Left Column: Calendar */}
+                <div style={{ width: '380px', borderRight: '1px solid #e2e8f0', padding: '20px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <button 
+                      onClick={() => {
+                        if (calendarMonth === 0) {
+                          setCalendarMonth(11);
+                          setCalendarYear(prev => prev - 1);
+                        } else {
+                          setCalendarMonth(prev => prev - 1);
+                        }
+                      }}
+                      style={{ padding: '6px 10px', background: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
                     >
-                      <div style={{ fontWeight: 'bold', color: '#334155', marginBottom: '6px' }}>
-                        {item.date} {item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})
-                      </div>
-                      <div style={{ color: '#475569', fontSize: '0.9rem' }}>
-                        {item.plain_english_summary}
-                      </div>
+                      ◀
+                    </button>
+                    <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '1.05rem' }}>
+                      {calendarYear}年 {calendarMonth + 1}月
                     </div>
-                  ))}
+                    <button 
+                      onClick={() => {
+                        if (calendarMonth === 11) {
+                          setCalendarMonth(0);
+                          setCalendarYear(prev => prev + 1);
+                        } else {
+                          setCalendarMonth(prev => prev + 1);
+                        }
+                      }}
+                      style={{ padding: '6px 10px', background: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
+                    >
+                      ▶
+                    </button>
+                  </div>
+                  
+                  {/* Weekday headers */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', marginBottom: '8px', textAlign: 'center', fontWeight: 600, color: '#64748b', fontSize: '0.85rem' }}>
+                    {['日', '一', '二', '三', '四', '五', '六'].map((day, i) => (
+                      <div key={i}>{day}</div>
+                    ))}
+                  </div>
+                  
+                  {/* Days grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', textAlign: 'center', flex: 1 }}>
+                    {getDaysInMonthGrid(calendarYear, calendarMonth).map((cell, idx) => {
+                      const isSelected = cell.dateStr === selectedDateStr;
+                      const hasHistory = new Set(allHistoryList.map(item => (item as any).target_date).filter(Boolean)).has(cell.dateStr);
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => {
+                            setSelectedDateStr(cell.dateStr);
+                            if (!cell.isCurrentMonth) {
+                              const parts = cell.dateStr.split('-');
+                              setCalendarYear(parseInt(parts[0]));
+                              setCalendarMonth(parseInt(parts[1]) - 1);
+                            }
+                          }}
+                          style={{
+                            width: '38px',
+                            height: '38px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '50%',
+                            cursor: 'pointer',
+                            position: 'relative',
+                            margin: 'auto',
+                            fontSize: '0.9rem',
+                            fontWeight: isSelected ? 'bold' : cell.isCurrentMonth ? 500 : 'normal',
+                            background: isSelected ? '#2563eb' : 'transparent',
+                            color: isSelected ? '#ffffff' : cell.isCurrentMonth ? '#334155' : '#cbd5e1',
+                            boxShadow: isSelected ? '0 4px 6px -1px rgba(37, 99, 235, 0.4)' : 'none',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {cell.dayNum}
+                          {hasHistory && (
+                            <span 
+                              style={{ 
+                                position: 'absolute', 
+                                bottom: '4px', 
+                                width: '4px', 
+                                height: '4px', 
+                                borderRadius: '50%', 
+                                background: isSelected ? '#ffffff' : '#2563eb',
+                                transition: 'background-color 0.15s'
+                              }} 
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </div>
+                
+                {/* Right Column: Records */}
+                <div style={{ flex: 1, padding: '20px', overflowY: 'auto', background: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '1.05rem' }}>
+                      {(() => {
+                        if (!selectedDateStr) return '';
+                        try {
+                          const d = new Date(selectedDateStr);
+                          const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+                          return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (${weekdays[d.getDay()]}) 交易周期`;
+                        } catch {
+                          return selectedDateStr;
+                        }
+                      })()}
+                    </div>
+                    <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '4px' }}>
+                      包含前一交易日 15:30 至 {selectedDateStr} 15:30 产生的所有复盘记录
+                    </div>
+                  </div>
+                  
+                  {allHistoryList.filter(item => (item as any).target_date === selectedDateStr).length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.9rem', textAlign: 'center', padding: '20px', border: '2px dashed #e2e8f0', borderRadius: '12px', background: '#ffffff' }}>
+                      该日期暂无历史深度复盘记录。<br/>请在左侧日历上选择带有蓝点标记的日期。
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {allHistoryList
+                        .filter(item => (item as any).target_date === selectedDateStr)
+                        .map((item, idx) => (
+                          <div 
+                            key={idx}
+                            onClick={() => { handleTimelineClick(item); setShowHistoryModal(false); }}
+                            style={{ 
+                              padding: '16px', 
+                              border: '1px solid #e2e8f0', 
+                              borderRadius: '10px', 
+                              cursor: 'pointer', 
+                              background: '#ffffff',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                              transition: 'all 0.2s ease',
+                              borderLeft: item.trigger_type === 'manual' ? '4px solid #f59e0b' : '4px solid #3b82f6'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = '#cbd5e1';
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.05)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = '#e2e8f0';
+                              e.currentTarget.style.transform = 'none';
+                              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <span style={{ fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>
+                                {item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})
+                              </span>
+                              <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: item.trigger_type === 'manual' ? '#fffbeb' : '#eff6ff', color: item.trigger_type === 'manual' ? '#b45309' : '#1d4ed8', fontWeight: 500 }}>
+                                {item.trigger_type === 'manual' ? '手动' : '定时自动'}
+                              </span>
+                            </div>
+                            <div style={{ color: '#475569', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                              {item.plain_english_summary ? item.plain_english_summary.replace(/^【[^】]+】\s*/, '') : ''}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                
+              </div>
+            )}
+            
           </div>
         </div>
       )}

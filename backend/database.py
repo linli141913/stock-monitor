@@ -197,11 +197,31 @@ def get_trading_session_bounds_for_symbol(symbol: str):
         
     return start_time.isoformat(), end_time.isoformat()
 
+def get_target_trading_date_for_timestamp(ts_str: str, market: str) -> str:
+    try:
+        dt = datetime.fromisoformat(ts_str)
+    except Exception:
+        return ts_str.split("T")[0]
+        
+    cutoff_time = dt.replace(hour=15, minute=30, second=0, microsecond=0)
+    today_is_trade = is_trading_day(dt, market)
+    
+    if today_is_trade:
+        if dt < cutoff_time:
+            return dt.strftime("%Y-%m-%d")
+        else:
+            next_trade = get_next_trading_day(dt, market)
+            return next_trade.strftime("%Y-%m-%d")
+    else:
+        next_trade = get_next_trading_day(dt, market)
+        return next_trade.strftime("%Y-%m-%d")
+
 def get_today_analysis_history(symbol: str) -> list:
     """获取某只股票今天的分析历史，用于记忆注入和前端时间轴展示 (按交易日 15:30 到 15:30 划分)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    market = get_market_by_symbol(symbol)
     start_time, end_time = get_trading_session_bounds_for_symbol(symbol)
     
     cursor.execute('''
@@ -213,13 +233,16 @@ def get_today_analysis_history(symbol: str) -> list:
     
     results = []
     for row in cursor.fetchall():
+        ts = row[2]
+        target_date = get_target_trading_date_for_timestamp(ts, market)
         results.append({
             "date": row[0],
             "time": row[1],
-            "timestamp": row[2],
+            "timestamp": ts,
             "trigger_type": row[3],
             "plain_english_summary": row[4],
-            "full_json": json.loads(row[5]) if row[5] else {}
+            "full_json": json.loads(row[5]) if row[5] else {},
+            "target_date": target_date
         })
         
     conn.close()
@@ -230,6 +253,8 @@ def get_all_analysis_history(symbol: str) -> list:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    market = get_market_by_symbol(symbol)
+    
     cursor.execute('''
     SELECT date, time, timestamp, trigger_type, plain_english_summary, full_json 
     FROM ai_analysis_history 
@@ -239,13 +264,16 @@ def get_all_analysis_history(symbol: str) -> list:
     
     results = []
     for row in cursor.fetchall():
+        ts = row[2]
+        target_date = get_target_trading_date_for_timestamp(ts, market)
         results.append({
             "date": row[0],
             "time": row[1],
-            "timestamp": row[2],
+            "timestamp": ts,
             "trigger_type": row[3],
             "plain_english_summary": row[4],
-            "full_json": json.loads(row[5]) if row[5] else {}
+            "full_json": json.loads(row[5]) if row[5] else {},
+            "target_date": target_date
         })
         
     conn.close()
