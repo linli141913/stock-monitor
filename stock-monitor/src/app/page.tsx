@@ -249,6 +249,11 @@ function HomeContent() {
     return <div style={{ padding: '24px', textAlign: 'center' }}>加载中...</div>;
   }
 
+  // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
+  // 如果不匹配，强制进入加载状态，避免屏幕闪烁上一只股票的数据
+  const isDataStale = overviewData && !overviewData.stockCode.toLowerCase().includes(stockCode.toLowerCase().replace(/^(sh|sz|hk)/i, ''));
+  const showOverviewLoading = overviewLoading || isDataStale;
+
   return (
     <div className={styles.container}>
       <SearchMonitorBar onSearch={handleSearch} />
@@ -256,7 +261,7 @@ function HomeContent() {
       <div className={styles.layout}>
         {/* 左侧主内容区 */}
         <div className={styles.leftCol}>
-          {overviewLoading ? (
+          {showOverviewLoading ? (
             <div className={styles.loadingContainer}>行情加载中...</div>
           ) : overviewError ? (
             <div className={styles.errorContainer}>
@@ -276,7 +281,7 @@ function HomeContent() {
               ⚠️ {klineError}
               <button onClick={fetchKline} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
             </div>
-          ) : klineData.length > 0 ? (
+          ) : klineData.length > 0 && !isDataStale ? (
             <StockChartCard
               data={klineData}
               period={period}
@@ -284,7 +289,7 @@ function HomeContent() {
               loading={klineLoading}
             />
           ) : (
-             <div className={styles.loadingContainer}>K 线加载中...</div>
+            <div className={styles.loadingContainer}>K 线加载中...</div>
           )}
 
           <StockInfoTabs
