@@ -250,9 +250,9 @@ function HomeContent() {
   }
 
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
-  // 如果不匹配，强制进入加载状态，避免屏幕闪烁上一只股票的数据
+  // 计算是否正在加载全新数据（当前 overviewData 的代码与 URL 中的 code 不匹配）
   const isDataStale = overviewData && !overviewData.stockCode.toLowerCase().includes(stockCode.toLowerCase().replace(/^(sh|sz|hk)/i, ''));
-  const showOverviewLoading = overviewLoading || isDataStale;
+  const showOverviewLoading = (overviewLoading || isDataStale) && !overviewError;
 
   return (
     <div className={styles.container}>

@@ -223,6 +223,25 @@ def get_stock_overview(symbol: str):
     """
     获取股票实时行情（腾讯财经）
     """
+    # 尝试中文/拼音解析为股票代码
+    if symbol and not (symbol.isalnum() and not any('\u4e00' <= c <= '\u9fff' for c in symbol)):
+        try:
+            suggest_url = f"http://suggest3.sinajs.cn/suggest/type=&key={symbol}"
+            s_resp = requests.get(suggest_url, timeout=2)
+            s_resp.encoding = 'gbk'
+            if '=";' not in s_resp.text:
+                data = s_resp.text.split('="')[1].split('";')[0]
+                if data:
+                    first_match = data.split(';')[0].split(',')
+                    if len(first_match) >= 4:
+                        symbol_resolved = first_match[3]
+                        if symbol_resolved.startswith(('sh', 'sz', 'hk', 'bj')):
+                            symbol = symbol_resolved[2:]
+                        else:
+                            symbol = symbol_resolved
+        except:
+            pass
+
     prefix = get_prefix(symbol)
     
     # 1. 获取基本行情
