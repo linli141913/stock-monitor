@@ -138,6 +138,25 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     }
   };
 
+  const getScoreInfo = (s: number) => {
+    let color = '#f59e0b';
+    let text = '中性';
+    let bg = '#fffbeb';
+    let border = '#fef3c7';
+    if (s >= 80) {
+      color = '#ef4444';
+      text = '看好';
+      bg = '#fee2e2';
+      border = '#fecaca';
+    } else if (s <= 40) {
+      color = '#10b981';
+      text = '警戒';
+      bg = '#d1fae5';
+      border = '#a7f3d0';
+    }
+    return { color, text, bg, border };
+  };
+
   const fetchHistory = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
@@ -372,8 +391,27 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                   minWidth: '140px'
                 }}
               >
-                <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '4px' }}>
-                  {item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})
+                <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '4px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>{item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})</span>
+                  {(() => {
+                    const itemScore = item.full_json?.score ?? 50;
+                    const { color, text, bg, border } = getScoreInfo(itemScore);
+                    return (
+                      <span style={{ 
+                        marginLeft: '6px', 
+                        fontSize: '0.7rem', 
+                        padding: '0px 4px', 
+                        borderRadius: '3px', 
+                        backgroundColor: bg, 
+                        color: color, 
+                        border: `1px solid ${border}`,
+                        fontWeight: 'bold',
+                        lineHeight: 1.2
+                      }}>
+                        {itemScore}分
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div style={{ color: '#0f172a', fontWeight: 500, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {item.plain_english_summary}
@@ -676,8 +714,27 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                             }}
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                              <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>
-                                {item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})
+                              <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span>{item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})</span>
+                                {(() => {
+                                  const itemScore = item.full_json?.score ?? 50;
+                                  const { color, text, bg, border } = getScoreInfo(itemScore);
+                                  return (
+                                    <span style={{ 
+                                      marginLeft: '8px', 
+                                      fontSize: '0.75rem', 
+                                      padding: '1px 6px', 
+                                      borderRadius: '4px', 
+                                      backgroundColor: bg, 
+                                      color: color, 
+                                      border: `1px solid ${border}`,
+                                      fontWeight: 'bold',
+                                      lineHeight: 1.2
+                                    }}>
+                                      {itemScore}分 {text}
+                                    </span>
+                                  );
+                                })()}
                               </span>
                               <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: item.trigger_type === 'manual' ? '#fffbeb' : '#eff6ff', color: item.trigger_type === 'manual' ? '#b45309' : '#1d4ed8', fontWeight: 500 }}>
                                 {item.trigger_type === 'manual' ? '手动' : '定时自动'}
