@@ -26,7 +26,7 @@ export function useWatchlist() {
     } catch {}
 
     // 从后端拉取最新数据同步
-    fetch(`${API_BASE}/api/watchlist`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
+    fetch(`${API_BASE}/api/watchlist?_t=${Date.now()}`, { headers: { 'ngrok-skip-browser-warning': 'true' }, cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
         if (data && data.data && Array.isArray(data.data)) {

@@ -250,10 +250,10 @@ function HomeContent() {
   }
 
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
-  // 如果搜索的是中文名称，而返回的数据中 name 匹配，或者代码匹配，则不算 stale。
+  // 如果搜索的是中文名称，而返回的数据中 stockName 匹配，或者代码匹配，则不算 stale。
   const isDataStale = overviewData && 
     !(overviewData.stockCode.toLowerCase().includes(stockCode.toLowerCase().replace(/^(sh|sz|hk)/i, ''))) &&
-    !(overviewData.name === stockCode);
+    !(overviewData.stockName === stockCode);
   const showOverviewLoading = (overviewLoading || isDataStale) && !overviewError;
 
   return (

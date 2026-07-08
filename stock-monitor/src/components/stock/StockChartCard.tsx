@@ -397,7 +397,6 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
           ref={echartsRef}
           option={option} 
           style={{ height: '100%', width: '100%' }}
-          notMerge={false}
           lazyUpdate={true}
           showLoading={loading}
           onEvents={onEvents}
