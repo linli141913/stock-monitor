@@ -304,3 +304,76 @@
   font-size: 11px;
   color: var(--color-text-secondary);
 }
+
+/* Premium Scrollable Container for All News List */
+.accordionContentScroll {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-xs);
+  border-radius: var(--radius-sm);
+  background-color: rgba(247, 249, 252, 0.5);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  max-height: 450px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.accordionContentScroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.accordionContentScroll::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+}
+
+/* Source Badge - Premium Glassmorphism styling */
+.sourceBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.sourceCninfo {
+  background-color: rgba(212, 175, 55, 0.08);
+  color: #c9960c;
+  border-color: rgba(212, 175, 55, 0.25);
+}
+
+.sourceCls {
+  background-color: rgba(231, 76, 60, 0.08);
+  color: #e74c3c;
+  border-color: rgba(231, 76, 60, 0.25);
+}
+
+.sourceEastmoney {
+  background-color: rgba(52, 152, 219, 0.08);
+  color: #2980b9;
+  border-color: rgba(52, 152, 219, 0.25);
+}
+
+.sourceSina {
+  background-color: rgba(230, 126, 34, 0.08);
+  color: #d35400;
+  border-color: rgba(230, 126, 34, 0.25);
+}
+
+.sourcePress {
+  background-color: rgba(155, 89, 182, 0.08);
+  color: #8e44ad;
+  border-color: rgba(155, 89, 182, 0.25);
+}
+
+.sourceDefault {
+  background-color: rgba(149, 165, 166, 0.08);
+  color: #7f8c8d;
+  border-color: rgba(149, 165, 166, 0.25);
+}
+

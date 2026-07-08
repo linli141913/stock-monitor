@@ -37,6 +37,21 @@ def init_db():
     )
     ''')
     
+    # 多源新闻公告聚合表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS crawled_news (
+        id TEXT PRIMARY KEY,
+        symbol TEXT,
+        title TEXT,
+        url TEXT UNIQUE,
+        ctime INTEGER,
+        source TEXT,
+        content TEXT,
+        category TEXT,
+        created_at REAL
+    )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -313,6 +328,86 @@ def save_cached_dynamics(symbol: str, data: dict):
                    (symbol, time.time(), json.dumps(data, ensure_ascii=False)))
     conn.commit()
     conn.close()
+
+def save_crawled_news(news_list: list):
+    """批量插入抓取到的新闻公告，自动忽略已存在的 URL 链接"""
+    import time
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS crawled_news (
+        id TEXT PRIMARY KEY,
+        symbol TEXT,
+        title TEXT,
+        url TEXT UNIQUE,
+        ctime INTEGER,
+        source TEXT,
+        content TEXT,
+        category TEXT,
+        created_at REAL
+    )
+    ''')
+    for item in news_list:
+        try:
+            cursor.execute('''
+            INSERT OR IGNORE INTO crawled_news (id, symbol, title, url, ctime, source, content, category, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                item.get("id"),
+                item.get("symbol", ""),
+                item.get("title", ""),
+                item.get("url", ""),
+                item.get("ctime", 0),
+                item.get("source", ""),
+                item.get("content", ""),
+                item.get("category", ""),
+                time.time()
+            ))
+        except Exception as e:
+            print(f"DB Error inserting news: {e}")
+    conn.commit()
+    conn.close()
+
+def get_latest_crawled_news(symbol: str, limit: int = 100) -> list:
+    """从聚合新闻池中读取与个股或对应行业关联的最新的 50~100 条去重资讯"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS crawled_news (
+        id TEXT PRIMARY KEY,
+        symbol TEXT,
+        title TEXT,
+        url TEXT UNIQUE,
+        ctime INTEGER,
+        source TEXT,
+        content TEXT,
+        category TEXT,
+        created_at REAL
+    )
+    ''')
+    # 读取最新 24 小时或最新的 100 条
+    # 支持模糊关联该股票代码或者通用政策/行业
+    cursor.execute('''
+    SELECT symbol, title, url, ctime, source, content, category 
+    FROM crawled_news 
+    WHERE symbol=? OR symbol='' OR symbol IS NULL
+    ORDER BY ctime DESC, created_at DESC 
+    LIMIT ?
+    ''', (symbol, limit))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append({
+            "symbol": row[0],
+            "title": row[1],
+            "url": row[2],
+            "ctime": row[3],
+            "source": row[4],
+            "content": row[5],
+            "category": row[6]
+        })
+    conn.close()
+    return results
 
 # 初始化
 init_db()

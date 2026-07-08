@@ -10,6 +10,16 @@ interface Props {
 export default function IndustryMonitorCard({ data }: Props) {
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
+  const [allNewsOpen, setAllNewsOpen] = useState(true);
+
+  const getSourceClass = (source: string) => {
+    if (source.includes('巨潮')) return styles.sourceCninfo;
+    if (source.includes('财联社')) return styles.sourceCls;
+    if (source.includes('东财') || source.includes('东方财富') || source.includes('研报')) return styles.sourceEastmoney;
+    if (source.includes('新浪')) return styles.sourceSina;
+    if (source.includes('报') || source.includes('央视') || source.includes('21世纪') || source.includes('报道')) return styles.sourcePress;
+    return styles.sourceDefault;
+  };
 
   const renderList = (items?: DynamicsItem[]) => {
     if (!items || items.length === 0) {
@@ -22,6 +32,9 @@ export default function IndustryMonitorCard({ data }: Props) {
             <div key={index} className={styles.dynamicsItem}>
               <div className={styles.itemHeader}>
                 <div className={styles.itemTitleArea}>
+                  <span className={`${styles.sourceBadge} ${getSourceClass(item.source)}`}>
+                    {item.source}
+                  </span>
                   {item.url ? (
                     <a href={item.url} target="_blank" rel="noopener noreferrer" className={styles.itemLink}>
                       {item.title}
@@ -34,7 +47,7 @@ export default function IndustryMonitorCard({ data }: Props) {
               </div>
               <div className={styles.itemFooter}>
                 <span className={styles.itemTime}>{item.time}</span>
-                <span className={styles.itemSource}>来源：{item.source}</span>
+                <span className={styles.itemSource}>资讯来源：{item.source}</span>
               </div>
             </div>
           );
@@ -129,6 +142,31 @@ export default function IndustryMonitorCard({ data }: Props) {
           {dynamicsOpen && (
             <div className={styles.accordionContent}>
               {renderList(data?.upstreamDownstream)}
+            </div>
+          )}
+        </div>
+
+        {/* 实时多源资讯 Accordion */}
+        <div className={styles.accordionGroup}>
+          <button 
+            className={`${styles.accordionHeader} ${allNewsOpen ? styles.headerActive : ''}`}
+            onClick={() => setAllNewsOpen(!allNewsOpen)}
+          >
+            <div className={styles.headerLabelArea}>
+              <BarChart3 size={16} className={styles.headerIcon} />
+              <span>实时多源资讯 ({data?.allNews?.length || 0})</span>
+            </div>
+            <div className={styles.headerRightArea}>
+              <span className={styles.summaryText}>最新去重全景资讯池</span>
+              <ChevronDown 
+                size={16} 
+                className={`${styles.chevron} ${allNewsOpen ? styles.chevronRotate : ''}`} 
+              />
+            </div>
+          </button>
+          {allNewsOpen && (
+            <div className={styles.accordionContentScroll}>
+              {renderList(data?.allNews)}
             </div>
           )}
         </div>

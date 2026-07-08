@@ -19,4 +19,5 @@ export interface IndustryMonitor {
   refreshInterval?: string;
   policies?: DynamicsItem[];
   upstreamDownstream?: DynamicsItem[];
+  allNews?: DynamicsItem[];
 }

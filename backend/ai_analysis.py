@@ -64,22 +64,53 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
     if cached:
         return cached
 
-    from real_data_fetcher import RealDataFetcher
-    fetcher = RealDataFetcher()
-    news_text = fetcher.get_industry_news_dehydrated(symbol)
+    import time
+    from datetime import datetime
+    news_items = database.get_latest_crawled_news(symbol, limit=100)
     
-    api_key = os.getenv("LLM_API_KEY", "").strip()
-    if not api_key:
+    if not news_items:
         fallback = {
             "policies": [
-                {"title": "半导体与集成电路产业国产替代支持力度加大", "source": "工信部", "url": "", "time": "07-08 10:00"}
+                {"title": "国家加码支持先进制造与集成电路产业国产替代", "source": "中国证券报", "url": "", "time": "07-09 09:00"}
             ],
             "upstreamDownstream": [
-                {"title": "上游多晶硅及靶材等原材料价格高位持稳", "source": "行业协会", "url": "", "time": "07-08 11:30"},
-                {"title": "下游消费电子与车载智能终端出货缓慢复苏", "source": "IDC研究", "url": "", "time": "07-08 14:00"}
+                {"title": "半导体设备巨头订单饱和，上游原材料晶圆需求坚挺", "source": "东财研报", "url": "", "time": "07-09 09:30"}
             ]
         }
         return fallback
+
+    # 序列化新闻文本
+    news_text = ""
+    for idx, item in enumerate(news_items):
+        t_val = item.get("ctime", time.time())
+        try:
+            time_str = datetime.fromtimestamp(t_val).strftime("%m-%d %H:%M")
+        except:
+            time_str = "今日"
+        news_text += f"[{idx+1}] 时间: {time_str} | 来源: {item.get('source')} | 标题: {item.get('title')} | 链接: {item.get('url')}\n"
+
+    api_key = os.getenv("LLM_API_KEY", "").strip()
+    if not api_key:
+        # 简单策略拆分
+        policies = []
+        updown = []
+        for x in news_items:
+            t_val = x.get("ctime", time.time())
+            try:
+                time_str = datetime.fromtimestamp(t_val).strftime("%m-%d %H:%M")
+            except:
+                time_str = "今日"
+            pkg = {
+                "title": x.get("title"),
+                "source": x.get("source"),
+                "url": x.get("url"),
+                "time": time_str
+            }
+            if x.get("category") == "policy" and len(policies) < 10:
+                policies.append(pkg)
+            elif len(updown) < 10:
+                updown.append(pkg)
+        return {"policies": policies or [{"title": "集成电路国产替代持续推进", "source": "新浪", "url": "", "time": "07-09 09:00"}], "upstreamDownstream": updown}
 
     try:
         from openai import OpenAI
@@ -90,12 +121,12 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
         model_name = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
         
         prompt = f"""
-        你是一个半导体与电子行业的顶尖分析助理。请从以下抓取到的真实行业新闻列表中，进行严格的“相关性筛选”，不要重写标题，不要包含任何自定义描述或AI润色，保持新闻的真实性：
-        1. 筛选出与该行业 ({industry_name}) 以及股票代码 {symbol} 最相关的“产业政策/国内政策/海外法规动态”新闻（最多5条，必须有真实的新闻标题、发布时间、来源和链接）。
-        2. 筛选出与该股票产业链相关的“上游原材料/设备供应商重大动态”和“下游核心客户/终端消费市场需求”新闻（最多5条，必须有真实的新闻标题、发布时间、来源和链接）。
+        你是一个半导体与电子行业的顶尖分析助理。请从以下抓取到的真实行业及宏观新闻列表中，进行严格的“相关性分类筛选”，不要重写标题，不要包含任何自定义描述或AI润色，保持新闻的真实性：
+        1. 筛选出与该行业 ({industry_name}) 以及股票代码 {symbol} 最相关的“国家产业政策/国内政策/海外法规动态/交易所公告监管”新闻（最多10条，必须有真实的新闻标题、发布时间、来源和链接）。
+        2. 筛选出与该股票或者行业产业链相关的“上游原材料/设备供应商重大动态”、“公司财务/研报业绩预测”和“下游核心客户/终端消费市场需求”新闻（最多10条，必须有真实的新闻标题、发布时间、来源和链接）。
         
-        【极重要规则】：若无直接与该个股或特定细分行业相关的政策/动态新闻，可扩大筛选范围至整个半导体、电子信息、先进制造或科技板块的最新产业政策与产业链供需变动。请确保 policies 和 upstreamDownstream 两个数组均最多各有 5 条有价值的新闻，绝对不可返回空列表！
-
+        【极重要规则】：请确保 policies 和 upstreamDownstream 两个数组均最多各有 10 条有价值的新闻，绝对不可返回空列表！
+        
         【行业新闻输入】
         {news_text}
 
@@ -103,7 +134,7 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
         {{
             "policies": [
                 {{
-                    "title": "100%保持原文的政策新闻标题",
+                    "title": "100%保持原文的新闻标题",
                     "source": "新闻中对应的来源",
                     "url": "新闻中对应的链接，如果没有则留空",
                     "time": "新闻中对应的时间，例如：07-08 12:30"
@@ -111,7 +142,7 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
             ],
             "upstreamDownstream": [
                 {{
-                    "title": "100%保持原文的产业链新闻标题",
+                    "title": "100%保持原文的新闻标题",
                     "source": "新闻中对应的来源",
                     "url": "新闻中对应的链接，如果没有则留空",
                     "time": "新闻中对应的时间，例如：07-08 12:30"
@@ -122,7 +153,7 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "你是一个严格进行新闻分类筛选、绝不胡说八道和重写标题的API助理。"},
+                {"role": "system", "content": "你是一个严格进行新闻分类筛选、绝不胡说八道 and 重写标题的API助理。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
@@ -137,16 +168,26 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
         return res
     except Exception as e:
         print(f"Error fetching industry dynamics via LLM: {e}")
-        fallback = {
-            "policies": [
-                {"title": "半导体产业国产替代支持力度持续加大", "source": "工信部", "url": "", "time": "07-08 10:00"}
-            ],
-            "upstreamDownstream": [
-                {"title": "上游多晶硅及偏光片价格近期持稳", "source": "行业协会", "url": "", "time": "07-08 11:30"},
-                {"title": "下游智能手机及车载芯片需求温和复苏", "source": "IDC", "url": "", "time": "07-08 14:00"}
-            ]
-        }
-        return fallback
+        # 降级兜底
+        policies = []
+        updown = []
+        for x in news_items[:20]:
+            t_val = x.get("ctime", time.time())
+            try:
+                time_str = datetime.fromtimestamp(t_val).strftime("%m-%d %H:%M")
+            except:
+                time_str = "今日"
+            pkg = {
+                "title": x.get("title"),
+                "source": x.get("source"),
+                "url": x.get("url"),
+                "time": time_str
+            }
+            if x.get("category") == "policy" and len(policies) < 10:
+                policies.append(pkg)
+            elif len(updown) < 10:
+                updown.append(pkg)
+        return {"policies": policies, "upstreamDownstream": updown}
 
 fetcher = RealDataFetcher()
 

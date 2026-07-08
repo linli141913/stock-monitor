@@ -35,6 +35,17 @@ app.include_router(ai_analysis_router)
 app.include_router(news_router)
 
 # ── 后台定时追踪任务 ──────────────────────────────────────────────
+def run_collection_sync():
+    try:
+        import news_collector
+        news_collector.run_collection()
+    except Exception as e:
+        print(f"[{datetime.now()}] 定时资讯采集失败: {e}")
+
+async def auto_collect_news():
+    print(f"[{datetime.now()}] 触发定时多源资讯采集任务...")
+    await asyncio.to_thread(run_collection_sync)
+
 async def auto_analyze_watchlist():
     print(f"[{datetime.now()}] 触发后台自动分析追踪任务...")
     items = database.get_watchlist()
@@ -54,13 +65,17 @@ async def auto_analyze_watchlist():
 @app.on_event("startup")
 def start_scheduler():
     scheduler = AsyncIOScheduler()
+    # 启动时立即异步拉取一次新闻
+    scheduler.add_job(auto_collect_news, 'date', run_date=datetime.now())
+    # 随后每 30 分钟拉取一次
+    scheduler.add_job(auto_collect_news, 'interval', minutes=30)
     # 每天 10:30, 11:30, 15:00, 22:00
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=10, minute=30)
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=11, minute=30)
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=15, minute=0)
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=22, minute=0)
     scheduler.start()
-    print("后台自动化追踪调度器已启动。")
+    print("后台自动化追踪与资讯采集调度器已启动。")
 # ── 公共工具函数 ──────────────────────────────────────────────
 
 def get_prefix(symbol: str) -> str:
@@ -733,6 +748,23 @@ def get_industry_monitor(symbol: str):
     flow_str = f"净流入 {flow_val} 亿元" if flow_val > 0 else f"净流出 {abs(flow_val)} 亿元"
     
     # 2. 检查是否在自选监测列表中，若不在则不调用大模型筛选，展示说明文字，防额度消耗
+    # 实时去重多源资讯池（读取 80 条）
+    import time
+    news_pool = database.get_latest_crawled_news(symbol, limit=80)
+    all_news_list = []
+    for x in news_pool:
+        ctime_val = x.get("ctime", time.time())
+        try:
+            time_str = datetime.fromtimestamp(ctime_val).strftime("%m-%d %H:%M")
+        except:
+            time_str = "今日"
+        all_news_list.append({
+            "title": x.get("title"),
+            "source": x.get("source"),
+            "url": x.get("url"),
+            "time": time_str
+        })
+
     if not database.is_in_watchlist(symbol):
         return {
             "industryName": industry_name,
@@ -758,6 +790,7 @@ def get_industry_monitor(symbol: str):
                     "time": "实时"
                 }
             ],
+            "allNews": all_news_list,
             "updateTime": "已休眠",
             "refreshInterval": "静态"
         }
@@ -783,6 +816,7 @@ def get_industry_monitor(symbol: str):
         "downstreamStatus": down_status,
         "policies": dynamics.get("policies", []),
         "upstreamDownstream": dynamics.get("upstreamDownstream", []),
+        "allNews": all_news_list,
         "updateTime": "实时监控",
         "refreshInterval": "动态"
     }
@@ -790,18 +824,22 @@ def get_industry_monitor(symbol: str):
 @app.get("/api/stock/telegraph")
 def get_telegraph():
     """
-    获取真实的 7x24 小时财联社电报或宏观新闻
+    获取真实的 7x24 小时去重新闻与公告电报
     """
     try:
-        import akshare as ak
-        df = ak.stock_info_global_cls()
-        # AKShare 财联社接口返回字段通常包含 '发布时间', '标题', '内容' 等
+        import time
+        news_items = database.get_latest_crawled_news("", limit=50)
         news_list = []
-        for _, row in df.head(15).iterrows():
+        for x in news_items:
+            ctime_val = x.get("ctime", time.time())
+            try:
+                time_str = datetime.fromtimestamp(ctime_val).strftime("%H:%M:%S")
+            except:
+                time_str = "实时"
             news_list.append({
-                "time": str(row.get("发布时间", "")),
-                "title": str(row.get("标题", "")),
-                "content": str(row.get("内容", ""))
+                "time": time_str,
+                "title": f"[{x.get('source')}] {x.get('title')}",
+                "content": x.get("content", "")
             })
         return {"data": news_list}
     except Exception as e:
