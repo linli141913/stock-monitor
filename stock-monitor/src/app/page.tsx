@@ -209,13 +209,22 @@ function HomeContent() {
 
   // 换股时，行情 + K 线 + 公司信息 都刷新
   useEffect(() => {
+    // 切换股票时立刻清空旧状态，防止闪烁上次的数据
+    setOverviewData(null);
+    setKlineData([]);
+    setCompanyData(null);
+    setGlobalNews([]);
+    setRelatedStocks([]);
+    setIndustryMonitorData({});
+    setAbnormalPeers([]);
+
     fetchOverview();
     fetchKline();
     fetchCompanyInfo();
     fetchRelatedPrices(stockCode);
     fetchIndustryAndPeers(stockCode);
     fetchGlobalNews();
-  }, [stockCode]);
+  }, [stockCode, fetchOverview, fetchKline, fetchCompanyInfo, fetchRelatedPrices, fetchIndustryAndPeers, fetchGlobalNews]);
 
   // 换周期时，只刷新 K 线，行情不动
   useEffect(() => {

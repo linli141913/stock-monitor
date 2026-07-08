@@ -26,7 +26,7 @@ export function useWatchlist() {
     } catch {}
 
     // 从后端拉取最新数据同步
-    fetch(`${API_BASE}/api/watchlist`)
+    fetch(`${API_BASE}/api/watchlist`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
       .then(res => res.json())
       .then(data => {
         if (data && data.data && Array.isArray(data.data)) {
@@ -36,7 +36,10 @@ export function useWatchlist() {
           if (backendList.length === 0 && localList.length > 0) {
             fetch(`${API_BASE}/api/watchlist`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+              },
               body: JSON.stringify({ items: localList })
             }).catch(() => {});
             return;
@@ -58,7 +61,10 @@ export function useWatchlist() {
           if (needsUpdate) {
             fetch(`${API_BASE}/api/watchlist`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+              },
               body: JSON.stringify({ items: backendList })
             }).catch(() => {});
           }
@@ -81,7 +87,10 @@ export function useWatchlist() {
       // 同步到后台 API
       fetch(`${API_BASE}/api/watchlist`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
         body: JSON.stringify({ items: list })
       }).catch(err => console.error("同步后台失败", err));
     } catch {}
