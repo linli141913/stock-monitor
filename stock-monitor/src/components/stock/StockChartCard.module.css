@@ -1,0 +1,119 @@
+.card {
+  background-color: var(--color-card);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-card);
+  margin-bottom: var(--space-md);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-sm);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.tab {
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  position: relative;
+}
+
+.tab:hover {
+  color: var(--color-primary);
+}
+
+.tab.active {
+  color: var(--color-primary);
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -9px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-primary);
+}
+
+.legend {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chartContainer {
+  width: 100%;
+}
+
+
+
+@media (max-width: 768px) {
+  .card { padding: 12px; margin-bottom: 8px; border-radius: 8px; }
+  .header { flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+  .controls { width: 100%; justify-content: flex-start; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+  .controls::-webkit-scrollbar { display: none; }
+  .timeFilters, .maFilters { gap: 6px; }
+  .filterBtn { padding: 6px 10px; font-size: 14px; }
+  .chartContainer { height: 300px !important; }
+}
+
+.fsText { display: none; }
+@media (max-width: 768px) {
+  .fsText { display: inline; margin-left: 4px; font-size: 14px; }
+  .mobileFullscreenText { 
+    background-color: var(--color-primary-light); 
+    color: var(--color-primary); 
+    padding: 4px 10px; 
+    border-radius: 4px; 
+    border: none;
+    display: flex;
+    align-items: center;
+  }
+}
+
+.simulatedFullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100dvw !important;
+  height: 100dvh !important;
+  z-index: 99999 !important;
+  background: white !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 768px) {
+  .simulatedFullscreen {
+    /* To force landscape on mobile, we can rotate the container */
+    transform: rotate(90deg);
+    transform-origin: top left;
+    width: 100dvh !important;
+    height: 100dvw !important;
+    left: 100dvw !important;
+    top: 0 !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .simulatedFullscreen .chartContainer {
+    height: calc(100% - 60px) !important;
+  }
+}

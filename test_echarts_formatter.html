@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div id="main" style="width: 600px;height:400px;"></div>
+    <script>
+        var chart = echarts.init(document.getElementById('main'));
+        var option = {
+            tooltip: { trigger: 'axis' },
+            xAxis: { data: ['2023-01-01'] },
+            yAxis: {},
+            series: [{
+                name: 'K线',
+                type: 'candlestick',
+                dimensions: ['开盘', '收盘', '最低', '最高'],
+                data: [[10, 20, 5, 25]]
+            }]
+        };
+        chart.setOption(option);
+    </script>
+</body>
+</html>
