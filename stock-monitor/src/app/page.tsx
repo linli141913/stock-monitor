@@ -92,7 +92,12 @@ function HomeContent() {
 
       // 如果后端做了代码纠偏（比如港股多输了0），同步更新前端的统一搜索状态
       if (data.code && data.code.toLowerCase() !== stockCode.toLowerCase()) {
-        router.push(`/?code=${data.code.toLowerCase()}`);
+        // 如果只是加了 sh/sz/bj/hk 前缀，就不强制刷新 URL，避免二次渲染带来的卡顿
+        const strippedBackend = data.code.toLowerCase().replace(/^(sh|sz|hk|bj)/, '');
+        const strippedFront = stockCode.toLowerCase().replace(/^(sh|sz|hk|bj)/, '');
+        if (strippedBackend !== strippedFront && data.name !== stockCode) {
+          router.push(`/?code=${data.code.toLowerCase()}`);
+        }
       }
 
       // 实时更新 K 线的最后一根蜡烛（产生“动态呼吸感”）
@@ -207,11 +212,10 @@ function HomeContent() {
     }
   }, []);
 
-  // 换股时，行情 + K 线 + 公司信息 都刷新
+  // 换股时，行情 + 公司信息 都刷新
   useEffect(() => {
     // 切换股票时立刻清空旧状态，防止闪烁上次的数据
     setOverviewData(null);
-    setKlineData([]);
     setCompanyData(null);
     setGlobalNews([]);
     setRelatedStocks([]);
@@ -219,17 +223,18 @@ function HomeContent() {
     setAbnormalPeers([]);
 
     fetchOverview();
-    fetchKline();
     fetchCompanyInfo();
     fetchRelatedPrices(stockCode);
     fetchIndustryAndPeers(stockCode);
     fetchGlobalNews();
-  }, [stockCode, fetchOverview, fetchKline, fetchCompanyInfo, fetchRelatedPrices, fetchIndustryAndPeers, fetchGlobalNews]);
+  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchRelatedPrices, fetchIndustryAndPeers, fetchGlobalNews]);
 
-  // 换周期时，只刷新 K 线，行情不动
+  // 换周期或换股时，刷新 K 线
   useEffect(() => {
+    // 切换股票时立刻清空K线数据
+    setKlineData([]);
     fetchKline();
-  }, [period]);
+  }, [stockCode, period, fetchKline]);
 
   // 30 秒自动刷新行情（不影响 K 线）
   useEffect(() => {
