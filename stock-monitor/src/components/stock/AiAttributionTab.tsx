@@ -408,7 +408,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                         fontWeight: 'bold',
                         lineHeight: 1.2
                       }}>
-                        {itemScore}分
+                        {itemScore}分 {text}
                       </span>
                     );
                   })()}
