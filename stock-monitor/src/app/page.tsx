@@ -48,11 +48,11 @@ function HomeContent() {
 
   // ── 搜索 ──────────────────────────────────────────────────
   const handleSearch = (keyword: string) => {
-    const code = keyword.match(/(?:hk)?\d{5,6}/i);
-    if (code) {
-      router.push(`/?code=${code[0].toLowerCase()}`);
+    const trimmed = keyword.trim();
+    if (trimmed) {
+      router.push(`/?code=${trimmed}`);
     } else {
-      alert('请输入 6 位 A 股股票代码 或 5 位港股代码，如：000021 / hk00700');
+      alert('请输入股票名称或代码，如：平安银行 / 000001');
     }
   };
 
