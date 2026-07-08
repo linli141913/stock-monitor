@@ -124,7 +124,14 @@ def update_watchlist(req: WatchlistRequest):
 
 @app.get("/api/stock/ai_history/{symbol}")
 def get_ai_history(symbol: str):
-    return {"data": database.get_today_analysis_history(symbol)}
+    start_time, end_time = database.get_trading_session_bounds_for_symbol(symbol)
+    return {
+        "data": database.get_today_analysis_history(symbol),
+        "bounds": {
+            "start": start_time,
+            "end": end_time
+        }
+    }
 
 @app.get("/api/stock/ai_history_all/{symbol}")
 def get_all_ai_history(symbol: str):

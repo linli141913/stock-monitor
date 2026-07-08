@@ -116,16 +116,85 @@ def save_analysis_history(symbol: str, trigger_type: str, plain_english_summary:
     conn.commit()
     conn.close()
 
-def get_trading_session_bounds():
+def get_market_by_symbol(symbol: str) -> str:
+    sym = symbol.lower()
+    if sym.startswith("hk") or (sym.isdigit() and len(sym) == 5):
+        return "hk"
+    return "cn"
+
+def is_trading_day(dt, market="cn"):
+    # dt is a datetime or date object
+    if dt.weekday() >= 5:  # Saturday or Sunday
+        return False
+    
+    date_str = dt.strftime("%Y-%m-%d")
+    
+    # 2026 CN Holidays (A-Share)
+    cn_holidays = {
+        "2026-01-01", "2026-01-02",
+        "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
+        "2026-04-06",
+        "2026-05-01", "2026-05-04", "2026-05-05",
+        "2026-06-19",
+        "2026-09-25",
+        "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07"
+    }
+    
+    # 2026 HK Holidays
+    hk_holidays = {
+        "2026-01-01",
+        "2026-02-17", "2026-02-18", "2026-02-19",
+        "2026-04-03", "2026-04-04", "2026-04-06",
+        "2026-05-01", "2026-05-25",
+        "2026-06-19",
+        "2026-07-01",
+        "2026-09-26",
+        "2026-10-01", "2026-10-19",
+        "2026-12-25", "2026-12-26"
+    }
+    
+    if market == "hk":
+        return date_str not in hk_holidays
+    else:
+        return date_str not in cn_holidays
+
+def get_previous_trading_day(dt, market="cn"):
     from datetime import timedelta
+    prev = dt - timedelta(days=1)
+    while not is_trading_day(prev, market):
+        prev -= timedelta(days=1)
+    return prev
+
+def get_next_trading_day(dt, market="cn"):
+    from datetime import timedelta
+    nxt = dt + timedelta(days=1)
+    while not is_trading_day(nxt, market):
+        nxt += timedelta(days=1)
+    return nxt
+
+def get_trading_session_bounds_for_symbol(symbol: str):
+    from datetime import timedelta
+    market = get_market_by_symbol(symbol)
     now = datetime.now()
     cutoff_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    if now < cutoff_time:
-        start_time = cutoff_time - timedelta(days=1)
-        end_time = cutoff_time
+    
+    today_is_trade = is_trading_day(now, market)
+    
+    if today_is_trade:
+        if now < cutoff_time:
+            prev_trade = get_previous_trading_day(now, market)
+            start_time = prev_trade.replace(hour=15, minute=30, second=0, microsecond=0)
+            end_time = cutoff_time
+        else:
+            next_trade = get_next_trading_day(now, market)
+            start_time = cutoff_time
+            end_time = next_trade.replace(hour=15, minute=30, second=0, microsecond=0)
     else:
-        start_time = cutoff_time
-        end_time = cutoff_time + timedelta(days=1)
+        prev_trade = get_previous_trading_day(now, market)
+        next_trade = get_next_trading_day(now, market)
+        start_time = prev_trade.replace(hour=15, minute=30, second=0, microsecond=0)
+        end_time = next_trade.replace(hour=15, minute=30, second=0, microsecond=0)
+        
     return start_time.isoformat(), end_time.isoformat()
 
 def get_today_analysis_history(symbol: str) -> list:
@@ -133,7 +202,7 @@ def get_today_analysis_history(symbol: str) -> list:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    start_time, end_time = get_trading_session_bounds()
+    start_time, end_time = get_trading_session_bounds_for_symbol(symbol)
     
     cursor.execute('''
     SELECT date, time, timestamp, trigger_type, plain_english_summary, full_json 

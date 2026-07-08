@@ -46,6 +46,27 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [allHistoryList, setAllHistoryList] = useState<HistoryItem[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [fetchingAllHistory, setFetchingAllHistory] = useState(false);
+  const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
+
+  const formatBoundsDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const date = String(d.getDate()).padStart(2, '0');
+      const hours = String(d.getHours()).padStart(2, '0');
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      
+      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const weekday = weekdays[d.getDay()];
+      
+      return `${month}-${date} (${weekday}) ${hours}:${minutes}`;
+    } catch {
+      return '';
+    }
+  };
 
   const fetchHistory = async () => {
     try {
@@ -53,6 +74,9 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       if (res.ok) {
         const json = await res.json();
         setHistoryList(json.data || []);
+        if (json.bounds) {
+          setBounds(json.bounds);
+        }
       }
     } catch (err) {
       console.error('获取历史记录失败', err);
@@ -245,7 +269,14 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       {historyList.length > 0 && (
         <div className={styles.timelineContainer} style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ fontWeight: 'bold', color: '#1e293b' }}>今日盘中追踪时间轴</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 'bold', color: '#1e293b' }}>今日盘中追踪时间轴</span>
+              {bounds && (
+                <span style={{ fontSize: '0.8rem', color: '#475569', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', fontWeight: 500 }}>
+                  分析跨度: {formatBoundsDate(bounds.start)} ~ {formatBoundsDate(bounds.end)}
+                </span>
+              )}
+            </div>
             <button 
               onClick={() => { setShowHistoryModal(true); fetchAllHistory(); }}
               style={{ fontSize: '0.85rem', color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
