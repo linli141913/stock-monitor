@@ -24,7 +24,7 @@ export default function SearchMonitorBar({ onSearch }: Props) {
         <input 
           type="text" 
           className={styles.searchInput}
-          placeholder="输入股票名称 / 代码，例如：深科技 / 000021"
+          placeholder="输入股票名称 / 代码，例如：000725"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}

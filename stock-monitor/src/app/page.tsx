@@ -25,7 +25,7 @@ function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const codeParam = searchParams.get('code');
-  const stockCode = codeParam || '000021';
+  const stockCode = codeParam || '000725';
   
   const [isMounted, setIsMounted] = useState(false);
   const [period, setPeriod] = useState<'day'|'week'|'month'|'year'>('day');
