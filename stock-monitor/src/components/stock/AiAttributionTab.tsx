@@ -478,11 +478,44 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       )}
       
       {showHistoryModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '850px', maxHeight: '90vh', borderRadius: '16px', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div 
+          onClick={() => setShowHistoryModal(false)}
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            background: 'rgba(15, 23, 42, 0.4)', 
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 999, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            padding: '16px' 
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{ 
+              background: 'rgba(255, 255, 255, 0.65)', 
+              backdropFilter: 'blur(20px) saturate(190%)', 
+              WebkitBackdropFilter: 'blur(20px) saturate(190%)',
+              width: '100%', 
+              maxWidth: '850px', 
+              maxHeight: '90vh', 
+              borderRadius: '20px', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              boxShadow: '0 30px 60px -15px rgba(15, 23, 42, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.6)', 
+              border: '1px solid rgba(255, 255, 255, 0.4)',
+              overflow: 'hidden' 
+            }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255, 255, 255, 0.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.15)' }}>
               <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: '#0f172a' }}>{stockCode} 历史深度复盘记录</h3>
-              <button onClick={() => setShowHistoryModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b' }}>&times;</button>
+              <button onClick={() => setShowHistoryModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#475569' }}>&times;</button>
             </div>
             
             {fetchingAllHistory ? (
@@ -490,10 +523,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
             ) : allHistoryList.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#64748b', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>暂无历史记录</div>
             ) : (
-              <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: '450px' }}>
+              <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: '450px', background: 'transparent' }}>
                 
                 {/* Left Column: Calendar */}
-                <div style={{ width: '380px', borderRight: '1px solid #e2e8f0', padding: '20px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                <div style={{ width: '380px', borderRight: '1px solid rgba(255, 255, 255, 0.3)', padding: '20px', display: 'flex', flexDirection: 'column', flexShrink: 0, background: 'transparent' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                     <button 
                       onClick={() => {
@@ -504,7 +537,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                           setCalendarMonth(prev => prev - 1);
                         }
                       }}
-                      style={{ padding: '6px 10px', background: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
+                      style={{ padding: '6px 10px', background: 'rgba(255, 255, 255, 0.4)', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
                     >
                       ◀
                     </button>
@@ -520,7 +553,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                           setCalendarMonth(prev => prev + 1);
                         }
                       }}
-                      style={{ padding: '6px 10px', background: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
+                      style={{ padding: '6px 10px', background: 'rgba(255, 255, 255, 0.4)', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}
                     >
                       ▶
                     </button>
@@ -563,7 +596,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                             fontWeight: isSelected ? 'bold' : cell.isCurrentMonth ? 500 : 'normal',
                             background: isSelected ? '#2563eb' : 'transparent',
                             color: isSelected ? '#ffffff' : cell.isCurrentMonth ? '#334155' : '#cbd5e1',
-                            boxShadow: isSelected ? '0 4px 6px -1px rgba(37, 99, 235, 0.4)' : 'none',
+                            boxShadow: isSelected ? '0 4px 10px rgba(37, 99, 235, 0.4)' : 'none',
                             transition: 'all 0.15s ease'
                           }}
                         >
@@ -588,8 +621,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                 </div>
                 
                 {/* Right Column: Records */}
-                <div style={{ flex: 1, padding: '20px', overflowY: 'auto', background: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                <div style={{ flex: 1, padding: '20px', overflowY: 'auto', background: 'rgba(255, 255, 255, 0.25)', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.3)', paddingBottom: '12px', marginBottom: '16px' }}>
                     <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '1.05rem' }}>
                       {(() => {
                         if (!selectedDateStr) return '';
@@ -602,13 +635,13 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                         }
                       })()}
                     </div>
-                    <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '4px' }}>
+                    <div style={{ color: '#475569', fontSize: '0.8rem', marginTop: '4px' }}>
                       包含前一交易日 15:30 至 {selectedDateStr} 15:30 产生的所有复盘记录
                     </div>
                   </div>
                   
                   {allHistoryList.filter(item => (item as any).target_date === selectedDateStr).length === 0 ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.9rem', textAlign: 'center', padding: '20px', border: '2px dashed #e2e8f0', borderRadius: '12px', background: '#ffffff' }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '0.9rem', textAlign: 'center', padding: '20px', border: '2px dashed rgba(255, 255, 255, 0.5)', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.35)' }}>
                       该日期暂无历史深度复盘记录。<br/>请在左侧日历上选择带有蓝点标记的日期。
                     </div>
                   ) : (
@@ -621,27 +654,29 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                             onClick={() => { handleTimelineClick(item); setShowHistoryModal(false); }}
                             style={{ 
                               padding: '16px', 
-                              border: '1px solid #e2e8f0', 
+                              border: '1px solid rgba(255, 255, 255, 0.4)', 
                               borderRadius: '10px', 
                               cursor: 'pointer', 
-                              background: '#ffffff',
-                              boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                              background: 'rgba(255, 255, 255, 0.75)',
+                              boxShadow: '0 4px 6px -1px rgba(15, 23, 42, 0.05)',
                               transition: 'all 0.2s ease',
                               borderLeft: item.trigger_type === 'manual' ? '4px solid #f59e0b' : '4px solid #3b82f6'
                             }}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = '#cbd5e1';
-                              e.currentTarget.style.transform = 'translateY(-1px)';
-                              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.05)';
+                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)';
+                              e.currentTarget.style.transform = 'translateY(-1.5px)';
+                              e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(15, 23, 42, 0.08)';
                             }}
                             onMouseLeave={(e) => {
-                              e.currentTarget.style.borderColor = '#e2e8f0';
+                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.75)';
                               e.currentTarget.style.transform = 'none';
-                              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+                              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(15, 23, 42, 0.05)';
                             }}
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                              <span style={{ fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>
+                              <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>
                                 {item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})
                               </span>
                               <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: item.trigger_type === 'manual' ? '#fffbeb' : '#eff6ff', color: item.trigger_type === 'manual' ? '#b45309' : '#1d4ed8', fontWeight: 500 }}>
