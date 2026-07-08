@@ -119,3 +119,61 @@ class RealDataFetcher:
         except Exception as e:
             print(f"Error fetching industry news: {e}")
             return "行业资讯获取失败。"
+
+    def get_finance_summary(self, symbol: str) -> str:
+        """Fetch real quarterly finance core indices from EastMoney/EMWeb."""
+        try:
+            import requests
+            secucode = symbol
+            if not ("." in symbol):
+                secucode = f"{symbol}.SH" if symbol.startswith('6') else f"{symbol}.SZ"
+            
+            is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
+            if is_hk:
+                import akshare as ak
+                symbol_pure = symbol.lower().replace("hk", "")
+                df = ak.stock_financial_hk_analysis_indicator_em(symbol=symbol_pure)
+                if df.empty:
+                    return "暂无最新财报财务核心数据。"
+                df = df.fillna(0)
+                reports = df.to_dict('records')
+                summary_lines = []
+                for r in reports[:3]:
+                    date_str = str(r.get("REPORT_DATE", ""))[:10]
+                    rev = r.get("OPERATE_INCOME", 0) or 0
+                    rev_yoy = r.get("OPERATE_INCOME_YOY", 0) or 0
+                    net = r.get("HOLDER_PROFIT", 0) or 0
+                    net_yoy = r.get("HOLDER_PROFIT_YOY", 0) or 0
+                    gross = r.get("GROSS_PROFIT_RATIO", 0) or 0
+                    roe = r.get("ROE_YEARLY", 0) or 0
+                    summary_lines.append(
+                        f"报告期: {date_str}, 营收: {rev:,.0f}元 (同比 {rev_yoy:.2f}%), "
+                        f"归母净利润: {net:,.0f}元 (同比 {net_yoy:.2f}%), "
+                        f"销售毛利率: {gross:.2f}%, ROE: {roe:.2f}%"
+                    )
+                return "\n".join(summary_lines)
+            else:
+                url = f"https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={secucode}"
+                resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3)
+                data = resp.json().get("data", [])
+                if not data:
+                    return "暂无最新财报财务核心数据。"
+                
+                summary_lines = []
+                for r in data[:3]:
+                    date_name = r.get("REPORT_DATE_NAME", "")
+                    rev = r.get("TOTALOPERATEREVE") or 0
+                    rev_yoy = r.get("TOTALOPERATEREVETZ") or 0
+                    net = r.get("PARENTNETPROFIT") or 0
+                    net_yoy = r.get("PARENTNETPROFITTZ") or 0
+                    gross = r.get("XSMLL") or 0
+                    roe = r.get("ROEJQ") or 0
+                    summary_lines.append(
+                        f"报告期: {date_name}, 营收: {rev/100000000.0:.2f}亿元 (同比 {rev_yoy:.2f}%), "
+                        f"归母净利润: {net/100000000.0:.2f}亿元 (同比 {net_yoy:.2f}%), "
+                        f"销售毛利率: {gross:.2f}%, ROE: {roe:.2f}%"
+                    )
+                return "\n".join(summary_lines)
+        except Exception as e:
+            print(f"Error fetching finance summary: {e}")
+            return "财报核心数据获取失败。"

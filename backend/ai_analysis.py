@@ -30,6 +30,34 @@ class AiAttributionResponse(BaseModel):
     credibility: str
     riskNotice: str
 
+CHAIN_MAP = {
+    "000725": {
+        "role": "中游面板制造与组装巨头",
+        "upstream": "偏光片（杉杉股份、三利谱）、玻璃基板（彩虹股份、东旭光电）、液晶材料（八亿时空、万润股份）、光刻胶（容大感光）",
+        "downstream": "智能手机品牌商（华为、苹果、小米、OPPO）、电视整机厂（TCL、海信、创维）、车载显示器终端"
+    },
+    "000519": {
+        "role": "超硬材料（人造金刚石）全球龙头 & 兵工集团军工核心标的",
+        "upstream": "高纯石墨粉（原料）、叶蜡石（合成压机用的传压介质）、金刚石压机设备",
+        "downstream": "半导体划片与精密减薄工具厂商、工业级石材切割锯片/砂轮厂商、培育钻石珠宝首饰渠道商"
+    },
+    "600584": {
+        "role": "半导体先进封测龙头",
+        "upstream": "封测设备（光刻机、贴片机、分选机）、引线框架、环氧塑封料（华海诚科）、晶圆代工厂",
+        "downstream": "汽车芯片、消费电子芯片、AI算力芯片设计厂商（华为海思、联发科等）"
+    },
+    "688126": {
+        "role": "大尺寸半导体硅片供应商",
+        "upstream": "多晶硅原料（通威股份、大全能源）、单晶炉设备、高纯化学气体",
+        "downstream": "晶圆代工厂（中芯国际、华虹半导体、台积电）"
+    },
+    "688981": {
+        "role": "中国大陆集成电路制造晶圆代工龙头",
+        "upstream": "半导体设备（北方华创、中微公司、上海微电子）、半导体硅片材料（沪硅产业）、光刻胶及高纯化学品",
+        "downstream": "芯片设计公司（韦尔股份、紫光国微、兆易创新、华为海思）"
+    }
+}
+
 fetcher = RealDataFetcher()
 
 @router.get("/ai_attribution/{symbol}", response_model=AiAttributionResponse)
@@ -39,6 +67,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
     stock_news = fetcher.get_stock_news(symbol)
     macro_env = fetcher.get_macro_environment()
     industry_news = fetcher.get_industry_news_dehydrated(symbol)
+    finance_summary = fetcher.get_finance_summary(symbol)
     
     # 2. Fetch today's history for memory injection
     history_records = database.get_today_analysis_history(symbol)
@@ -47,8 +76,24 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         history_context = "【今日历史追踪节点】\n"
         for idx, rec in enumerate(history_records):
             history_context += f"- {rec['time']} ({rec['trigger_type']}): {rec['plain_english_summary']}\n"
+            
+    # 3. Handle Industry Chain context
+    chain_info = CHAIN_MAP.get(symbol)
+    if chain_info:
+        chain_context = f"""
+        【产业链上下游映射关系】
+        公司角色：{chain_info['role']}
+        上游供应商与核心原材料：{chain_info['upstream']}
+        下游核心客户与消费终端：{chain_info['downstream']}
+        请你结合上述产业链关系，深度推演上下游对该股今日异动与未来走势的逻辑映射。
+        """
+    else:
+        chain_context = f"""
+        【产业链上下游映射关系】
+        （本股票尚未录入静态产业链映射库，请你作为顶尖行业分析师，根据你自身的知识库自动联网/推演该股票在产业链中的角色、上游供应商和下游核心客户，并融入接下来的归因分析中）
+        """
     
-    # 3. Call AI pipeline
+    # 4. Call AI pipeline
     api_key = os.getenv("LLM_API_KEY", "").strip()
     if not api_key:
         return {
@@ -85,18 +130,23 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         行业核心事件精选（百条脱水提纯）：{industry_news}
         宏观与海外环境：{macro_env}
         
+        【公司基本面核心财务摘要（最近3个报告期）】
+        {finance_summary}
+        
+        {chain_context}
+        
         {history_context}
         
         【深度分析双引擎指令】
         必须严格按以下两个层次进行深度思考并输出内容：
         
         第一层：【今日复盘总结】（陈述事实与逻辑映射）
-        结合盘口的量价表现、资金流向，以及上述“个股定向新闻”和“行业脱水事件”，精准复盘“今天这只股票为什么会走出这样的形态”。不要流水账式复述新闻，要点出核心驱动力（是情绪错杀，还是基本面共振？）。
+        结合盘口的量价表现、资金流向，以及上述“个股定向新闻”和“行业脱水事件”，精准复盘“今天这只股票为什么会走出这样的形态”。不要流水账式复述新闻，要点出核心驱动力（是情绪错杀，还是基本面/产业链/财务层面的多重共振？）。
         必须在分析中带出信息出处，使用严谨的 Markdown 超链接，如：`<br/>[来源: 新浪财经](url)`。
         
         第二层：【未来走势深度分析】（以基本面为主，技术面为辅）
         请利用机构投研思维推演，严禁说套话！
-        基于今天发生的大事件和盘口情绪，推导明天或下周可能的资金进攻方向。如果有利好，预期能发酵到什么程度？如果有大跌，下方的逻辑支撑在哪里？有何致命风险？
+        基于公司最新季度财报表现（如毛利率变化趋势、扣非利润增速等）、产业链上下游影响以及今天盘口情绪，推导明天或下周可能的资金进攻方向。如果有利好，预期能发酵到什么程度？如果有大跌，下方的逻辑支撑在哪里？有何致命风险？
         
         【极简要求】
         第三层：【极简通俗总结】
@@ -111,10 +161,10 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             "evidenceChain": {{
                 "technicalAndSentiment": "【量价与情绪面】用精炼语言剖析当天的量价异动...",
                 "fundFactor": "【资金面博弈】洞察主力资金真实意图...",
-                "fundamentalAndNews": "【基本面与资讯】把今日复盘总结写在这里，深度解读脱水资讯对股价的催化作用(务必附带链接)...",
-                "sectorAndMacro": "【板块与宏观共振】一针见微指出板块协同与全球宏观映射..."
+                "fundamentalAndNews": "【基本面与资讯】把今日复盘总结写在这里，结合最新的核心财报表现和新闻，深度解读对股价的催化作用(务必附带链接)...",
+                "sectorAndMacro": "【板块与宏观共振】结合产业链上下游传导关系，一针见微指出板块协同与全球宏观映射..."
             }},
-            "futureTrendPrediction": "【未来走势深度分析】写在这里，给出具有投研深度的短中期推演，不要模棱两可。",
+            "futureTrendPrediction": "【未来走势深度分析】结合公司核心财报趋势与产业链关系写在这里，给出具有投研深度的短中期推演，不要模棱两可。",
             "plainEnglishSummary": "用50~100字通俗易懂地讲清楚今天到底发生了什么，主力在干嘛，以及对接下来的操作建议，开头不要带任何括号或前缀标题。",
             "aiJudgment": "【一针见血】的最终综合诊断结论。",
             "credibility": "高 / 中 / 低",

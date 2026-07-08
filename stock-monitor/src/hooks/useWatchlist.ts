@@ -99,8 +99,8 @@ export function useWatchlist() {
   const addToWatchlist = useCallback((stockCode: string, stockName: string) => {
     setWatchlist(prev => {
       if (prev.find(i => i.stockCode === stockCode)) return prev;
-      if (prev.length >= 5) {
-        alert("监控列表最多只能添加 5 只股票哦！");
+      if (prev.length >= 10) {
+        alert("监控列表最多只能添加 10 只股票哦！");
         return prev;
       }
       const next = [...prev, { stockCode, stockName, addedAt: new Date().toISOString() }];

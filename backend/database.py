@@ -55,13 +55,13 @@ def get_watchlist():
     return results
 
 def add_to_watchlist(symbol: str) -> bool:
-    """添加股票到监测列表，如果已满 5 个则返回 False"""
+    """添加股票到监测列表，如果已满 10 个则返回 False"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM watchlist")
     count = cursor.fetchone()[0]
     
-    if count >= 5:
+    if count >= 10:
         # 检查是否已经在里面
         cursor.execute("SELECT symbol FROM watchlist WHERE symbol=?", (symbol,))
         if not cursor.fetchone():
@@ -82,12 +82,12 @@ def remove_from_watchlist(symbol: str):
     conn.close()
     
 def replace_watchlist(items: list) -> bool:
-    """全量替换监测列表，超过 5 只直接截断"""
+    """全量替换监测列表，超过 10 只直接截断"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM watchlist")
     
-    limited_items = items[:5]
+    limited_items = items[:10]
     for item in limited_items:
         sym = item.get("stockCode", "")
         name = item.get("stockName", "")
