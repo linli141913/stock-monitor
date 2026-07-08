@@ -84,7 +84,7 @@ export default function WatchlistPage() {
   }, [watchlist, fetchLiveData]);
 
   const handleRowClick = (stockCode: string) => {
-    router.push(`/?code=${stockCode}`);
+    window.location.href = `/?code=${stockCode}`;
   };
 
   const handleRemove = (e: React.MouseEvent, stockCode: string) => {

@@ -50,7 +50,7 @@ function HomeContent() {
   const handleSearch = (keyword: string) => {
     const trimmed = keyword.trim();
     if (trimmed) {
-      router.push(`/?code=${trimmed}`);
+      window.location.href = `/?code=${trimmed}`;
     } else {
       alert('请输入股票名称或代码，如：平安银行 / 000001');
     }
