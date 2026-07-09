@@ -301,7 +301,7 @@ def get_all_analysis_history(symbol: str) -> list:
 
 
 def get_cached_dynamics(symbol: str) -> dict:
-    """获取缓存的行业动态新闻及时间，如果不存在或超过 1 小时则返回 None"""
+    """获取缓存的行业动态新闻及时间，如果不存在或超过 10 分钟则返回 None"""
     import time
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -311,7 +311,7 @@ def get_cached_dynamics(symbol: str) -> dict:
     conn.close()
     if row:
         last_updated, news_json = row
-        if time.time() - last_updated < 3600:
+        if time.time() - last_updated < 600:
             try:
                 return json.loads(news_json)
             except:

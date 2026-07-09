@@ -61,7 +61,10 @@ function HomeContent() {
     if (!isSilent) setOverviewLoading(true);
     setOverviewError('');
     try {
-      const res = await fetch(`${API_BASE}/api/stock/overview/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(`${API_BASE}/api/stock/overview/${stockCode}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `行情请求失败 (${res.status})`);
@@ -96,7 +99,7 @@ function HomeContent() {
         const strippedBackend = data.code.toLowerCase().replace(/^(sh|sz|hk|bj)/, '');
         const strippedFront = stockCode.toLowerCase().replace(/^(sh|sz|hk|bj)/, '');
         if (strippedBackend !== strippedFront && data.name !== stockCode) {
-          router.push(`/?code=${data.code.toLowerCase()}`);
+          window.location.href = `/?code=${data.code.toLowerCase()}`;
         }
       }
 
@@ -129,7 +132,10 @@ function HomeContent() {
     setKlineLoading(true);
     setKlineError('');
     try {
-      const res = await fetch(`${API_BASE}/api/stock/kline/${stockCode}?period=${period}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(`${API_BASE}/api/stock/kline/${stockCode}?period=${period}&_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `K 线请求失败 (${res.status})`);
@@ -151,7 +157,10 @@ function HomeContent() {
   // ── 获取公司信息和公告 ─────────────────────
   const fetchCompanyInfo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/stock/company/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(`${API_BASE}/api/stock/company/${stockCode}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (res.ok) {
         const data = await res.json();
         setCompanyData(data);
@@ -164,7 +173,9 @@ function HomeContent() {
   // ── 获取自建的新浪财经新闻 (方案A) ─────────────────────
   const fetchGlobalNews = useCallback(async () => {
     try {
-      const res = await fetch(`/api/news?num=30`);
+      const res = await fetch(`/api/news?num=30&_t=${Date.now()}`, {
+        cache: 'no-store'
+      });
       if (res.ok) {
         const json = await res.json();
         setGlobalNews(json.data || []);
@@ -180,7 +191,10 @@ function HomeContent() {
   // ── 批量获取相关股票真实价格 ─────────────────────
   const fetchRelatedPrices = useCallback(async (sym: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/stock/related/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(`${API_BASE}/api/stock/related/${sym}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) {
@@ -197,11 +211,17 @@ function HomeContent() {
   // ── 获取行业资金与异常推荐 ─────────────────────
   const fetchIndustryAndPeers = useCallback(async (sym: string) => {
     try {
-      const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (res1.ok) {
         setIndustryMonitorData(await res1.json());
       }
-      const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store'
+      });
       if (res2.ok) {
         const json2 = await res2.json();
         let fetchedData = json2.data || [];
