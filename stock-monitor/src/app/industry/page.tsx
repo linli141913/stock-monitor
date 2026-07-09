@@ -3,7 +3,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
 
 import { useState, useEffect } from 'react';
-import { Activity, ArrowUp } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import styles from './page.module.css';
 import RadarNewsCard, { RadarNews } from '@/components/industry/RadarNewsCard';
 
@@ -22,23 +22,6 @@ export default function IndustryInsightPage() {
   const [newsList, setNewsList] = useState<RadarNews[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showScroll, setShowScroll] = useState(false);
-
-  useEffect(() => {
-    const checkScrollTop = () => {
-      if (!showScroll && window.pageYOffset > 300) {
-        setShowScroll(true);
-      } else if (showScroll && window.pageYOffset <= 300) {
-        setShowScroll(false);
-      }
-    };
-    window.addEventListener('scroll', checkScrollTop);
-    return () => window.removeEventListener('scroll', checkScrollTop);
-  }, [showScroll]);
-
-  const scrollTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const fetchNews = async (tabId: string, isSilent = false) => {
     if (!isSilent) setLoading(true);
@@ -103,13 +86,6 @@ export default function IndustryInsightPage() {
             <RadarNewsCard key={news.id} news={news} />
           ))}
         </div>
-      )}
-
-      {showScroll && (
-        <button className={styles.scrollTopBtn} onClick={scrollTop} title="返回顶部">
-          <ArrowUp size={16} />
-          <span>置顶</span>
-        </button>
       )}
     </div>
   );

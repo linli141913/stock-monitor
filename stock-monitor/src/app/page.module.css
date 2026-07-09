@@ -76,35 +76,3 @@
   }
 }
 
-.scrollTopBtn {
-  position: fixed;
-  top: 100px;
-  right: 40px;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px; /* Square block! */
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #3b82f6;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 1000;
-  transition: all 0.2s ease;
-  font-size: 11px;
-  font-weight: 600;
-  gap: 2px;
-}
-
-.scrollTopBtn:hover {
-  background: rgba(255, 255, 255, 0.9);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.2);
-}
-
-
