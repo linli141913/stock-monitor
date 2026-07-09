@@ -516,8 +516,17 @@ def fetch_hk_announcements(symbol_pure):
         print("HK announcement fetch error:", e)
     return announcements
 
+_company_info_cache = {}
+
 @app.get("/api/stock/company/{symbol}")
 def get_company_info(symbol: str):
+    import time
+    now = time.time()
+    if symbol in _company_info_cache:
+        ts, cached_data = _company_info_cache[symbol]
+        if now - ts < 43200:  # 12 hours
+            return cached_data
+
     import akshare as ak
     symbol_pure = symbol.lower().replace("hk", "")
     is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
@@ -690,12 +699,14 @@ def get_company_info(symbol: str):
     except Exception:
         pass
 
-    return {
+    res = {
         "companyInfo": company_info,
         "announcements": announcements,
         "financialData": financial_data,
         "news": []
     }
+    _company_info_cache[symbol] = (now, res)
+    return res
 
 from ai_analysis import fetch_real_industry_dynamics
 

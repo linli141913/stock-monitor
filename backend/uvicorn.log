@@ -1,6 +1,21 @@
 INFO:     Will watch for changes in these directories: ['/Volumes/HermesSSD/AntigravityData/量化监测-股票/backend']
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-INFO:     Started reloader process [30602] using StatReload
-INFO:     Started server process [30604]
+INFO:     Started reloader process [30970] using StatReload
+INFO:     Started server process [30972]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+后台自动化追踪与资讯采集调度器已启动。
+[2026-07-09 12:46:24.806834] 触发定时多源资讯采集任务...
+[2026-07-09T12:46:24.829456] Starting news collection pipeline...
+Fetching Sina Roll News...
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000002?_t=1783572383685 HTTP/1.1" 200 OK
+Failed to fetch ulist flow for top6 ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000002?_t=1783572383685 HTTP/1.1" 200 OK
+Fetching EastMoney Research Reports...
+  0%|          | 0/3 [00:00<?, ?it/s] 67%|██████▋   | 2/3 [00:00<00:00, 11.58it/s]                                             Fetching Cninfo: 行业公告关键词 (半导体)...
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000002?_t=1783572388684 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000002?_t=1783572388685 HTTP/1.1" 200 OK
+Failed to fetch real fund flow for overview: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000002?_t=1783572388684 HTTP/1.1" 200 OK
+Failed to fetch ulist flow for top6 ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000002?_t=1783572388685 HTTP/1.1" 200 OK
