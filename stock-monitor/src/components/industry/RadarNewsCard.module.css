@@ -238,4 +238,16 @@
   border-color: rgba(149, 165, 166, 0.25);
 }
 
+.sourceHkex {
+  background-color: rgba(26, 188, 156, 0.08);
+  color: #16a085;
+  border-color: rgba(26, 188, 156, 0.25);
+}
+
+.sourceHkRoll {
+  background-color: rgba(46, 204, 113, 0.08);
+  color: #27ae60;
+  border-color: rgba(46, 204, 113, 0.25);
+}
+
 

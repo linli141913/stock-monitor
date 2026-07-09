@@ -36,6 +36,10 @@ export default function RadarNewsCard({ news }: Props) {
   const isVerified = news.ai_verification_status.includes('✅');
 
   const getSourceClass = (source: string) => {
+    if (source.includes('港交所')) return styles.sourceHkex;
+    if (source.includes('港股快讯') || source.includes('港股')) return styles.sourceHkRoll;
+    if (source.includes('上交所')) return styles.sourceCls; // 上海证券交易所 (红色系)
+    if (source.includes('深交所')) return styles.sourceEastmoney; // 深圳证券交易所 (蓝色系)
     if (source.includes('巨潮')) return styles.sourceCninfo;
     if (source.includes('财联社')) return styles.sourceCls;
     if (source.includes('东财') || source.includes('东方财富') || source.includes('研报')) return styles.sourceEastmoney;

@@ -140,13 +140,13 @@ def get_real_news_from_db(category: str) -> List[dict]:
                 publish_time = "刚刚"
                 
             # 自动映射可信度
-            if source in ["巨潮公告", "上交所", "深交所"]:
+            if source in ["巨潮公告", "上交所", "深交所", "上交所公告", "深交所公告", "北交所公告", "港交所公告", "交易所公告"]:
                 cred = "S"
                 verify_status = "✅ 官方信息源，真实公告直连"
             elif "研报" in source or "证券" in source or "基金" in source:
                 cred = "A"
                 verify_status = "✅ 机构深度研报，权威投研参考"
-            elif source in ["新浪财经", "财联社电报", "市场资讯"]:
+            elif source in ["新浪财经", "财联社电报", "市场资讯", "港股快讯"]:
                 cred = "B"
                 verify_status = "✅ 主流财经媒体，多源交叉印证"
             else:

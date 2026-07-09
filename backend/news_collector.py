@@ -276,6 +276,58 @@ def exists_in_database(news_id: str) -> bool:
     except:
         return False
 
+def fetch_sina_hk_news() -> list:
+    """从新浪财经滚动接口抓取最新港股快讯和交易所公告"""
+    url = "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&num=50&page=1"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/"
+    }
+    results = []
+    try:
+        time.sleep(1.5)  # 强制限速
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"Error fetching Sina HK news: HTTP {resp.status_code}")
+            return []
+            
+        data = resp.json()
+        items = data.get("result", {}).get("data", [])
+        for item in items:
+            title = item.get("title", "")
+            link = item.get("url", "")
+            intro = item.get("intro", "") or item.get("summary", "") or ""
+            ctime_raw = item.get("ctime")
+            media_name = item.get("media_name", "港股快讯")
+            
+            if not title or not link:
+                continue
+                
+            # 如果标题或媒体名包含特定公告或增减持、派息关键字，打标为“港交所公告”
+            source = media_name
+            if any(k in title for k in ["公告", "业绩预告", "分红", "派息", "除权", "增持", "减持", "招股", "董事会", "股份购买"]):
+                source = "港交所公告"
+            elif source == "新浪财经" or source == "港股快讯" or source == "新浪港股":
+                source = "港股快讯"
+                
+            ctime = int(ctime_raw) if ctime_raw else int(time.time())
+            
+            results.append({
+                "id": md5_hash(link),
+                "symbol": "",
+                "title": title,
+                "url": link,
+                "ctime": ctime,
+                "source": source,
+                "content": clean_html(intro)[:200],
+                "category": "industry"
+            })
+            
+    except Exception as e:
+        print(f"Error parsing Sina HK news: {e}")
+        
+    return results
+
 def run_collection():
     """多源资讯采集总调度口"""
     print(f"[{datetime.now().isoformat()}] Starting news collection pipeline...")
@@ -299,10 +351,30 @@ def run_collection():
         code = item.get("stockCode")
         name = item.get("stockName")
         if code:
-            print(f"Fetching Cninfo: 个股公告 ({name} / {code})...")
-            aggregated.extend(fetch_cninfo_announcements(code, code))
+            # A股公告抓取 (代码以 0, 3, 6, 8 等开头且长度为6)
+            if len(code) == 6:
+                print(f"Fetching Cninfo: 个股公告 ({name} / {code})...")
+                aggregated.extend(fetch_cninfo_announcements(code, code))
             
-    # 4. 入库保存
+    # 4. 抓取港股及港交所资讯
+    print("Fetching Sina HK Stock News...")
+    hk_news = fetch_sina_hk_news()
+    
+    # 关联港股自选股 (自选股代码长度为 5，如 00700)
+    for item in hk_news:
+        for w_item in watchlist:
+            code = w_item.get("stockCode", "")
+            name = w_item.get("stockName", "")
+            if code and len(code) == 5 and name:
+                # 模糊名字匹配 (例如 "腾讯" 匹配 "腾讯控股股价...")
+                short_name = name.replace("A", "").replace("B", "").replace("H", "").replace(" ", "")
+                if len(short_name) >= 2 and short_name[:2] in item["title"]:
+                    item["symbol"] = code
+                    print(f"Mapped HK news to watchlist item: {name} ({code}) -> {item['title']}")
+                    break
+    aggregated.extend(hk_news)
+            
+    # 5. 入库保存
     if aggregated:
         print(f"Saving {len(aggregated)} aggregated news items to SQLite database...")
         database.save_crawled_news(aggregated)
