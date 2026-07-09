@@ -43,6 +43,7 @@ function HomeContent() {
   const [klineError, setKlineError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [globalNews, setGlobalNews] = useState<any[]>([]);
+  const [industryLoading, setIndustryLoading] = useState(false);
 
   const autoRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -210,6 +211,7 @@ function HomeContent() {
 
   // ── 获取行业资金与异常推荐 ─────────────────────
   const fetchIndustryAndPeers = useCallback(async (sym: string) => {
+    setIndustryLoading(true);
     try {
       const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}?_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
@@ -229,6 +231,8 @@ function HomeContent() {
       }
     } catch (err) {
       console.error('Failed to fetch industry/peers', err);
+    } finally {
+      setIndustryLoading(false);
     }
   }, []);
 
@@ -300,6 +304,7 @@ function HomeContent() {
               data={overviewData}
               lastRefresh={lastRefresh}
               onRefresh={() => fetchOverview(false)}
+              onWatchlistToggle={() => fetchIndustryAndPeers(stockCode)}
             />
           )}
 
@@ -330,10 +335,13 @@ function HomeContent() {
 
         {/* 右侧侧栏 */}
         <div className={styles.rightCol}>
-          <IndustryMonitorCard data={{
-             ...industryMonitorData,
-             industryName: companyData?.companyInfo?.industryTags?.length > 0 ? companyData.companyInfo.industryTags[0] : industryMonitorData.industryName
-          }} />
+          <IndustryMonitorCard 
+            data={{
+               ...industryMonitorData,
+               industryName: companyData?.companyInfo?.industryTags?.length > 0 ? companyData.companyInfo.industryTags[0] : industryMonitorData.industryName
+            }} 
+            loading={industryLoading}
+          />
           <RelatedStocksCard data={relatedStocks} onStockClick={handleSearch} />
           {(() => {
             const relatedCodes = new Set(relatedStocks.map((r: any) => r.stockCode));

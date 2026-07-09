@@ -5,9 +5,10 @@ import styles from './IndustryMonitorCard.module.css';
 
 interface Props {
   data: IndustryMonitor;
+  loading?: boolean;
 }
 
-export default function IndustryMonitorCard({ data }: Props) {
+export default function IndustryMonitorCard({ data, loading }: Props) {
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
 
@@ -54,6 +55,28 @@ export default function IndustryMonitorCard({ data }: Props) {
       </div>
     );
   };
+
+  if (loading) {
+    return (
+      <div className={styles.card}>
+        <div className={styles.header}>
+          <div className={styles.titleArea}>
+            <BarChart3 className={styles.icon} size={20} />
+            <h2 className={styles.title}>行业监测</h2>
+          </div>
+          <div className={styles.loadingText}>
+            <div className={styles.spinner} />
+            <span>AI 分析中...</span>
+          </div>
+        </div>
+        <div className={styles.loadingContainer}>
+          <div className={styles.skeletonRow} style={{ width: '80%' }} />
+          <div className={styles.skeletonRow} style={{ width: '100%' }} />
+          <div className={styles.skeletonRow} style={{ width: '90%' }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.card}>

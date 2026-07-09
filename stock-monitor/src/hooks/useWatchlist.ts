@@ -81,41 +81,42 @@ export function useWatchlist() {
   }, []);
 
   // 写入 localStorage 并同步到后台
-  const persist = (list: WatchlistItem[]) => {
+  const persist = (list: WatchlistItem[]): Promise<any> => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
       // 同步到后台 API
-      fetch(`${API_BASE}/api/watchlist`, {
+      return fetch(`${API_BASE}/api/watchlist`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify({ items: list })
-      }).catch(err => console.error("同步后台失败", err));
-    } catch {}
+      }).catch(err => {
+        console.error("同步后台失败", err);
+        return null;
+      });
+    } catch {
+      return Promise.resolve(null);
+    }
   };
 
-  const addToWatchlist = useCallback((stockCode: string, stockName: string) => {
-    setWatchlist(prev => {
-      if (prev.find(i => i.stockCode === stockCode)) return prev;
-      if (prev.length >= 10) {
-        alert("监控列表最多只能添加 10 只股票哦！");
-        return prev;
-      }
-      const next = [...prev, { stockCode, stockName, addedAt: new Date().toISOString() }];
-      persist(next);
-      return next;
-    });
-  }, []);
+  const addToWatchlist = useCallback((stockCode: string, stockName: string): Promise<any> => {
+    if (watchlist.find(i => i.stockCode === stockCode)) return Promise.resolve(null);
+    if (watchlist.length >= 10) {
+      alert("监控列表最多只能添加 10 只股票哦！");
+      return Promise.resolve(null);
+    }
+    const next = [...watchlist, { stockCode, stockName, addedAt: new Date().toISOString() }];
+    setWatchlist(next);
+    return persist(next);
+  }, [watchlist]);
 
-  const removeFromWatchlist = useCallback((stockCode: string) => {
-    setWatchlist(prev => {
-      const next = prev.filter(i => i.stockCode !== stockCode);
-      persist(next);
-      return next;
-    });
-  }, []);
+  const removeFromWatchlist = useCallback((stockCode: string): Promise<any> => {
+    const next = watchlist.filter(i => i.stockCode !== stockCode);
+    setWatchlist(next);
+    return persist(next);
+  }, [watchlist]);
 
   const isInWatchlist = useCallback((stockCode: string) => {
     return watchlist.some(i => i.stockCode === stockCode);

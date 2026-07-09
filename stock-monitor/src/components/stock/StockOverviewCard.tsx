@@ -6,9 +6,10 @@ interface Props {
   data: StockOverview;
   lastRefresh?: Date | null;
   onRefresh?: () => void;
+  onWatchlistToggle?: () => void;
 }
 
-export default function StockOverviewCard({ data, lastRefresh, onRefresh }: Props) {
+export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatchlistToggle }: Props) {
   const isRise = data.changeAmount > 0;
   const isFall = data.changeAmount < 0;
   const priceColorClass = isRise ? 'text-rise' : isFall ? 'text-fall' : '';
@@ -17,11 +18,15 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh }: Prop
   const watched = isInWatchlist(data.stockCode);
 
   const toggleWatchlist = () => {
-    if (watched) {
-      removeFromWatchlist(data.stockCode);
-    } else {
-      addToWatchlist(data.stockCode, data.stockName);
-    }
+    const action = watched 
+      ? removeFromWatchlist(data.stockCode) 
+      : addToWatchlist(data.stockCode, data.stockName);
+      
+    action.then(() => {
+      if (onWatchlistToggle) {
+        onWatchlistToggle();
+      }
+    });
   };
 
   return (
