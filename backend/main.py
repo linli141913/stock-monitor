@@ -135,7 +135,7 @@ def get_em_data(url: str, timeout: int = 3) -> requests.Response:
         "Referer": "https://quote.eastmoney.com/",
         "Host": "push2.eastmoney.com"
     }
-    return requests.get(url, headers=headers, timeout=timeout, proxies={})
+    return requests.get(url, headers=headers, timeout=timeout, proxies={"http": None, "https": None})
 
 
 def calc_ma(closes: list[float], window: int) -> list:
