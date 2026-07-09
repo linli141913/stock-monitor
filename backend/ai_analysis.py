@@ -163,7 +163,7 @@ def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
         import json
         res = json.loads(content_res)
         
-        # 写入数据库持久缓存，10分钟内定死，不再消耗大模型 token
+        # 写入数据库持久缓存，一小时内定死，不再消耗大模型 token
         database.save_cached_dynamics(symbol, res)
         return res
     except Exception as e:
