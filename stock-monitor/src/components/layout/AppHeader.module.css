@@ -100,34 +100,35 @@
   }
 }
 
-/* 回到置顶按钮 - 内嵌在导航栏右侧 */
+/* 回到置顶按钮 - 内嵌在导航栏右侧，常驻显示 */
 .scrollTopBtn {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
   border-radius: 6px;
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  color: var(--color-primary);
+  /* 默认：灰色，不可点击 */
+  background: rgba(156, 163, 175, 0.08);
+  border: 1px solid rgba(156, 163, 175, 0.25);
+  color: #9ca3af;
   font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
-  /* 默认隐藏，往右缩进并透明 */
-  opacity: 0;
-  transform: translateX(12px);
   pointer-events: none;
-  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
-.scrollTopBtn.visible {
-  opacity: 1;
-  transform: translateX(0);
+/* 激活态：蓝色，可点击 */
+.scrollTopBtn.active {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+  color: var(--color-primary);
+  cursor: pointer;
   pointer-events: auto;
 }
 
-.scrollTopBtn:hover {
+.scrollTopBtn.active:hover {
   background: rgba(37, 99, 235, 0.15);
   border-color: rgba(37, 99, 235, 0.4);
 }

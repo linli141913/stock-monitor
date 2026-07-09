@@ -54,9 +54,9 @@ export default function AppHeader() {
             );
           })}
           
-          {/* 回到置顶按钮 */}
+          {/* 回到置顶按钮 - 常驻显示，滑动后激活 */}
           <button 
-            className={`${styles.scrollTopBtn} ${showScroll ? styles.visible : ''}`}
+            className={`${styles.scrollTopBtn} ${showScroll ? styles.active : ''}`}
             onClick={scrollTop}
             title="回到置顶"
           >
