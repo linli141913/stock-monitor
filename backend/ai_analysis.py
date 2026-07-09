@@ -58,11 +58,12 @@ CHAIN_MAP = {
     }
 }
 
-def fetch_real_industry_dynamics(symbol: str, industry_name: str) -> dict:
+def fetch_real_industry_dynamics(symbol: str, industry_name: str, force_refresh: bool = False) -> dict:
     # 优先从 SQLite 数据库缓存中读取，保证 1 小时内完全定死且支持多 worker 共享
-    cached = database.get_cached_dynamics(symbol)
-    if cached:
-        return cached
+    if not force_refresh:
+        cached = database.get_cached_dynamics(symbol)
+        if cached:
+            return cached
 
     import time
     from datetime import datetime

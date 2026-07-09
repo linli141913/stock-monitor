@@ -1,21 +1,188 @@
 INFO:     Will watch for changes in these directories: ['/Volumes/HermesSSD/AntigravityData/量化监测-股票/backend']
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-INFO:     Started reloader process [30970] using StatReload
-INFO:     Started server process [30972]
+INFO:     Started reloader process [32912] using StatReload
+INFO:     Started server process [32914]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 后台自动化追踪与资讯采集调度器已启动。
-[2026-07-09 12:46:24.806834] 触发定时多源资讯采集任务...
-[2026-07-09T12:46:24.829456] Starting news collection pipeline...
+[2026-07-09 13:59:16.044670] 触发定时多源资讯采集任务...
+[2026-07-09 13:59:16.044789] 触发后台自动更新行业与政策监控任务...
+[2026-07-09T13:59:16.061806] Starting news collection pipeline...
 Fetching Sina Roll News...
-INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000002?_t=1783572383685 HTTP/1.1" 200 OK
-Failed to fetch ulist flow for top6 ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
-INFO:     203.10.99.42:0 - "GET /api/stock/related/000002?_t=1783572383685 HTTP/1.1" 200 OK
+[2026-07-09 13:59:16.393278] 开始自动更新 000725 (光学光电子) 行业动态...
 Fetching EastMoney Research Reports...
-  0%|          | 0/3 [00:00<?, ?it/s] 67%|██████▋   | 2/3 [00:00<00:00, 11.58it/s]                                             Fetching Cninfo: 行业公告关键词 (半导体)...
-INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000002?_t=1783572388684 HTTP/1.1" 200 OK
-INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000002?_t=1783572388685 HTTP/1.1" 200 OK
+  0%|          | 0/3 [00:00<?, ?it/s] 67%|██████▋   | 2/3 [00:00<00:00, 10.53it/s]                                             Fetching Cninfo: 行业公告关键词 (半导体)...
+Fetching Cninfo: 个股公告 (京东方Ａ / 000725)...
+Fetching Cninfo: 个股公告 (中兵红箭 / 000519)...
+Fetching Cninfo: 个股公告 (深科技 / 000021)...
+Fetching Cninfo: 个股公告 (平安银行 / 000001)...
+Fetching Cninfo: 个股公告 (万  科Ａ / 000002)...
+Fetching Sina HK Stock News...
+Saving 140 aggregated news items to SQLite database...
+News collection pipeline completed successfully.
+[2026-07-09 13:59:49.374438] 000725 行业动态更新完成。
+[2026-07-09 13:59:49.660928] 开始自动更新 000519 (专用设备) 行业动态...
+[2026-07-09 14:00:24.775980] 000519 行业动态更新完成。
+[2026-07-09 14:00:25.284162] 开始自动更新 09863 (汽车) 行业动态...
+[2026-07-09 14:00:52.018838] 09863 行业动态更新完成。
+[2026-07-09 14:00:52.331922] 开始自动更新 000021 (消费电子) 行业动态...
+[2026-07-09 14:01:25.081272] 000021 行业动态更新完成。
+[2026-07-09 14:01:25.374118] 开始自动更新 000001 (银行) 行业动态...
+[2026-07-09 14:01:59.727821] 000001 行业动态更新完成。
+[2026-07-09 14:02:00.016837] 开始自动更新 000002 (房地产) 行业动态...
+[2026-07-09 14:02:19.979530] 000002 行业动态更新完成。
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576756215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576756214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576761215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576761215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576766214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576766214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576771214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576771214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576776214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576776214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576781214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576781213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576786214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576786214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576791214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576791214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576796214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576796215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576801214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576801214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576806213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576806213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576811214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576811214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576816214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576816214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576821214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576821214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576826214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576826214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576831215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576831215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576836214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576836214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576841214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576841215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576846213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576846214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576851213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576851213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576856214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576856215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576861215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576861215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576866214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576866215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576871214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576871214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576876214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576876215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576881214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576881214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576886215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576886215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576891215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576891215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576896215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576896215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576901214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576901214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576906214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576906215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576911214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576911215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576916215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576916215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576921215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576921215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576926215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576926215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576931214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576931214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576936214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576936215 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62261 - "GET /api/stock/industry/000725 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576761215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576756214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576756215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576761215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576786214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576766214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576771214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576771214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576826214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576821214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576791214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576836214 HTTP/1.1" 200 OK
 Failed to fetch real fund flow for overview: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
-INFO:     203.10.99.42:0 - "GET /api/stock/overview/000002?_t=1783572388684 HTTP/1.1" 200 OK
-Failed to fetch ulist flow for top6 ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
-INFO:     203.10.99.42:0 - "GET /api/stock/related/000002?_t=1783572388685 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576781213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576786214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576851213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576806213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576766214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576801214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576841214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576876214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576811214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576776214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576816214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576796214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576916215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576796215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576901214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576801214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576776214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576846214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576871214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576916215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576831215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576826214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576851213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576856214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576861215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576806213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576881214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576846213 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576936215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576781214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576906215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576881214 HTTP/1.1" 200 OK
+Failed to fetch real fund flow for overview: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576886215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576811214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576791214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576931214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576891215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576901214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576856215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576911215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576831215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576931214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576866214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576836214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576871214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576886215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576821214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576861215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576866215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576906214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576921215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576926215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576936214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576896215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576891215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576921215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576926215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576876215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576911214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576816214 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576841215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576896215 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/related/000519?_t=1783576941218 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "OPTIONS /api/stock/overview/000519?_t=1783576941218 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/related/000519?_t=1783576941218 HTTP/1.1" 200 OK
+INFO:     203.10.99.42:0 - "GET /api/stock/overview/000519?_t=1783576941218 HTTP/1.1" 200 OK

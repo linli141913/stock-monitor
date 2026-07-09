@@ -1,9 +1,6 @@
 import os
-os.environ['http_proxy'] = ''
-os.environ['https_proxy'] = ''
-os.environ['NO_PROXY'] = '*'
-import urllib.request
-urllib.request.getproxies = lambda: {}
+# 只针对本地回环地址绕过代理，保证本地定时任务不报错；外部接口使用系统代理保证网络畅通
+os.environ['NO_PROXY'] = 'localhost,127.0.0.1,127.0.0.1:8001,localhost:8001'
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,13 +59,35 @@ async def auto_analyze_watchlist():
         except Exception as e:
             print(f"[{datetime.now()}] {symbol} 自动分析失败: {e}")
 
+async def auto_update_watchlist_industry():
+    print(f"[{datetime.now()}] 触发后台自动更新行业与政策监控任务...")
+    items = database.get_watchlist()
+    for item in items:
+        symbol = item.get("stockCode")
+        if not symbol: continue
+        try:
+            # 获取所属行业名称
+            company_data = get_company_info(symbol)
+            industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
+            industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else "半导体"
+            
+            print(f"[{datetime.now()}] 开始自动更新 {symbol} ({industry_name}) 行业动态...")
+            # 强制刷新缓存
+            fetch_real_industry_dynamics(symbol, industry_name, force_refresh=True)
+            print(f"[{datetime.now()}] {symbol} 行业动态更新完成。")
+        except Exception as e:
+            print(f"[{datetime.now()}] {symbol} 自动更新行业动态失败: {e}")
+
 @app.on_event("startup")
 def start_scheduler():
     scheduler = AsyncIOScheduler()
-    # 启动时立即异步拉取一次新闻
+    # 启动时立即异步拉取一次新闻与行业监控大模型数据
     scheduler.add_job(auto_collect_news, 'date', run_date=datetime.now())
-    # 随后每 30 分钟拉取一次
+    scheduler.add_job(auto_update_watchlist_industry, 'date', run_date=datetime.now())
+    # 随后每 30 分钟拉取一次新闻
     scheduler.add_job(auto_collect_news, 'interval', minutes=30)
+    # 随后每 1 小时自动拉取更新一次行业动态
+    scheduler.add_job(auto_update_watchlist_industry, 'interval', hours=1)
     # 每天 10:30, 11:30, 15:00, 22:00
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=10, minute=30)
     scheduler.add_job(auto_analyze_watchlist, 'cron', hour=11, minute=30)
@@ -107,6 +126,16 @@ def get_em_prefix(symbol: str) -> str:
     if symbol.startswith('8') or symbol.startswith('4'):
         return "0." # 北交所在东财也是 0.
     return "0."
+
+def get_em_data(url: str, timeout: int = 3) -> requests.Response:
+    """用安全的 HTTPS 协议和 Referer 头请求东方财富接口，绕过防爬拦截"""
+    url = url.replace("http://push2.eastmoney.com", "https://push2.eastmoney.com")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://quote.eastmoney.com/",
+        "Host": "push2.eastmoney.com"
+    }
+    return requests.get(url, headers=headers, timeout=timeout, proxies={})
 
 
 def calc_ma(closes: list[float], window: int) -> list:
@@ -219,8 +248,8 @@ def get_batch_overview(symbols: str):
                         prefix = "1." if code.startswith('6') else "0."
                     secids.append(f"{prefix}{code}")
                 
-                em_url = f"http://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
-                resp_em = requests.get(em_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3, proxies={})
+                em_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
+                resp_em = get_em_data(em_url, timeout=3)
                 if resp_em.status_code == 200:
                     json_data = resp_em.json()
                     data_obj = json_data.get("data")
@@ -370,8 +399,8 @@ def get_stock_overview(symbol: str):
     try:
         is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
         em_prefix = get_em_prefix(symbol)
-        em_url = f"http://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={em_prefix}{symbol.replace('hk','')}&fields=f12,f62,f137,f138,f147,f148"
-        resp_em = requests.get(em_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3, proxies={})
+        em_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={em_prefix}{symbol.replace('hk','')}&fields=f12,f62,f137,f138,f147,f148"
+        resp_em = get_em_data(em_url, timeout=3)
         if resp_em.status_code == 200:
             json_data = resp_em.json()
             data_obj = json_data.get("data")
@@ -970,8 +999,8 @@ def get_abnormal_peers(symbol: str):
                     secids.append(f"{prefix}{code}")
                 
             fields = "f12,f137,f138,f147,f148" if is_hk else "f12,f62"
-            url = f"http://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields={fields}"
-            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3, proxies={})
+            url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields={fields}"
+            resp = get_em_data(url, timeout=1.5)
             if resp.status_code == 200:
                 data = resp.json().get("data", {}).get("diff", [])
                 
@@ -1199,10 +1228,10 @@ def get_related_stocks(symbol: str):
             if not secids:
                 return {"data": []}
                 
-            url = f"http://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f14,f2,f3,f137,f138,f147,f148"
+            url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f14,f2,f3,f137,f138,f147,f148"
             results = []
             try:
-                resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3)
+                resp = get_em_data(url, timeout=1.5)
                 if resp.status_code == 200:
                     diff = resp.json().get("data", {}).get("diff", [])
                     for item in diff:
@@ -1294,8 +1323,8 @@ def get_related_stocks(symbol: str):
                     prefix = "1." if code.startswith('6') else "0."
                     secids.append(f"{prefix}{code}")
                     
-                url = f"http://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
-                resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3, proxies={})
+                url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
+                resp = get_em_data(url, timeout=1.5)
                 if resp.status_code == 200:
                     data = resp.json().get("data", {}).get("diff", [])
                     flow_map = {item.get("f12"): item.get("f62", 0) for item in data if item.get("f12")}
