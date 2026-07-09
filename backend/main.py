@@ -195,14 +195,16 @@ def get_batch_overview(symbols: str):
                 code = v[2]
                 price = v[3]
                 change_pct = v[32]
+                is_hk = len(code) == 5 and code.isdigit()
+                
                 results.append({
                     "symbol": code,
                     "name": name,
                     "price": price,
                     "changePct": f"{change_pct}%" if change_pct != '' else "0.00%",
                     "changePercent": float(change_pct) if change_pct != '' else 0.0,
-                    "amount": float(v[37]) * 10000 if len(v) > 37 and v[37] != '' else 0.0,
-                    "volume": float(v[36]) * 100 if len(v) > 36 and v[36] != '' else 0.0,
+                    "amount": float(v[37]) if is_hk else (float(v[37]) * 10000 if len(v) > 37 and v[37] != '' else 0.0),
+                    "volume": float(v[36]) if is_hk else (float(v[36]) * 100 if len(v) > 36 and v[36] != '' else 0.0),
                 })
                 
         # 批量获取真实量化资金流向
@@ -295,6 +297,8 @@ def get_stock_overview(symbol: str):
     data_str = text.split("=")[1].strip().strip('";')
     fields = data_str.split("~")
 
+    is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
+
     try:
         name = fields[1] if len(fields) > 1 else symbol
         latest_price = float(fields[3]) if len(fields) > 3 and fields[3] else 0.0
@@ -304,8 +308,8 @@ def get_stock_overview(symbol: str):
         change_percent = float(fields[32]) if len(fields) > 32 and fields[32] else 0.0
         high_price   = float(fields[33]) if len(fields) > 33 and fields[33] else 0.0
         low_price    = float(fields[34]) if len(fields) > 34 and fields[34] else 0.0
-        volume    = (float(fields[36]) / 10000) if len(fields) > 36 and fields[36] else 0.0
-        turnover  = (float(fields[37]) / 10000) if len(fields) > 37 and fields[37] else 0.0
+        volume    = (float(fields[36]) / 10000.0) if len(fields) > 36 and fields[36] else 0.0
+        turnover  = (float(fields[37]) / 100000000.0) if is_hk else ((float(fields[37]) / 10000.0) if len(fields) > 37 and fields[37] else 0.0)
         turnover_rate = float(fields[38]) if len(fields) > 38 and fields[38] else 0.0
         pe_ratio  = fields[39] if len(fields) > 39 else "-"
         market_cap = fields[45] if len(fields) > 45 else "-"
@@ -352,11 +356,11 @@ def get_stock_overview(symbol: str):
             "high": high_price,
             "low": low_price,
             "previousClose": prev_close,
-            "volume": f"{volume:.2f}万手",
-            "turnoverAmount": f"{turnover:.2f}亿",
+            "volume": f"{volume:.2f}万股" if is_hk else f"{volume:.2f}万手",
+            "turnoverAmount": f"{turnover:.2f}亿港元" if is_hk else f"{turnover:.2f}亿元",
             "turnoverRate": turnover_rate,
             "peRatio": pe_ratio,
-            "marketCap": f"{market_cap}亿",
+            "marketCap": f"{market_cap}亿港元" if is_hk else f"{market_cap}亿元",
         },
         "industry": "-",
         "concepts": []

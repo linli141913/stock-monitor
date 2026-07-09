@@ -99,12 +99,14 @@ export default function WatchlistPage() {
     const sign = num >= 0 ? '+' : '';
     return `${sign}${num.toFixed(2)}%`;
   };
-  const formatAmount = (v: any) => {
+  const formatAmount = (v: any, stockCode?: string) => {
     if (v == null) return '-';
     const num = Number(v);
-    if (num >= 1e8) return `${(num / 1e8).toFixed(2)}亿`;
-    if (num >= 1e4) return `${(num / 1e4).toFixed(2)}万`;
-    return num.toFixed(0);
+    const isHk = stockCode && (stockCode.toLowerCase().startsWith('hk') || (stockCode.length === 5 && !isNaN(Number(stockCode))));
+    const unit = isHk ? '港元' : '元';
+    if (num >= 1e8) return `${(num / 1e8).toFixed(2)}亿${unit}`;
+    if (num >= 1e4) return `${(num / 1e4).toFixed(2)}万${unit}`;
+    return num.toFixed(0) + unit;
   };
 
   return (
@@ -193,7 +195,7 @@ export default function WatchlistPage() {
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {item.loading ? <span className={styles.skeleton} /> : formatAmount(item.amount)}
+                      {item.loading ? <span className={styles.skeleton} /> : formatAmount(item.amount, item.stockCode)}
                     </td>
                     <td style={{ textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
                       {addedDate}
