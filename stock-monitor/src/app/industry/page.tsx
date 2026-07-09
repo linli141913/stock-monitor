@@ -107,7 +107,8 @@ export default function IndustryInsightPage() {
 
       {showScroll && (
         <button className={styles.scrollTopBtn} onClick={scrollTop} title="返回顶部">
-          <ArrowUp size={20} />
+          <ArrowUp size={16} />
+          <span>置顶</span>
         </button>
       )}
     </div>

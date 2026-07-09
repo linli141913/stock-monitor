@@ -4,6 +4,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { ArrowUp } from 'lucide-react';
 import styles from './page.module.css';
 
 // Components
@@ -29,10 +30,27 @@ function HomeContent() {
   
   const [isMounted, setIsMounted] = useState(false);
   const [period, setPeriod] = useState<'day'|'week'|'month'|'year'>('day');
+  const [showScroll, setShowScroll] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    const checkScrollTop = () => {
+      if (!showScroll && window.pageYOffset > 300) {
+        setShowScroll(true);
+      } else if (showScroll && window.pageYOffset <= 300) {
+        setShowScroll(false);
+      }
+    };
+    window.addEventListener('scroll', checkScrollTop);
+    return () => window.removeEventListener('scroll', checkScrollTop);
+  }, [showScroll]);
+
+  const scrollTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const [overviewData, setOverviewData] = useState<any>(null);
   const [klineData, setKlineData] = useState<any[]>([]);
@@ -336,6 +354,13 @@ function HomeContent() {
           <DataSourceCard />
         </div>
       </div>
+
+      {showScroll && (
+        <button className={styles.scrollTopBtn} onClick={scrollTop} title="返回顶部">
+          <ArrowUp size={16} />
+          <span>置顶</span>
+        </button>
+      )}
     </div>
   );
 }
