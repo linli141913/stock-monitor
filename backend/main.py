@@ -1,6 +1,4 @@
 import os
-# 只针对本地回环地址绕过代理，保证本地定时任务不报错；外部接口使用系统代理保证网络畅通
-os.environ['NO_PROXY'] = 'localhost,127.0.0.1,127.0.0.1:8001,localhost:8001'
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -135,7 +133,7 @@ def get_em_data(url: str, timeout: int = 3) -> requests.Response:
         "Referer": "https://quote.eastmoney.com/",
         "Host": "push2.eastmoney.com"
     }
-    return requests.get(url, headers=headers, timeout=timeout, proxies={"http": None, "https": None})
+    return requests.get(url, headers=headers, timeout=timeout)
 
 
 def calc_ma(closes: list[float], window: int) -> list:
@@ -749,47 +747,78 @@ def get_industry_monitor(symbol: str):
     industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
     industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else "半导体"
     
+    # 判断是否在交易时间（工作日 09:30-15:00 北京时间）
+    from datetime import datetime, time as dtime
+    import pytz
+    now_cst = datetime.now(pytz.timezone("Asia/Shanghai"))
+    is_trading_hours = (
+        now_cst.weekday() < 5  # 周一到周五
+        and dtime(9, 30) <= now_cst.time() <= dtime(15, 0)
+    )
+
+    # 优先用 akshare 行业资金流排行，直接按行业名匹配，稳定可靠
     fallback_heat = 60
     fallback_flow = 0.0
     sector_change = 0.0
-    
+    fund_flow_available = False
     try:
-        # 使用同行业相关个股的汇总数据来计算板块的实时表现
-        related = get_related_stocks(symbol)
-        related_data = related.get("data", [])
-        total_flow = 0.0
-        total_change = 0.0
-        count = len(related_data)
-        
-        for r in related_data:
-            flow_str = r.get("fundFlow", "")
-            if "流入" in flow_str:
-                try:
-                    val = float(flow_str.replace("净", "").replace("流入", "").replace("亿港元", "").replace("亿元", "").strip())
-                    total_flow += val
-                except: pass
-            elif "流出" in flow_str:
-                try:
-                    val = float(flow_str.replace("净", "").replace("流出", "").replace("亿港元", "").replace("亿元", "").strip())
-                    total_flow -= val
-                except: pass
-            
-            cp = r.get("changePercent")
-            if cp is None:
-                cp = r.get("oneDayChange", 0.0)
-            total_change += float(cp)
-        
-        if count > 0:
-            fallback_flow = round(total_flow, 2)
-            sector_change = round(total_change / count, 2)
-            fallback_heat = min(100, int(50 + (abs(fallback_flow) * 2) + sector_change * 3))
-
+        import akshare as ak
+        df_sector = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        # 模糊匹配行业名称（industry_name 可能是 "光学光电子" 或 "半导体" 等）
+        matched = df_sector[df_sector["名称"].str.contains(industry_name, na=False)]
+        if matched.empty:
+            for kw in industry_name.split("·"):
+                matched = df_sector[df_sector["名称"].str.contains(kw.strip(), na=False)]
+                if not matched.empty:
+                    break
+        if not matched.empty:
+            row = matched.iloc[0]
+            raw_flow = row.get("今日主力净流入-净额", 0) or 0
+            fallback_flow = round(float(raw_flow) / 1e8, 2)
+            raw_pct = row.get("今日涨跌幅", 0) or 0
+            sector_change = round(float(raw_pct), 2)
+            fallback_heat = min(100, int(50 + abs(fallback_flow) * 0.3 + sector_change * 3))
+            fund_flow_available = True
     except Exception as e:
-        print("Fallback derivation logic error:", e)
+        print("akshare sector fund flow failed:", e)
+        # 备用：用相关股票资金流加总
+        try:
+            related = get_related_stocks(symbol)
+            related_data = related.get("data", [])
+            total_flow = 0.0
+            total_change = 0.0
+            count = len(related_data)
+            for r in related_data:
+                flow_str = r.get("fundFlow", "")
+                if "流入" in flow_str:
+                    try:
+                        val = float(flow_str.replace("净", "").replace("流入", "").replace("亿港元", "").replace("亿元", "").strip())
+                        total_flow += val
+                    except: pass
+                elif "流出" in flow_str:
+                    try:
+                        val = float(flow_str.replace("净", "").replace("流出", "").replace("亿港元", "").replace("亿元", "").strip())
+                        total_flow -= val
+                    except: pass
+                cp = r.get("changePercent") or r.get("oneDayChange", 0.0)
+                total_change += float(cp)
+            if count > 0:
+                fallback_flow = round(total_flow, 2)
+                sector_change = round(total_change / count, 2)
+                fallback_heat = min(100, int(50 + (abs(fallback_flow) * 2) + sector_change * 3))
+                if abs(fallback_flow) > 0:
+                    fund_flow_available = True
+        except Exception as e2:
+            print("Fallback derivation logic error:", e2)
 
-    # Format fund flow string
+    # Format fund flow string，收盘/非交易时间给出明确提示
     flow_val = fallback_flow
-    flow_str = f"净流入 {flow_val} 亿元" if flow_val > 0 else f"净流出 {abs(flow_val)} 亿元"
+    if not is_trading_hours:
+        flow_str = f"今日收盘 {'+' if flow_val >= 0 else ''}{flow_val} 亿元" if fund_flow_available else "今日已收盘"
+    elif not fund_flow_available:
+        flow_str = "数据获取中..."
+    else:
+        flow_str = f"净流入 {flow_val} 亿元" if flow_val > 0 else f"净流出 {abs(flow_val)} 亿元"
     
     # 2. 检查是否在自选监测列表中，若不在则不调用大模型筛选，展示说明文字，防额度消耗
     # 实时去重多源资讯池（读取 80 条）
