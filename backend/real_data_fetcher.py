@@ -66,10 +66,46 @@ class RealDataFetcher:
         return "暂无最新重大公司新闻。"
 
     def get_macro_environment(self) -> str:
-        """Fetch macro environment (e.g., sector, SOX, etc. - mocked temporarily for stability, can be expanded to scrape)"""
-        # In a full production system, we would scrape or use specific AKShare APIs for SOX index, NVDA, etc.
-        # For now, return a stable representative string so the LLM has context.
-        return "海外半导体：昨夜费城半导体指数异动，英伟达等核心标的波动较大。国内：半导体板块整体受国产替代政策预期提振。"
+        """实时抓取海外宏观环境：费城半导体指数(SOX)、英伟达、AMD、英特尔、台积电 + 纳斯达克"""
+        try:
+            import requests
+            url = "https://hq.sinajs.cn/list=gb_soxx,gb_nvda,gb_amd,gb_intc,gb_tsm,int_ndaq"
+            headers = {
+                "Referer": "https://finance.sina.com.cn/",
+                "User-Agent": "Mozilla/5.0"
+            }
+            resp = requests.get(url, headers=headers, timeout=5)
+            resp.encoding = "gbk"
+            raw = resp.text
+
+            def parse_sina_us(line: str):
+                """解析新浪美股行情行"""
+                try:
+                    fields = line.split('"')[1].split(",")
+                    name = fields[0]
+                    price = float(fields[1]) if fields[1] else 0.0
+                    change_pct = float(fields[2]) if fields[2] else 0.0
+                    return name, price, change_pct
+                except Exception:
+                    return None, None, None
+
+            lines = [l.strip() for l in raw.strip().split("\n") if "hq_str_" in l]
+            results = []
+            for line in lines:
+                name, price, change_pct = parse_sina_us(line)
+                if name and price:
+                    direction = "▲" if change_pct >= 0 else "▼"
+                    sign = "+" if change_pct >= 0 else ""
+                    results.append(f"{name} {direction}{sign}{change_pct:.2f}%（现价 {price}）")
+
+            if results:
+                summary = "【海外实时宏观环境】\n" + "\n".join(results)
+                return summary
+        except Exception as e:
+            print(f"Error fetching macro environment: {e}")
+
+        # 降级兜底
+        return "海外半导体：费城半导体指数与英伟达等核心标的数据获取失败，请检查网络。"
 
 
     def get_industry_news_dehydrated(self, symbol: str) -> str:
