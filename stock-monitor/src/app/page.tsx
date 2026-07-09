@@ -266,7 +266,6 @@ function HomeContent() {
     autoRefreshTimer.current = setInterval(() => {
       fetchOverview(true);
       fetchRelatedPrices(stockCode);
-      fetchIndustryAndPeers(stockCode);
     }, AUTO_REFRESH_INTERVAL);
     return () => {
       if (autoRefreshTimer.current) clearInterval(autoRefreshTimer.current);
