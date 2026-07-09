@@ -17,7 +17,7 @@ export default function RootLayout({
     <html lang="zh-CN" suppressHydrationWarning>
       <body>
         <AppHeader />
-        <main style={{ minHeight: 'calc(100vh - 64px - 80px)' }}>
+        <main style={{ minHeight: 'calc(100vh - 64px - 80px)', paddingTop: '64px' }}>
           {children}
         </main>
         <PageFooter />

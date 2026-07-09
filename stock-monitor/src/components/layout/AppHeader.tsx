@@ -1,12 +1,30 @@
 'use client';
 
-import { LayoutList, LineChart, Bell, TrendingUp } from 'lucide-react';
+import { LayoutList, LineChart, Bell, TrendingUp, ArrowUp } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import styles from './AppHeader.module.css';
 
 export default function AppHeader() {
   const pathname = usePathname();
+  const [showScroll, setShowScroll] = useState(false);
+
+  useEffect(() => {
+    const checkScrollTop = () => {
+      if (!showScroll && window.pageYOffset > 200) {
+        setShowScroll(true);
+      } else if (showScroll && window.pageYOffset <= 200) {
+        setShowScroll(false);
+      }
+    };
+    window.addEventListener('scroll', checkScrollTop);
+    return () => window.removeEventListener('scroll', checkScrollTop);
+  }, [showScroll]);
+
+  const scrollTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const navItems = [
     { name: '首页', path: '/', icon: <LineChart size={18} /> },
@@ -35,6 +53,16 @@ export default function AppHeader() {
               </Link>
             );
           })}
+          
+          {/* 回到置顶按钮 */}
+          <button 
+            className={`${styles.scrollTopBtn} ${showScroll ? styles.visible : ''}`}
+            onClick={scrollTop}
+            title="回到置顶"
+          >
+            <ArrowUp size={14} />
+            <span>回到置顶</span>
+          </button>
         </nav>
       </div>
     </header>
