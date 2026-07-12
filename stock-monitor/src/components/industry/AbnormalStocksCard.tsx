@@ -64,11 +64,11 @@ export default function AbnormalStocksCard({ data, onStockClick }: Props) {
                 </div>
               <div className={styles.reason}>
                 <span className={styles.reasonLabel}>异动原因：</span>
-                {stock.reason}
+                {stock.reason || '暂无可验证归因'}
               </div>
               <div className={styles.meta}>
-                <span>量比: <strong className="text-rise">{stock.volumeRatio}</strong></span>
-                {stock.twentyDayChange && (
+                <span>量比: <strong className="text-rise">{stock.volumeRatio ?? '暂无数据'}</strong></span>
+                {stock.twentyDayChange != null && (
                   <span>20日: <strong className={stock.twentyDayChange > 0 ? 'text-rise' : 'text-fall'}>{stock.twentyDayChange > 0 ? '+' : ''}{stock.twentyDayChange}%</strong></span>
                 )}
                 {stock.fundFlow && (

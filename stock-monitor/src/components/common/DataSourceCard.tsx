@@ -1,18 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
 import { Database, FileText, Newspaper, PieChart, Landmark } from 'lucide-react';
 import styles from './DataSourceCard.module.css';
 
 export default function DataSourceCard() {
-  const [mounted, setMounted] = useState(false);
-  const [timeStr, setTimeStr] = useState('');
-
-  useEffect(() => {
-    setMounted(true);
-    setTimeStr(new Date().toLocaleString('zh-CN'));
-  }, []);
-
   return (
     <div className={styles.card}>
       <div className={styles.header}>
@@ -24,28 +15,28 @@ export default function DataSourceCard() {
         <div className={styles.grid}>
           <div className={styles.sourceItem}>
             <LineChartIcon size={16} className={styles.sourceIcon} />
-            <span>行情数据</span>
+            <span>腾讯财经：行情、K 线</span>
           </div>
           <div className={styles.sourceItem}>
             <FileText size={16} className={styles.sourceIcon} />
-            <span>公司公告</span>
+            <span>巨潮资讯：公司公告</span>
           </div>
           <div className={styles.sourceItem}>
             <Newspaper size={16} className={styles.sourceIcon} />
-            <span>行业新闻</span>
+            <span>新浪财经：A股资金流、部分新闻</span>
           </div>
           <div className={styles.sourceItem}>
             <PieChart size={16} className={styles.sourceIcon} />
-            <span>财报数据</span>
+            <span>东方财富：公司资料、财务、部分公告及研报</span>
           </div>
           <div className={styles.sourceItem}>
             <Landmark size={16} className={styles.sourceIcon} />
-            <span>政策资讯</span>
+            <span>同花顺：A股行业资金流</span>
           </div>
         </div>
         <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '6px', fontSize: '13px', color: '#64748b' }}>
           <div style={{ marginBottom: '4px' }}><strong>数据类型：</strong>准实时</div>
-          <div style={{ marginBottom: '4px' }}><strong>最后更新：</strong>{mounted ? timeStr : '加载中...'}</div>
+          <div style={{ marginBottom: '4px' }}><strong>最后更新：</strong>以各数据卡片标注时间为准</div>
           <div><strong>延迟说明：</strong>公开数据源可能存在几十秒到数分钟延迟</div>
         </div>
       </div>

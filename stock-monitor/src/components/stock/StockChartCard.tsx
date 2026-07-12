@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { Maximize, Minimize } from 'lucide-react';
+import type { ElementEvent as ZRenderElementEvent } from 'zrender/lib/Element.js';
 import { KlineItem } from '@/types/stock';
 import styles from './StockChartCard.module.css';
 
@@ -15,6 +15,26 @@ interface Props {
   onPeriodChange: (p: PeriodType) => void;
 }
 
+interface DataZoomEvent {
+  start?: number;
+  end?: number;
+  batch?: Array<Pick<DataZoomEvent, 'start' | 'end'>>;
+}
+
+interface ZoomState {
+  period: PeriodType;
+  start: number;
+  end: number;
+}
+
+interface ChartTooltipParam {
+  axisValueLabel?: string;
+  marker?: string;
+  seriesName?: string;
+  seriesType?: string;
+  value?: unknown;
+}
+
 const periodMap: Record<PeriodType, string> = {
   'day': '日K',
   'week': '周K',
@@ -22,25 +42,28 @@ const periodMap: Record<PeriodType, string> = {
   'year': '年K'
 };
 const periodKeys: PeriodType[] = ['day', 'week', 'month', 'year'];
+const DEFAULT_ZOOM = { start: 50, end: 100 };
 
 export default function StockChartCard({ data, period, loading, onPeriodChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const echartsRef = useRef<any>(null);
+  const echartsRef = useRef<ReactECharts>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSimulatedFullscreen, setIsSimulatedFullscreen] = useState(false);
-  const zoomRef = useRef({ start: 50, end: 100 });
-  const prevPeriodRef = useRef(period);
-
-  if (prevPeriodRef.current !== period) {
-    zoomRef.current = { start: 50, end: 100 };
-    prevPeriodRef.current = period;
-  }
+  const [zoomState, setZoomState] = useState<ZoomState>({ period, ...DEFAULT_ZOOM });
+  const activeZoom = zoomState.period === period ? zoomState : DEFAULT_ZOOM;
 
   const onEvents = {
-    datazoom: (params: any) => {
-      const z = params.batch ? params.batch[0] : params;
-      if (z.start !== undefined) zoomRef.current.start = z.start;
-      if (z.end !== undefined) zoomRef.current.end = z.end;
+    datazoom: (params: DataZoomEvent) => {
+      const zoomEvent = params.batch?.[0] ?? params;
+      setZoomState((previous) => {
+        const previousZoom = previous.period === period ? previous : { period, ...DEFAULT_ZOOM };
+        const start = zoomEvent.start ?? previousZoom.start;
+        const end = zoomEvent.end ?? previousZoom.end;
+        if (previous.period === period && previous.start === start && previous.end === end) {
+          return previous;
+        }
+        return { period, start, end };
+      });
     }
   };
 
@@ -59,13 +82,13 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
 
     const zr = chart.getZr();
 
-    const onTouchStart = (e: any) => {
+    const onTouchStart = (e: ZRenderElementEvent) => {
       startPosRef.current = { x: e.offsetX, y: e.offsetY };
       isInspectingRef.current = true;
       chart.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY });
     };
 
-    const onTouchMove = (e: any) => {
+    const onTouchMove = (e: ZRenderElementEvent) => {
       const dx = e.offsetX - startPosRef.current.x;
       const dy = e.offsetY - startPosRef.current.y;
       
@@ -179,10 +202,11 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       borderColor: '#ccc',
       padding: 10,
       textStyle: { color: '#000' },
-      formatter: function (params: any) {
-        if (!params || !params.length) return '';
-        let html = params[0].axisValueLabel + '<br/>';
-        params.forEach((param: any) => {
+      formatter: function (params: ChartTooltipParam | ChartTooltipParam[]) {
+        const tooltipParams = Array.isArray(params) ? params : [params];
+        if (tooltipParams.length === 0) return '';
+        let html = `${tooltipParams[0].axisValueLabel ?? ''}<br/>`;
+        tooltipParams.forEach((param) => {
           if (param.seriesType === 'candlestick') {
             const val = param.value;
             let o, c, l, h;
@@ -203,8 +227,8 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
             let val = param.value;
             if (Array.isArray(val)) {
                 val = val[1] !== undefined ? val[1] : val[0];
-            } else if (typeof val === 'object' && val !== null) {
-                val = val.value || 0;
+            } else if (typeof val === 'object' && val !== null && 'value' in val) {
+                val = (val as { value?: unknown }).value ?? 0;
             }
             if (val !== '-' && val !== undefined && val !== null) {
               html += `${param.marker} ${param.seriesName}: ${val}<br/>`;
@@ -213,12 +237,17 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
         });
         return html;
       },
-      position: function (pos: any, params: any, el: any, elRect: any, size: any) {
+      position: function (
+        pos: [number, number],
+        _params: unknown,
+        _el: unknown,
+        _elRect: unknown,
+        size: { viewSize: [number, number]; contentSize: [number, number] },
+      ) {
         if (isMobileDevice) {
-          let viewW = size.viewSize[0] || window.innerWidth;
-          let viewH = size.viewSize[1] || window.innerHeight;
-          let boxW = size.contentSize[0] || 150;
-          let boxH = size.contentSize[1] || 150;
+          const viewH = size.viewSize[1] || window.innerHeight;
+          const boxW = size.contentSize[0] || 150;
+          const boxH = size.contentSize[1] || 150;
           
           // 默认放在十字线的左边，防止右手大拇指遮挡
           let x = pos[0] - boxW - 15; 
@@ -299,16 +328,16 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
       {
         type: 'inside',
         xAxisIndex: [0, 1],
-        start: zoomRef.current.start,
-        end: zoomRef.current.end
+        start: activeZoom.start,
+        end: activeZoom.end
       },
       {
         show: false,
         xAxisIndex: [0, 1],
         type: 'slider',
         top: '95%',
-        start: zoomRef.current.start,
-        end: zoomRef.current.end
+        start: activeZoom.start,
+        end: activeZoom.end
       }
     ],
     series: [

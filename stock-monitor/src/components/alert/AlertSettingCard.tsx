@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { BellRing, Info } from 'lucide-react';
 import { AlertRule } from '@/types/alert';
 import styles from './AlertSettingCard.module.css';
@@ -10,25 +9,6 @@ interface Props {
 }
 
 export default function AlertSettingCard({ initialData }: Props) {
-  const [email, setEmail] = useState(initialData.email || '');
-  const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
-
-  const handleSave = () => {
-    if (!email.includes('@')) {
-      alert('请输入有效的邮箱地址');
-      return;
-    }
-    
-    setSaving(true);
-    // 模拟API请求
-    setTimeout(() => {
-      setSaving(false);
-      setSuccessMsg('提醒设置已保存');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    }, 800);
-  };
-
   return (
     <div className={styles.card}>
       <div className={styles.header}>
@@ -39,25 +19,25 @@ export default function AlertSettingCard({ initialData }: Props) {
       <div className={styles.content}>
         <div className={styles.checkboxGroup}>
           <label className={styles.checkboxLabel}>
-            <input type="checkbox" defaultChecked={initialData.priceChangeAlert} />
+            <input type="checkbox" defaultChecked={initialData.priceChangeAlert} disabled />
             <span className={styles.labelText}>股价涨跌幅提醒</span>
             <span className={styles.threshold}>≥ {initialData.priceChangeThreshold}%</span>
           </label>
           
           <label className={styles.checkboxLabel}>
-            <input type="checkbox" defaultChecked={initialData.volumeAlert} />
+            <input type="checkbox" defaultChecked={initialData.volumeAlert} disabled />
             <span className={styles.labelText}>异常放量提醒</span>
             <span className={styles.threshold}>≥ {initialData.volumeRatioThreshold}倍</span>
           </label>
           
           <label className={styles.checkboxLabel}>
-            <input type="checkbox" defaultChecked={initialData.announcementAlert} />
+            <input type="checkbox" defaultChecked={initialData.announcementAlert} disabled />
             <span className={styles.labelText}>公告更新提醒</span>
             <Info size={14} className={styles.infoIcon} />
           </label>
           
           <label className={styles.checkboxLabel}>
-            <input type="checkbox" defaultChecked={initialData.industryAlert} />
+            <input type="checkbox" defaultChecked={initialData.industryAlert} disabled />
             <span className={styles.labelText}>行业异动提醒</span>
             <Info size={14} className={styles.infoIcon} />
           </label>
@@ -69,22 +49,20 @@ export default function AlertSettingCard({ initialData }: Props) {
             type="email" 
             className={styles.emailInput} 
             placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={initialData.email || ''}
+            disabled
+            readOnly
           />
         </div>
 
         <button 
           className={styles.saveBtn} 
-          onClick={handleSave}
-          disabled={saving}
+          disabled
         >
-          {saving ? '保存中...' : '保存提醒'}
+          提醒功能准备中
         </button>
 
-        {successMsg && (
-          <div className={styles.successMsg}>{successMsg}</div>
-        )}
+        <div className={styles.successMsg}>当前不会保存设置或发送邮件</div>
       </div>
     </div>
   );

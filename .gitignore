@@ -1,0 +1,33 @@
+# macOS / editor
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example
+!backend/.env.example
+!stock-monitor/.env.example
+
+# Python
+backend/venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+stock-monitor/node_modules/
+stock-monitor/.next/
+stock-monitor/out/
+stock-monitor/.vercel/
+*.tsbuildinfo
+
+# Runtime data and logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Local tunnel binaries and archives
+ngrok
+ngrok-*.zip

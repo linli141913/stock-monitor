@@ -1,20 +1,22 @@
 export interface StockOverview {
   stockName: string;
   stockCode: string;
-  marketStatus?: string; // e.g. "交易中" or "已休市"
-  latestPrice: number;
-  changeAmount: number;
-  changePercent: number;
-  openPrice: number;
-  highPrice: number;
-  lowPrice: number;
-  previousClose: number;
-  volume: string;
-  turnoverAmount: string;
-  turnoverRate: number;
-  peDynamic?: number;
-  marketCap?: string;
-  updateTime: string;
+  marketStatus?: string;
+  marketStatusCode?: "pre_open" | "trading" | "lunch_break" | "closed" | "holiday" | "unknown";
+  latestPrice: number | null;
+  changeAmount: number | null;
+  changePercent: number | null;
+  openPrice: number | null;
+  highPrice: number | null;
+  lowPrice: number | null;
+  previousClose: number | null;
+  volume: string | null;
+  turnoverAmount: string | null;
+  turnoverRate: number | null;
+  peDynamic?: number | null;
+  marketCap?: string | null;
+  sourceTime: string | null;
+  fetchedAt: string;
   dataSource?: string;
   dataType?: "实时" | "准实时" | "延迟";
   refreshInterval?: string;
@@ -39,26 +41,26 @@ export interface KlineItem {
 export interface RelatedStock {
   stockName: string;
   stockCode: string;
-  latestPrice: number;
-  changePercent: number;
+  latestPrice: number | null;
+  changePercent: number | null;
   industryRelation?: string;
   abnormalTag?: string;
   updateTime?: string;
-  fundFlow?: string;
+  fundFlow?: string | null;
 }
 
 export interface AbnormalStock {
   stockName: string;
   stockCode: string;
   oneDayChange: number;
-  fiveDayChange?: number;
-  twentyDayChange?: number;
-  volumeRatio?: number;
-  turnoverRate?: number;
-  fundFlow?: string;
-  reason?: string;
-  riskNote?: string;
-  updateTime?: string;
+  fiveDayChange?: number | null;
+  twentyDayChange?: number | null;
+  volumeRatio?: number | null;
+  turnoverRate?: number | null;
+  fundFlow?: string | null;
+  reason?: string | null;
+  riskNote?: string | null;
+  updateTime?: string | null;
 }
 
 export interface CompanyInfo {
@@ -100,6 +102,6 @@ export interface News {
   source: string;
   publishTime: string;
   summary: string;
-  sentiment: "利好" | "利空" | "中性";
+  sentiment: "利好" | "利空" | "中性" | "未分析";
   url: string;
 }

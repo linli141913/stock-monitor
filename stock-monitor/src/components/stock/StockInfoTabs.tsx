@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CompanyInfo, FinancialSummary, Announcement, News } from '@/types/stock';
+import { CompanyInfo, Announcement, News } from '@/types/stock';
 import styles from './StockInfoTabs.module.css';
 import { FinancialSummaryTab } from './FinancialSummaryTab';
 import AiAttributionTab from './AiAttributionTab';
@@ -9,14 +9,13 @@ import AiAttributionTab from './AiAttributionTab';
 interface Props {
   stockCode: string;
   companyInfo: CompanyInfo;
-  financialData: FinancialSummary;
   announcements: Announcement[];
   news: News[];
 }
 
 type TabType = 'AI归因' | '公司概览' | '财务摘要' | '公告' | '相关新闻';
 
-export default function StockInfoTabs({ stockCode, companyInfo, financialData, announcements, news }: Props) {
+export default function StockInfoTabs({ stockCode, companyInfo, announcements, news }: Props) {
   const [activeTab, setActiveTab] = useState<TabType>('AI归因');
   // We now always show the Financial Data tab
   const hasNews = news && news.length > 0;

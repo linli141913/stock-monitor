@@ -1,11 +1,10 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
+const API_BASE = '/api/backend';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { useWatchlist, WatchlistItem } from '@/hooks/useWatchlist';
+import { useWatchlist } from '@/hooks/useWatchlist';
 import styles from './page.module.css';
 
 
@@ -21,6 +20,14 @@ interface StockLiveData {
   error: boolean;
 }
 
+interface BatchOverviewItem {
+  symbol: string;
+  price?: number | string | null;
+  changePercent?: number | null;
+  volume?: number | null;
+  amount?: number | null;
+}
+
 export default function WatchlistPage() {
   const router = useRouter();
   const { watchlist, removeFromWatchlist } = useWatchlist();
@@ -28,40 +35,27 @@ export default function WatchlistPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // 初始化行情数据结构
-  useEffect(() => {
-    setLiveData(watchlist.map(item => ({
-      ...item,
-      price: null,
-      changePercent: null,
-      volume: null,
-      amount: null,
-      loading: true,
-      error: false,
-    })));
-  }, [watchlist]);
-
   // 批量拉取实时行情
   const fetchLiveData = useCallback(async () => {
     if (watchlist.length === 0) return;
-    setRefreshing(true);
     const symbols = watchlist.map(i => i.stockCode).join(',');
     try {
       const res = await fetch(`${API_BASE}/api/stock/batch_overview?symbols=${symbols}&_t=${Date.now()}`, { headers: { 'ngrok-skip-browser-warning': 'true' }, cache: 'no-store' });
       if (!res.ok) throw new Error('fetch failed');
-      const json = await res.json();
-      const map: Record<string, any> = {};
-      (json.data || []).forEach((item: any) => {
-        map[item.symbol] = item;
+      const json = await res.json() as { data?: BatchOverviewItem[] };
+      const quoteMap: Record<string, BatchOverviewItem> = {};
+      (json.data || []).forEach((item) => {
+        quoteMap[item.symbol] = item;
       });
       setLiveData(watchlist.map(item => {
-        const real = map[item.stockCode];
+        const real = quoteMap[item.stockCode];
         if (!real) {
           return { ...item, price: null, changePercent: null, volume: null, amount: null, loading: false, error: true };
         }
+        const price = real.price == null ? null : Number(real.price);
         return {
           ...item,
-          price: real.price ?? null,
+          price: price != null && Number.isFinite(price) ? price : null,
           changePercent: real.changePercent ?? null,
           volume: real.volume ?? null,
           amount: real.amount ?? null,
@@ -79,12 +73,20 @@ export default function WatchlistPage() {
 
   useEffect(() => {
     if (watchlist.length > 0) {
-      fetchLiveData();
+      const timer = window.setTimeout(() => {
+        void fetchLiveData();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [watchlist, fetchLiveData]);
 
   const handleRowClick = (stockCode: string) => {
-    window.location.href = `/?code=${stockCode}`;
+    window.location.assign(`/?code=${stockCode}`);
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    void fetchLiveData();
   };
 
   const handleRemove = (e: React.MouseEvent, stockCode: string) => {
@@ -92,22 +94,32 @@ export default function WatchlistPage() {
     removeFromWatchlist(stockCode);
   };
 
-  const formatPrice = (v: any) => v == null ? '-' : Number(v).toFixed(2);
-  const formatPct = (v: any) => {
+  const formatPrice = (v: number | null | undefined) => v == null ? '-' : v.toFixed(2);
+  const formatPct = (v: number | null | undefined) => {
     if (v == null) return '-';
-    const num = Number(v);
+    const num = v;
     const sign = num >= 0 ? '+' : '';
     return `${sign}${num.toFixed(2)}%`;
   };
-  const formatAmount = (v: any, stockCode?: string) => {
+  const formatAmount = (v: number | null | undefined, stockCode?: string) => {
     if (v == null) return '-';
-    const num = Number(v);
+    const num = v;
     const isHk = stockCode && (stockCode.toLowerCase().startsWith('hk') || (stockCode.length === 5 && !isNaN(Number(stockCode))));
     const unit = isHk ? '港元' : '元';
     if (num >= 1e8) return `${(num / 1e8).toFixed(2)}亿${unit}`;
     if (num >= 1e4) return `${(num / 1e4).toFixed(2)}万${unit}`;
     return num.toFixed(0) + unit;
   };
+
+  const displayLiveData = watchlist.map((item) => liveData.find((liveItem) => liveItem.stockCode === item.stockCode) || {
+    ...item,
+    price: null,
+    changePercent: null,
+    volume: null,
+    amount: null,
+    loading: true,
+    error: false,
+  });
 
   return (
     <div className={styles.container}>
@@ -123,7 +135,7 @@ export default function WatchlistPage() {
         {watchlist.length > 0 && (
           <button
             className={`${styles.refreshBtn} ${refreshing ? styles.refreshing : ''}`}
-            onClick={fetchLiveData}
+            onClick={handleRefresh}
             disabled={refreshing}
           >
             {refreshing ? '刷新中…' : '🔄 刷新行情'}
@@ -154,7 +166,7 @@ export default function WatchlistPage() {
               </tr>
             </thead>
             <tbody>
-              {liveData.map(item => {
+              {displayLiveData.map(item => {
                 const isRise = item.changePercent != null && item.changePercent >= 0;
                 const addedDate = new Date(item.addedAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
                 return (

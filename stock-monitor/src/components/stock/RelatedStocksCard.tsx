@@ -53,10 +53,10 @@ export default function RelatedStocksCard({ data, onStockClick }: Props) {
                     <div className={styles.stockCode}>{stock.stockCode}</div>
                   </td>
                   <td className={`${styles.rightAlign} ${styles.price}`}>
-                    {stock.latestPrice.toFixed(2)}
+                    {stock.latestPrice == null ? '暂无数据' : stock.latestPrice.toFixed(2)}
                   </td>
-                  <td className={`${styles.rightAlign} ${styles.percent} ${stock.changePercent > 0 ? 'text-rise' : stock.changePercent < 0 ? 'text-fall' : ''}`}>
-                    {stock.changePercent > 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                  <td className={`${styles.rightAlign} ${styles.percent} ${stock.changePercent != null && stock.changePercent > 0 ? 'text-rise' : stock.changePercent != null && stock.changePercent < 0 ? 'text-fall' : ''}`}>
+                    {stock.changePercent == null ? '暂无数据' : `${stock.changePercent > 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                   </td>
                   <td className={`${styles.rightAlign} ${stock.fundFlow?.includes('流入') ? 'text-rise' : stock.fundFlow?.includes('流出') ? 'text-fall' : ''}`}>
                     {stock.fundFlow || '-'}

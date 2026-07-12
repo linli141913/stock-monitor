@@ -1,8 +1,8 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
+const API_BASE = '/api/backend';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrainCircuit } from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
 import styles from './AiAttributionTab.module.css';
@@ -17,8 +17,8 @@ interface EvidenceChain {
 interface AttributionData {
   stockName: string;
   stockCode: string;
-  changePercent: number;
-  score: number;
+  changePercent: number | null;
+  score: number | null;
   evidenceChain: EvidenceChain;
   futureTrendPrediction: string;
   plainEnglishSummary?: string;
@@ -29,6 +29,7 @@ interface AttributionData {
 
 interface HistoryItem {
   date?: string;
+  target_date?: string;
   time: string;
   timestamp?: string;
   trigger_type: string;
@@ -47,9 +48,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [fetchingAllHistory, setFetchingAllHistory] = useState(false);
   const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
+  const [calendarStatus, setCalendarStatus] = useState<'available' | 'unknown'>('available');
   
-  const [calendarYear, setCalendarYear] = useState<number>(2026);
-  const [calendarMonth, setCalendarMonth] = useState<number>(6); // 0-indexed
+  const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth());
   const [selectedDateStr, setSelectedDateStr] = useState<string>('');
 
   const getDaysInMonthGrid = (year: number, month: number) => {
@@ -93,31 +95,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     return days;
   };
 
-  useEffect(() => {
-    if (showHistoryModal && allHistoryList.length > 0) {
-      const latestWithTarget = allHistoryList.find(item => item.full_json?.stockCode === stockCode || item.timestamp);
-      // Let's find any item that has target_date
-      const targetItem = allHistoryList.find(item => (item as any).target_date);
-      if (targetItem && (targetItem as any).target_date) {
-        const parts = (targetItem as any).target_date.split('-');
-        if (parts.length === 3) {
-          const y = parseInt(parts[0]);
-          const m = parseInt(parts[1]) - 1;
-          setCalendarYear(y);
-          setCalendarMonth(m);
-          setSelectedDateStr((targetItem as any).target_date);
-          return;
-        }
-      }
-      
-      // Fallback
-      const today = new Date();
-      setCalendarYear(today.getFullYear());
-      setCalendarMonth(today.getMonth());
-      setSelectedDateStr(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
-    }
-  }, [showHistoryModal, allHistoryList, stockCode]);
-
   const formatBoundsDate = (dateStr?: string) => {
     if (!dateStr) return '';
     try {
@@ -157,28 +134,45 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     return { color, text, bg, border };
   };
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res.ok) {
-        const json = await res.json();
+        const json = await res.json() as {
+          data?: HistoryItem[];
+          bounds?: { start: string; end: string } | null;
+          calendarStatus?: 'available' | 'unknown';
+        };
         setHistoryList(json.data || []);
-        if (json.bounds) {
-          setBounds(json.bounds);
-        }
+        setBounds(json.bounds || null);
+        setCalendarStatus(json.calendarStatus || 'unknown');
       }
     } catch (err) {
+      setBounds(null);
+      setCalendarStatus('unknown');
       console.error('获取历史记录失败', err);
     }
-  };
+  }, [stockCode]);
 
   const fetchAllHistory = async () => {
     setFetchingAllHistory(true);
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history_all/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res.ok) {
-        const json = await res.json();
-        setAllHistoryList(json.data || []);
+        const json = await res.json() as { data?: HistoryItem[] };
+        const historyItems = json.data || [];
+        setAllHistoryList(historyItems);
+
+        const targetDate = historyItems.find((item) => item.target_date)?.target_date;
+        const today = new Date();
+        const fallbackDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const selectedDate = targetDate || fallbackDate;
+        const parts = selectedDate.split('-');
+        if (parts.length === 3) {
+          setCalendarYear(parseInt(parts[0]));
+          setCalendarMonth(parseInt(parts[1]) - 1);
+          setSelectedDateStr(selectedDate);
+        }
       }
     } catch (err) {
       console.error('获取所有历史失败', err);
@@ -188,8 +182,11 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   };
 
   useEffect(() => {
-    fetchHistory();
-  }, [stockCode]);
+    const timer = window.setTimeout(() => {
+      void fetchHistory();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchHistory]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -218,12 +215,12 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_attribution/${stockCode}?trigger=manual`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('无法获取归因分析数据');
-      const json = await res.json();
+      const json = await res.json() as AttributionData;
       setData(json);
       setLastUpdated(new Date());
       fetchHistory(); // 刷新时间轴
-    } catch (err: any) {
-      setError(err.message || '网络异常');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '网络异常');
     } finally {
       setLoading(false);
     }
@@ -275,11 +272,11 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     return html;
   };
 
-  const isUp = data ? data.changePercent > 0 : false;
-  const isDown = data ? data.changePercent < 0 : false;
+  const isUp = data?.changePercent != null && data.changePercent > 0;
+  const isDown = data?.changePercent != null && data.changePercent < 0;
 
   const getGaugeOption = () => {
-    const score = data ? data.score || 50 : 50;
+    const score = data?.score ?? 0;
     
     return {
       series: [
@@ -320,16 +317,16 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     };
   };
 
-  const score = data ? data.score || 50 : 50;
+  const score = data?.score ?? null;
   let statusColor = '#f59e0b'; // default yellow
-  let statusText = '中性观望';
+  let statusText = score == null ? '未生成评分' : '中性观望';
   let statusBg = '#fef3c7';
   
-  if (score >= 80) { 
+  if (score != null && score >= 80) {
     statusColor = '#ef4444'; // Red
     statusBg = '#fee2e2';
     statusText = '强烈看好';
-  } else if (score <= 40) { 
+  } else if (score != null && score <= 40) {
     statusColor = '#10b981'; // Green
     statusBg = '#d1fae5';
     statusText = '高危警戒';
@@ -342,7 +339,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           <span className={styles.stockName}>{data ? data.stockName : stockCode}</span>
           {data && (
             <span className={`${styles.stockChange} ${isUp ? styles.textRise : isDown ? styles.textFall : ''}`}>
-              今日涨跌幅：{isUp ? '+' : ''}{data.changePercent}%
+              今日涨跌幅：{data.changePercent == null ? '暂无数据' : `${isUp ? '+' : ''}${data.changePercent}%`}
             </span>
           )}
           <div className={styles.badge}>每日涨跌归因分析</div>
@@ -394,7 +391,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                 <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '4px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span>{item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})</span>
                   {(() => {
-                    const itemScore = item.full_json?.score ?? 50;
+                    const itemScore = item.full_json?.score;
+                    if (itemScore == null) {
+                      return <span style={{ marginLeft: '6px', fontSize: '0.7rem', color: '#64748b' }}>未评分</span>;
+                    }
                     const { color, text, bg, border } = getScoreInfo(itemScore);
                     return (
                       <span style={{ 
@@ -421,6 +421,12 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           </div>
         </div>
       )}
+
+      {calendarStatus === 'unknown' && (
+        <div style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '8px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '0.9rem' }}>
+          交易日历暂不可用，无法按交易周期归组。
+        </div>
+      )}
       
       {!data && historyList.length > 0 && (
         <div className={styles.emptyContainer} style={{ marginTop: '32px' }}>
@@ -435,7 +441,9 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         <>
       <div className={styles.gaugeCard}>
         <div className={styles.gaugeChart}>
-          <ReactECharts option={getGaugeOption()} style={{ height: '180px', width: '100%' }} />
+          {score == null
+            ? <div className={styles.emptyText}>本次 AI 分析未生成评分</div>
+            : <ReactECharts option={getGaugeOption()} style={{ height: '180px', width: '100%' }} />}
         </div>
         <div className={styles.gaugeInfo}>
           <h3 className={styles.gaugeInfoTitle}>
@@ -443,10 +451,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           </h3>
           <div className={styles.gaugeScoreArea}>
             <span className={styles.gaugeScoreNum} style={{ color: statusColor }}>
-              {score}
+              {score ?? '—'}
             </span>
             <span className={styles.gaugeScoreUnit}>
-              分
+              {score == null ? '' : '分'}
             </span>
             <span className={styles.gaugeScoreTag} style={{ 
               backgroundColor: statusBg, 
@@ -608,7 +616,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', textAlign: 'center', flex: 1 }}>
                     {getDaysInMonthGrid(calendarYear, calendarMonth).map((cell, idx) => {
                       const isSelected = cell.dateStr === selectedDateStr;
-                      const hasHistory = new Set(allHistoryList.map(item => (item as any).target_date).filter(Boolean)).has(cell.dateStr);
+                      const hasHistory = new Set(allHistoryList.map(item => item.target_date).filter(Boolean)).has(cell.dateStr);
                       return (
                         <div
                           key={idx}
@@ -674,18 +682,20 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                       })()}
                     </div>
                     <div style={{ color: '#475569', fontSize: '0.8rem', marginTop: '4px' }}>
-                      包含前一交易日 15:30 至 {selectedDateStr} 15:30 产生的所有复盘记录
+                      {bounds && bounds.end.startsWith(selectedDateStr)
+                        ? `当前周期：${formatBoundsDate(bounds.start)} 至 ${formatBoundsDate(bounds.end)}`
+                        : '记录按后端返回的对应市场交易周期归组'}
                     </div>
                   </div>
                   
-                  {allHistoryList.filter(item => (item as any).target_date === selectedDateStr).length === 0 ? (
+                  {allHistoryList.filter(item => item.target_date === selectedDateStr).length === 0 ? (
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '0.9rem', textAlign: 'center', padding: '20px', border: '2px dashed rgba(255, 255, 255, 0.5)', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.35)' }}>
                       该日期暂无历史深度复盘记录。<br/>请在左侧日历上选择带有蓝点标记的日期。
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       {allHistoryList
-                        .filter(item => (item as any).target_date === selectedDateStr)
+                        .filter(item => item.target_date === selectedDateStr)
                         .map((item, idx) => (
                           <div 
                             key={idx}
@@ -717,7 +727,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                               <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span>{item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})</span>
                                 {(() => {
-                                  const itemScore = item.full_json?.score ?? 50;
+                                  const itemScore = item.full_json?.score;
+                                  if (itemScore == null) return <span style={{ color: '#64748b' }}>未评分</span>;
                                   const { color, text, bg, border } = getScoreInfo(itemScore);
                                   return (
                                     <span style={{ 

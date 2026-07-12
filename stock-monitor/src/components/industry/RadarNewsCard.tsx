@@ -1,6 +1,8 @@
 import React from 'react';
 import styles from './RadarNewsCard.module.css';
-import { ExternalLink, BrainCircuit } from 'lucide-react';
+import { ExternalLink, FileSearch } from 'lucide-react';
+
+type ContentType = 'official_announcement' | 'media_report' | 'institution_research' | 'other';
 
 export interface RadarNews {
   id: string;
@@ -9,12 +11,15 @@ export interface RadarNews {
   publish_time: string;
   original_link: string;
   credibility_level: string; // S, A, B, C
+  credibility_method: 'source_rule';
+  content_type: ContentType;
   region: string; // 国内, 国外
   related_chains: string[];
   related_stocks: string[];
-  ai_summary: string;
-  ai_impact: string;
-  ai_verification_status: string;
+  source_summary: string;
+  heuristic_impact: string;
+  impact_method: 'heuristic';
+  verification_status: string;
 }
 
 interface Props {
@@ -33,7 +38,12 @@ export default function RadarNewsCard({ news }: Props) {
     }
   };
 
-  const isVerified = news.ai_verification_status.includes('✅');
+  const contentTypeLabels: Record<ContentType, string> = {
+    official_announcement: '官方公告',
+    media_report: '媒体报道',
+    institution_research: '机构研报',
+    other: '其他资讯',
+  };
 
   const getSourceClass = (source: string) => {
     if (source.includes('港交所')) return styles.sourceHkex;
@@ -73,7 +83,10 @@ export default function RadarNewsCard({ news }: Props) {
 
       <div className={styles.tagsRow}>
         <span className={`${styles.tag} ${getCredClass(news.credibility_level)}`}>
-          {news.credibility_level}级
+          来源规则评级：{news.credibility_level}级
+        </span>
+        <span className={`${styles.tag} ${styles.regionTag}`}>
+          {contentTypeLabels[news.content_type]}
         </span>
         <span className={`${styles.tag} ${styles.regionTag}`}>
           {news.region}
@@ -94,18 +107,18 @@ export default function RadarNewsCard({ news }: Props) {
 
       <div className={styles.aiContainer}>
         <div className={styles.aiHeader}>
-          <BrainCircuit size={16} className={styles.aiIcon} />
-          <span>AI 交叉验证与解析</span>
-          <span className={`${styles.verifyStatus} ${isVerified ? styles.statusVerified : styles.statusWarning}`}>
-            {news.ai_verification_status}
+          <FileSearch size={16} className={styles.aiIcon} />
+          <span>来源规则判断与影响说明</span>
+          <span className={`${styles.verifyStatus} ${styles.statusWarning}`}>
+            {news.verification_status}
           </span>
         </div>
         <div className={styles.aiContent}>
           <p className={styles.summary}>
-            <strong>一句话摘要：</strong> {news.ai_summary}
+            <strong>来源摘要：</strong> {news.source_summary}
           </p>
           <p className={styles.impact}>
-            <strong>可能影响：</strong> {news.ai_impact}
+            <strong>规则影响分析：</strong> {news.heuristic_impact}
           </p>
         </div>
       </div>

@@ -1,7 +1,7 @@
-const echarts = require('echarts');
+async function main() {
+const echarts = await import('echarts');
 // Mocking the DOM environment for echarts
-const jsdom = require('jsdom');
-const { JSDOM } = jsdom;
+const { JSDOM } = await import('jsdom');
 const { window } = new JSDOM(`<!DOCTYPE html><div id="main" style="width: 600px;height:400px;"></div>`);
 global.window = window;
 global.document = window.document;
@@ -40,3 +40,6 @@ chart.dispatchAction({
     dataIndex: 0,
     seriesIndex: 0
 });
+}
+
+main().catch(console.error);

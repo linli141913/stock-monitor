@@ -95,17 +95,17 @@ export default function IndustryMonitorCard({ data, loading }: Props) {
             <div className={styles.progressTrack}>
               <div 
                 className={styles.progressFill} 
-                style={{ width: `${data?.heatScore || 0}%` }}
+                style={{ width: `${data?.heatScore ?? 0}%` }}
               ></div>
             </div>
-            <span className={styles.score}>{data?.heatScore || 0}/100</span>
+            <span className={styles.score}>{data?.heatScore == null ? '暂无数据' : `${data.heatScore}/100`}</span>
           </div>
         </div>
 
         <div className={styles.row}>
           <div className={styles.label}>板块涨跌</div>
-          <div className={`${styles.value} ${(data?.sectorChangePercent || 0) > 0 ? 'text-rise' : (data?.sectorChangePercent || 0) < 0 ? 'text-fall' : ''}`}>
-            {(data?.sectorChangePercent || 0) > 0 ? '+' : ''}{(data?.sectorChangePercent || 0).toFixed(2)}%
+          <div className={`${styles.value} ${data?.sectorChangePercent != null && data.sectorChangePercent > 0 ? 'text-rise' : data?.sectorChangePercent != null && data.sectorChangePercent < 0 ? 'text-fall' : ''}`}>
+            {data?.sectorChangePercent == null ? '暂无数据' : `${data.sectorChangePercent > 0 ? '+' : ''}${data.sectorChangePercent.toFixed(2)}%`}
           </div>
         </div>
 

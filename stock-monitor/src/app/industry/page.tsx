@@ -1,8 +1,8 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
+const API_BASE = '/api/backend';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Activity } from 'lucide-react';
 import styles from './page.module.css';
 import RadarNewsCard, { RadarNews } from '@/components/industry/RadarNewsCard';
@@ -23,9 +23,7 @@ export default function IndustryInsightPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const fetchNews = async (tabId: string, isSilent = false) => {
-    if (!isSilent) setLoading(true);
-    setError('');
+  const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
       let endpoint = `/${tabId}`;
       if (tabId === 'latest') endpoint = '/latest?category=all';
@@ -33,24 +31,37 @@ export default function IndustryInsightPage() {
       const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('获取资讯失败');
       const data = await res.json();
+      setError('');
       setNewsList(data);
-    } catch (err: any) {
-      if (!isSilent) setError(err.message || '网络错误');
+    } catch (err: unknown) {
+      if (!isSilent) setError(err instanceof Error ? err.message : '网络错误');
     } finally {
       if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchNews(activeTab, false);
+    const initialTimer = window.setTimeout(() => {
+      void fetchNews(activeTab, false);
+    }, 0);
     
     // 30秒静默轮询更新
     const timer = setInterval(() => {
       fetchNews(activeTab, true);
     }, 30000);
     
-    return () => clearInterval(timer);
-  }, [activeTab]);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(timer);
+    };
+  }, [activeTab, fetchNews]);
+
+  const handleTabChange = (tabId: string) => {
+    if (tabId === activeTab) return;
+    setLoading(true);
+    setError('');
+    setActiveTab(tabId);
+  };
 
   return (
     <div className={styles.container}>
@@ -67,7 +78,7 @@ export default function IndustryInsightPage() {
           <button
             key={tab.id}
             className={`${styles.tab} ${activeTab === tab.id ? styles.activeTab : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabChange(tab.id)}
           >
             {tab.label}
           </button>

@@ -1,7 +1,8 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import requests
@@ -13,18 +14,61 @@ from news_api import router as news_router
 from ai_analysis import router as ai_analysis_router
 from pydantic import BaseModel
 import database
+import market_calendar
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
 app = FastAPI(title="量化监测-股票", version="1.0.0")
 
+
+def get_allowed_origins() -> list[str]:
+    configured = os.getenv("FRONTEND_ORIGINS", "")
+    origins = ["http://localhost:4000", "http://127.0.0.1:4000"]
+    origins.extend(origin.strip() for origin in configured.split(",") if origin.strip())
+    return list(dict.fromkeys(origin for origin in origins if origin != "*"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=get_allowed_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Backend-Token", "ngrok-skip-browser-warning"],
 )
+
+
+def request_requires_backend_token(request: Request) -> bool:
+    path = request.url.path
+    if request.method in {"GET", "POST"} and path == "/api/watchlist":
+        return True
+    protected_ai_prefixes = (
+        "/api/stock/ai_attribution/",
+        "/api/stock/ai_history/",
+        "/api/stock/ai_history_all/",
+    )
+    return request.method == "GET" and path.startswith(protected_ai_prefixes)
+
+
+@app.middleware("http")
+async def protect_sensitive_endpoints(request: Request, call_next):
+    if not request_requires_backend_token(request):
+        return await call_next(request)
+
+    expected_token = os.getenv("BACKEND_API_TOKEN", "").strip()
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if not expected_token:
+        if app_env == "production":
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "服务端访问保护尚未配置"},
+            )
+        return await call_next(request)
+
+    provided_token = request.headers.get("X-Backend-Token", "")
+    import hmac
+
+    if not hmac.compare_digest(provided_token, expected_token):
+        return JSONResponse(status_code=401, content={"detail": "未授权访问"})
+    return await call_next(request)
 
 app.include_router(ai_analysis_router)
 app.include_router(news_router)
@@ -52,13 +96,14 @@ async def auto_analyze_watchlist():
             # We call the ai_attribution endpoint internally via requests to trigger full pipeline including history injection
             # Wait, calling localhost directly in a background task is the easiest way to reuse all logic
             url = f"http://127.0.0.1:8001/api/stock/ai_attribution/{symbol}?trigger=auto"
-            requests.get(url, timeout=60)
+            token = os.getenv("BACKEND_API_TOKEN", "").strip()
+            headers = {"X-Backend-Token": token} if token else {}
+            requests.get(url, headers=headers, timeout=60)
             print(f"[{datetime.now()}] {symbol} 自动分析完成。")
         except Exception as e:
             print(f"[{datetime.now()}] {symbol} 自动分析失败: {e}")
 
-async def auto_update_watchlist_industry():
-    print(f"[{datetime.now()}] 触发后台自动更新行业与政策监控任务...")
+def run_watchlist_industry_update_sync():
     items = database.get_watchlist()
     for item in items:
         symbol = item.get("stockCode")
@@ -75,6 +120,11 @@ async def auto_update_watchlist_industry():
             print(f"[{datetime.now()}] {symbol} 行业动态更新完成。")
         except Exception as e:
             print(f"[{datetime.now()}] {symbol} 自动更新行业动态失败: {e}")
+
+
+async def auto_update_watchlist_industry():
+    print(f"[{datetime.now()}] 触发后台自动更新行业与政策监控任务...")
+    await asyncio.to_thread(run_watchlist_industry_update_sync)
 
 @app.on_event("startup")
 def start_scheduler():
@@ -102,7 +152,7 @@ def get_prefix(symbol: str) -> str:
     symbol = symbol.lower()
     if symbol.startswith("hk"):
         return "" # 后面拼接时直接用 symbol，因为已经带了 hk
-    
+
     # 如果纯数字且长度为5，或者是港股常见代码
     if symbol.isdigit() and len(symbol) == 5:
         return "hk"
@@ -148,6 +198,147 @@ def calc_ma(closes: list[float], window: int) -> list:
     return result
 
 
+def format_market_timestamp(value: str) -> Optional[str]:
+    """将行情源时间统一为可读格式；缺失或格式异常时返回 None。"""
+    if not value:
+        return None
+    if "/" in value and ":" in value:
+        return value.replace("/", "-")
+    if len(value) >= 14 and value[:14].isdigit():
+        return (
+            f"{value[:4]}-{value[4:6]}-{value[6:8]} "
+            f"{value[8:10]}:{value[10:12]}:{value[12:14]}"
+        )
+    return None
+
+
+def get_market_status_for_symbol(symbol: str) -> dict:
+    market = database.get_market_by_symbol(symbol)
+    status, calendar_day = market_calendar.get_market_status(market)
+    return {
+        "marketStatus": status.label,
+        "marketStatusCode": status.code,
+        "market": market,
+        "calendarSource": calendar_day.source_url,
+        "calendarCheckedAt": calendar_day.checked_at,
+        "calendarError": calendar_day.error,
+    }
+
+
+def parse_optional_float(value: Any) -> Optional[float]:
+    """保留真实 0；缺失、空字符串或无效数字返回 None。"""
+    if value in (None, "", "-"):
+        return None
+    try:
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_sina_money_flow(payload: dict) -> Optional[float]:
+    """解析新浪资金流接口报告的主力净额；缺失时保持 None。"""
+    return parse_optional_float(payload.get("netamount"))
+
+
+def find_sina_industry_node(nodes: Any, industry_name: str) -> Optional[str]:
+    """从新浪真实板块目录中查找与公司行业一致的板块代码。"""
+    if not industry_name:
+        return None
+    candidates = []
+
+    def walk(value: Any) -> None:
+        if not isinstance(value, list):
+            return
+        if (
+            len(value) >= 3
+            and isinstance(value[0], str)
+            and isinstance(value[2], str)
+            and value[2].startswith(("sw1_", "sw2_", "sw3_", "new_"))
+        ):
+            candidates.append((value[0].strip(), value[2]))
+        for child in value:
+            walk(child)
+
+    walk(nodes)
+    for name, node in candidates:
+        if name == industry_name:
+            return node
+    for name, node in candidates:
+        if industry_name in name or name in industry_name:
+            return node
+    return None
+
+
+def parse_sina_peer_codes(rows: list[dict], symbol: str) -> list[str]:
+    current = symbol.lower().replace("sh", "").replace("sz", "").replace("bj", "")
+    peers = []
+    for row in rows:
+        code = str(row.get("code", "")).strip().zfill(6)
+        if code.isdigit() and len(code) == 6 and code != current and code not in peers:
+            peers.append(code)
+    return peers
+
+
+def get_sina_data(url: str, timeout: int = 5) -> requests.Response:
+    """新浪国内公开接口直连，不继承本机代理地址。"""
+    session = requests.Session()
+    session.trust_env = False
+    return session.get(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://finance.sina.com.cn/",
+        },
+        timeout=timeout,
+    )
+
+
+def get_sina_stock_fund_flow(symbol: str) -> Optional[float]:
+    code = symbol.lower().replace("sh", "").replace("sz", "").replace("bj", "")
+    if not (code.isdigit() and len(code) == 6):
+        return None
+    prefix = "sh" if code.startswith("6") else "sz"
+    url = (
+        "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+        f"MoneyFlow.ssi_ssfx_flzjtj?daima={prefix}{code}"
+    )
+    try:
+        response = get_sina_data(url)
+        response.raise_for_status()
+        return parse_sina_money_flow(response.json())
+    except Exception as exc:
+        print(f"Failed to fetch Sina fund flow for {code}: {exc}")
+        return None
+
+
+def get_a_share_industry_peer_codes(symbol: str, industry_name: str) -> list[str]:
+    """从新浪申万行业目录获取真实同行代码，失败时返回空列表。"""
+    if not industry_name:
+        return []
+    try:
+        nodes_url = (
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+            "Market_Center.getHQNodes"
+        )
+        nodes_response = get_sina_data(nodes_url)
+        nodes_response.raise_for_status()
+        node = find_sina_industry_node(nodes_response.json(), industry_name)
+        if not node:
+            return []
+        detail_url = (
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+            f"Market_Center.getHQNodeData?page=1&num=300&sort=symbol&asc=1&node={node}"
+            "&symbol=&_s_r_a=page"
+        )
+        detail_response = get_sina_data(detail_url)
+        detail_response.raise_for_status()
+        return parse_sina_peer_codes(detail_response.json(), symbol)
+    except Exception as exc:
+        print(f"Failed to fetch Sina industry constituents for {industry_name}: {exc}")
+        return []
+
+
 # ── 接口实现 ──────────────────────────────────────────────────
 
 class WatchlistRequest(BaseModel):
@@ -167,12 +358,15 @@ def update_watchlist(req: WatchlistRequest):
 @app.get("/api/stock/ai_history/{symbol}")
 def get_ai_history(symbol: str):
     start_time, end_time = database.get_trading_session_bounds_for_symbol(symbol)
+    bounds = None
+    calendar_status = "unknown"
+    if start_time is not None and end_time is not None:
+        bounds = {"start": start_time, "end": end_time}
+        calendar_status = "available"
     return {
         "data": database.get_today_analysis_history(symbol),
-        "bounds": {
-            "start": start_time,
-            "end": end_time
-        }
+        "bounds": bounds,
+        "calendarStatus": calendar_status,
     }
 
 @app.get("/api/stock/ai_history_all/{symbol}")
@@ -220,50 +414,37 @@ def get_batch_overview(symbols: str):
             if len(v) > 32:
                 name = v[1]
                 code = v[2]
-                price = v[3]
-                change_pct = v[32]
+                price = parse_optional_float(v[3] if len(v) > 3 else None)
+                change_pct = parse_optional_float(v[32] if len(v) > 32 else None)
                 is_hk = len(code) == 5 and code.isdigit()
+                raw_amount = parse_optional_float(v[37] if len(v) > 37 else None)
+                raw_volume = parse_optional_float(v[36] if len(v) > 36 else None)
                 
                 results.append({
                     "symbol": code,
                     "name": name,
                     "price": price,
-                    "changePct": f"{change_pct}%" if change_pct != '' else "0.00%",
-                    "changePercent": float(change_pct) if change_pct != '' else 0.0,
-                    "amount": float(v[37]) if is_hk else (float(v[37]) * 10000 if len(v) > 37 and v[37] != '' else 0.0),
-                    "volume": float(v[36]) if is_hk else (float(v[36]) * 100 if len(v) > 36 and v[36] != '' else 0.0),
+                    "changePct": f"{change_pct}%" if change_pct is not None else None,
+                    "changePercent": change_pct,
+                    "amount": raw_amount if is_hk or raw_amount is None else raw_amount * 10000,
+                    "volume": raw_volume if is_hk or raw_volume is None else raw_volume * 100,
                 })
                 
-        # 批量获取真实量化资金流向
+        # 新浪公开接口逐只获取真实主力资金净额；港股暂不填充无可靠口径的数据。
         if results:
-            try:
-                secids = []
-                for r in results:
-                    code = r["symbol"]
-                    if len(code) == 5 and code.isdigit():
-                        prefix = "116."
+            for item in results:
+                code = item["symbol"]
+                if len(code) != 6:
+                    continue
+                raw_flow = get_sina_stock_fund_flow(code)
+                if raw_flow is not None:
+                    flow_yi = raw_flow / 100000000.0
+                    if flow_yi > 0:
+                        item["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元"
+                    elif flow_yi < 0:
+                        item["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
                     else:
-                        prefix = "1." if code.startswith('6') else "0."
-                    secids.append(f"{prefix}{code}")
-                
-                em_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
-                resp_em = get_em_data(em_url, timeout=3)
-                if resp_em.status_code == 200:
-                    json_data = resp_em.json()
-                    data_obj = json_data.get("data")
-                    if data_obj and isinstance(data_obj, dict):
-                        diff_list = data_obj.get("diff", [])
-                        if diff_list and isinstance(diff_list, list):
-                            flow_map = {item.get("f12"): item.get("f62", 0) for item in diff_list if isinstance(item, dict) and item.get("f12")}
-                            
-                            for r in results:
-                                code = r["symbol"]
-                                raw_flow = flow_map.get(code, 0)
-                                if raw_flow is not None and isinstance(raw_flow, (int, float)) and raw_flow != 0:
-                                    flow_yi = raw_flow / 100000000.0
-                                    r["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} 亿元"
-            except Exception as e:
-                print("Failed to fetch real fund flow for batch overview:", e)
+                        item["fundFlow"] = "主力资金净流 0.0 亿元"
 
         return {"data": results}
     except Exception as e:
@@ -297,7 +478,8 @@ def get_stock_overview(symbol: str):
     
     # 1. 获取基本行情
     try:
-        url = f"http://qt.gtimg.cn/q={prefix}{symbol.replace('hk','')}"
+        quote_symbol = symbol.lower() if symbol.lower().startswith("hk") else f"{prefix}{symbol}"
+        url = f"http://qt.gtimg.cn/q={quote_symbol}"
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3)
         resp.encoding = 'gbk'
         text = resp.text
@@ -327,113 +509,79 @@ def get_stock_overview(symbol: str):
     is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
 
     try:
-        name = fields[1] if len(fields) > 1 else symbol
-        latest_price = float(fields[3]) if len(fields) > 3 and fields[3] else 0.0
-        prev_close   = float(fields[4]) if len(fields) > 4 and fields[4] else 0.0
-        open_price   = float(fields[5]) if len(fields) > 5 and fields[5] else 0.0
-        change_amount  = float(fields[31]) if len(fields) > 31 and fields[31] else 0.0
-        change_percent = float(fields[32]) if len(fields) > 32 and fields[32] else 0.0
-        high_price   = float(fields[33]) if len(fields) > 33 and fields[33] else 0.0
-        low_price    = float(fields[34]) if len(fields) > 34 and fields[34] else 0.0
-        volume    = (float(fields[36]) / 10000.0) if len(fields) > 36 and fields[36] else 0.0
-        turnover  = (float(fields[37]) / 100000000.0) if is_hk else ((float(fields[37]) / 10000.0) if len(fields) > 37 and fields[37] else 0.0)
-        turnover_rate = float(fields[38]) if len(fields) > 38 and fields[38] else 0.0
-        pe_ratio  = fields[39] if len(fields) > 39 else "-"
-        market_cap = fields[45] if len(fields) > 45 else "-"
+        name = fields[1] if len(fields) > 1 and fields[1] else symbol
+        latest_price = parse_optional_float(fields[3] if len(fields) > 3 else None)
+        prev_close = parse_optional_float(fields[4] if len(fields) > 4 else None)
+        open_price = parse_optional_float(fields[5] if len(fields) > 5 else None)
+        change_amount = parse_optional_float(fields[31] if len(fields) > 31 else None)
+        change_percent = parse_optional_float(fields[32] if len(fields) > 32 else None)
+        high_price = parse_optional_float(fields[33] if len(fields) > 33 else None)
+        low_price = parse_optional_float(fields[34] if len(fields) > 34 else None)
+        raw_volume = parse_optional_float(fields[36] if len(fields) > 36 else None)
+        raw_turnover = parse_optional_float(fields[37] if len(fields) > 37 else None)
+        volume = raw_volume / 10000.0 if raw_volume is not None else None
+        if raw_turnover is None:
+            turnover = None
+        else:
+            turnover = raw_turnover / 100000000.0 if is_hk else raw_turnover / 10000.0
+        turnover_rate_index = 59 if is_hk else 38
+        turnover_rate = parse_optional_float(
+            fields[turnover_rate_index] if len(fields) > turnover_rate_index else None
+        )
+        pe_ratio = parse_optional_float(fields[39] if len(fields) > 39 else None)
+        market_cap = parse_optional_float(fields[45] if len(fields) > 45 else None)
         update_time = fields[30] if len(fields) > 30 else ""
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"数据解析失败: {e}")
 
-    # 格式化时间
-    if "/" in update_time and ":" in update_time:
-        # 已经是 2026/07/06 15:11:12 这种格式，转成横杠
-        update_time = update_time.replace("/", "-")
-    elif len(update_time) >= 14:
-        update_time = (
-            f"{update_time[:4]}-{update_time[4:6]}-{update_time[6:8]} "
-            f"{update_time[8:10]}:{update_time[10:12]}:{update_time[12:14]}"
-        )
-    else:
-        update_time = "当前"
+    source_time = format_market_timestamp(update_time)
+    fetched_at = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(timespec="seconds")
 
-    status = "up" if change_amount > 0 else ("down" if change_amount < 0 else "flat")
-    
-    # 计算是否休市（简单按北京时间）
-    import datetime
-    market_status_text = "交易中"
-    now = datetime.datetime.now()
-    if now.weekday() >= 5:
-        market_status_text = "已休市"
+    if change_amount is None:
+        status = "unknown"
     else:
-        time_int = now.hour * 100 + now.minute
-        if time_int < 930 or time_int >= 1500:
-            market_status_text = "已休市"
+        status = "up" if change_amount > 0 else ("down" if change_amount < 0 else "flat")
+
+    market_status = get_market_status_for_symbol(symbol)
 
     res = {
         "name": name,
         "code": symbol,
         "status": status,
-        "marketStatus": market_status_text,
+        **market_status,
         "latestPrice": latest_price,
         "changeAmount": change_amount,
         "changePercent": change_percent,
-        "updateTime": update_time,
+        "sourceTime": source_time,
+        "fetchedAt": fetched_at,
         "details": {
             "open": open_price,
             "high": high_price,
             "low": low_price,
             "previousClose": prev_close,
-            "volume": f"{volume:.2f}万股" if is_hk else f"{volume:.2f}万手",
-            "turnoverAmount": f"{turnover:.2f}亿港元" if is_hk else f"{turnover:.2f}亿元",
+            "volume": (f"{volume:.2f}万股" if is_hk else f"{volume:.2f}万手") if volume is not None else None,
+            "turnoverAmount": (f"{turnover:.2f}亿港元" if is_hk else f"{turnover:.2f}亿元") if turnover is not None else None,
             "turnoverRate": turnover_rate,
             "peRatio": pe_ratio,
-            "marketCap": f"{market_cap}亿港元" if is_hk else f"{market_cap}亿元",
+            "marketCap": (f"{market_cap}亿港元" if is_hk else f"{market_cap}亿元") if market_cap is not None else None,
         },
         "industry": "-",
         "concepts": []
     }
     
-    # 尝试获取真实量化资金流向
-    try:
-        is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
-        em_prefix = get_em_prefix(symbol)
-        em_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={em_prefix}{symbol.replace('hk','')}&fields=f12,f62,f137,f138,f147,f148"
-        resp_em = get_em_data(em_url, timeout=3)
-        if resp_em.status_code == 200:
-            json_data = resp_em.json()
-            data_obj = json_data.get("data")
-            if data_obj and isinstance(data_obj, dict):
-                diff_list = data_obj.get("diff", [])
-                if diff_list and isinstance(diff_list, list) and len(diff_list) > 0:
-                    item = diff_list[0]
-                    if is_hk:
-                        # 港股主力净流 = (超大单买入f137 + 大单买入f138) - (超大单卖出f147 + 大单卖出f148)
-                        f137 = item.get("f137") or 0
-                        f138 = item.get("f138") or 0
-                        f147 = item.get("f147") or 0
-                        f148 = item.get("f148") or 0
-                        net_flow = (f137 + f138) - (f147 + f148)
-                        # 如果没有数据，且算出来是0，则可能接口无效
-                        if net_flow != 0 or f137 != 0 or f147 != 0:
-                            flow_yi = net_flow / 100000000.0
-                            res["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿港元" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} 亿港元"
-                    else:
-                        f62_val = item.get("f62")
-                        if f62_val is not None and isinstance(f62_val, (int, float)):
-                            flow_yi = f62_val / 100000000.0
-                            res["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} 亿元"
-                        
-        if "fundFlow" not in res and not is_hk:
-            import akshare as ak
-            df = ak.stock_individual_fund_flow_rank(indicator="今日")
-            row = df[df["代码"] == symbol]
-            if not row.empty:
-                f_val = row.iloc[0]["今日-主力净流入-净额"]
-                if isinstance(f_val, (int, float)):
-                    flow_yi = f_val / 100000000.0
-                    res["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} 亿元"
-    except Exception as e:
-        print("Failed to fetch real fund flow for overview:", e)
+    is_hk = symbol.lower().startswith("hk") or (symbol.isdigit() and len(symbol) == 5)
+    if is_hk:
+        res["fundFlow"] = "暂无港股资金流数据"
+    else:
+        raw_flow = get_sina_stock_fund_flow(symbol)
+        if raw_flow is not None:
+            flow_yi = raw_flow / 100000000.0
+            if flow_yi > 0:
+                res["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元"
+            elif flow_yi < 0:
+                res["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
+            else:
+                res["fundFlow"] = "主力资金净流 0.0 亿元"
 
     return res
 
@@ -571,23 +719,23 @@ def get_company_info(symbol: str):
             
             # 港股财务指标
             df_finance = ak.stock_financial_hk_analysis_indicator_em(symbol=symbol_pure)
-            df_finance = df_finance.fillna(0)
             finance_dict = df_finance.to_dict('records')[0] if not df_finance.empty else {}
             
             report_period = str(finance_dict.get('REPORT_DATE', '-'))[:10]
-            revenue = finance_dict.get('OPERATE_INCOME', 0)
-            revenue = f"{revenue/100000000:.2f}亿" if revenue and revenue != '-' else "-"
-            revenue_yoy = finance_dict.get('OPERATE_INCOME_YOY', 0)
-            revenue_yoy = f"{revenue_yoy:.2f}%" if revenue_yoy and revenue_yoy != '-' else "-"
-            net_profit = finance_dict.get('HOLDER_PROFIT', 0)
-            net_profit = f"{net_profit/100000000:.2f}亿" if net_profit and net_profit != '-' else "-"
-            net_profit_yoy = finance_dict.get('HOLDER_PROFIT_YOY', 0)
-            net_profit_yoy = f"{net_profit_yoy:.2f}%" if net_profit_yoy and net_profit_yoy != '-' else "-"
-            gross_margin = finance_dict.get('GROSS_PROFIT_RATIO', 0)
-            gross_margin = f"{gross_margin:.2f}%" if gross_margin and gross_margin != '-' else "-"
-            roe = finance_dict.get('ROE_YEARLY', 0)
-            roe = f"{roe:.2f}%" if roe and roe != '-' else "-"
-            eps = finance_dict.get('BASIC_EPS', '-')
+            revenue_value = parse_optional_float(finance_dict.get('OPERATE_INCOME'))
+            revenue = f"{revenue_value/100000000:.2f}亿" if revenue_value is not None else "-"
+            revenue_yoy_value = parse_optional_float(finance_dict.get('OPERATE_INCOME_YOY'))
+            revenue_yoy = f"{revenue_yoy_value:.2f}%" if revenue_yoy_value is not None else "-"
+            net_profit_value = parse_optional_float(finance_dict.get('HOLDER_PROFIT'))
+            net_profit = f"{net_profit_value/100000000:.2f}亿" if net_profit_value is not None else "-"
+            net_profit_yoy_value = parse_optional_float(finance_dict.get('HOLDER_PROFIT_YOY'))
+            net_profit_yoy = f"{net_profit_yoy_value:.2f}%" if net_profit_yoy_value is not None else "-"
+            gross_margin_value = parse_optional_float(finance_dict.get('GROSS_PROFIT_RATIO'))
+            gross_margin = f"{gross_margin_value:.2f}%" if gross_margin_value is not None else "-"
+            roe_value = parse_optional_float(finance_dict.get('ROE_YEARLY'))
+            roe = f"{roe_value:.2f}%" if roe_value is not None else "-"
+            eps_value = parse_optional_float(finance_dict.get('BASIC_EPS'))
+            eps = eps_value if eps_value is not None else "-"
             
             return {
                 "companyInfo": {
@@ -615,7 +763,7 @@ def get_company_info(symbol: str):
                 }
             }
         except Exception as e:
-            print("Failed to fetch HK company info, fallback to mock:", e)
+            print("Failed to fetch HK company info; returning missing-data state:", e)
             return {
                 "companyInfo": {
                     "mainBusiness": "港股公司信息",
@@ -625,7 +773,7 @@ def get_company_info(symbol: str):
                     "businessRelation": "-",
                     "updateTime": "实时"
                 },
-                "financialSummary": {
+                "financialData": {
                     "reportPeriod": "-",
                     "revenue": "-",
                     "revenueYoy": "-",
@@ -737,88 +885,80 @@ def get_company_info(symbol: str):
 
 from ai_analysis import fetch_real_industry_dynamics
 
+
+def format_industry_fund_flow(status_code, available, flow_value, is_hk):
+    if is_hk:
+        return "暂无港股行业资金流数据"
+    if status_code == "unknown":
+        return "暂无资金流数据（市场状态未知）"
+    if status_code == "lunch_break":
+        if available and flow_value is not None:
+            return f"午间休市 {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
+        return "暂无资金流数据（午间休市）"
+    if status_code != "trading":
+        if available and flow_value is not None:
+            return f"今日收盘 {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
+        return "暂无资金流数据（非交易时段）"
+    if not available or flow_value is None:
+        return "数据获取中..."
+    if flow_value > 0:
+        return f"净流入 {flow_value} 亿元"
+    if flow_value < 0:
+        return f"净流出 {abs(flow_value)} 亿元"
+    return "主力资金净流 0.0 亿元"
+
 @app.get("/api/stock/industry/{symbol}")
 def get_industry_monitor(symbol: str):
     """
-    抓取东方财富板块资金流，展示真实的主力监控，并融入AI上下游与政策动态（自选限制）
+    按市场获取行业指标，并融入 AI 上下游与政策动态（自选限制）。
     """
     # 1. 先获取这只股票的所属行业
     company_data = get_company_info(symbol)
     industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
     industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else "半导体"
+    is_hk = symbol.lower().startswith("hk") or (symbol.isdigit() and len(symbol) == 5)
     
-    # 判断是否在交易时间（工作日 09:30-15:00 北京时间）
-    from datetime import datetime, time as dtime
-    import pytz
-    now_cst = datetime.now(pytz.timezone("Asia/Shanghai"))
-    is_trading_hours = (
-        now_cst.weekday() < 5  # 周一到周五
-        and dtime(9, 30) <= now_cst.time() <= dtime(15, 0)
-    )
+    market_status = get_market_status_for_symbol(symbol)
 
-    # 优先用 akshare 行业资金流排行，直接按行业名匹配，稳定可靠
-    fallback_heat = 60
-    fallback_flow = 0.0
-    sector_change = 0.0
+    # 同花顺公开行业资金流，按真实行业名称匹配。
+    fallback_heat = None
+    fallback_flow = None
+    sector_change = None
     fund_flow_available = False
     try:
+        if is_hk:
+            raise LookupError("港股不使用 A 股行业资金流口径")
         import akshare as ak
-        df_sector = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
-        # 模糊匹配行业名称（industry_name 可能是 "光学光电子" 或 "半导体" 等）
-        matched = df_sector[df_sector["名称"].str.contains(industry_name, na=False)]
+        df_sector = ak.stock_fund_flow_industry(symbol="即时")
+        matched = df_sector[df_sector["行业"].astype(str) == industry_name]
         if matched.empty:
             for kw in industry_name.split("·"):
-                matched = df_sector[df_sector["名称"].str.contains(kw.strip(), na=False)]
+                matched = df_sector[df_sector["行业"].astype(str).str.contains(kw.strip(), na=False)]
                 if not matched.empty:
                     break
         if not matched.empty:
             row = matched.iloc[0]
-            raw_flow = row.get("今日主力净流入-净额", 0) or 0
-            fallback_flow = round(float(raw_flow) / 1e8, 2)
-            raw_pct = row.get("今日涨跌幅", 0) or 0
-            sector_change = round(float(raw_pct), 2)
-            fallback_heat = min(100, int(50 + abs(fallback_flow) * 0.3 + sector_change * 3))
-            fund_flow_available = True
+            raw_flow = parse_optional_float(row.get("净额"))
+            raw_pct = parse_optional_float(row.get("行业-涨跌幅"))
+            if raw_flow is not None:
+                fallback_flow = round(raw_flow, 2)
+                fund_flow_available = True
+            if raw_pct is not None:
+                sector_change = round(raw_pct, 2)
+            if fallback_flow is not None and sector_change is not None:
+                fallback_heat = max(0, min(100, int(50 + abs(fallback_flow) * 0.3 + sector_change * 3)))
+    except LookupError:
+        pass
     except Exception as e:
-        print("akshare sector fund flow failed:", e)
-        # 备用：用相关股票资金流加总
-        try:
-            related = get_related_stocks(symbol)
-            related_data = related.get("data", [])
-            total_flow = 0.0
-            total_change = 0.0
-            count = len(related_data)
-            for r in related_data:
-                flow_str = r.get("fundFlow", "")
-                if "流入" in flow_str:
-                    try:
-                        val = float(flow_str.replace("净", "").replace("流入", "").replace("亿港元", "").replace("亿元", "").strip())
-                        total_flow += val
-                    except: pass
-                elif "流出" in flow_str:
-                    try:
-                        val = float(flow_str.replace("净", "").replace("流出", "").replace("亿港元", "").replace("亿元", "").strip())
-                        total_flow -= val
-                    except: pass
-                cp = r.get("changePercent") or r.get("oneDayChange", 0.0)
-                total_change += float(cp)
-            if count > 0:
-                fallback_flow = round(total_flow, 2)
-                sector_change = round(total_change / count, 2)
-                fallback_heat = min(100, int(50 + (abs(fallback_flow) * 2) + sector_change * 3))
-                if abs(fallback_flow) > 0:
-                    fund_flow_available = True
-        except Exception as e2:
-            print("Fallback derivation logic error:", e2)
+        print("THS industry fund flow failed:", e)
 
-    # Format fund flow string，收盘/非交易时间给出明确提示
     flow_val = fallback_flow
-    if not is_trading_hours:
-        flow_str = f"今日收盘 {'+' if flow_val >= 0 else ''}{flow_val} 亿元" if fund_flow_available else "今日已收盘"
-    elif not fund_flow_available:
-        flow_str = "数据获取中..."
-    else:
-        flow_str = f"净流入 {flow_val} 亿元" if flow_val > 0 else f"净流出 {abs(flow_val)} 亿元"
+    flow_str = format_industry_fund_flow(
+        market_status["marketStatusCode"],
+        fund_flow_available,
+        flow_val,
+        is_hk,
+    )
     
     # 2. 检查是否在自选监测列表中，若不在则不调用大模型筛选，展示说明文字，防额度消耗
     # 实时去重多源资讯池（读取 80 条）
@@ -877,7 +1017,7 @@ def get_industry_monitor(symbol: str):
     
     upstream_downstream_list = dynamics.get("upstreamDownstream", [])
     up_status = upstream_downstream_list[0].get("title", "上游动态监控中") if len(upstream_downstream_list) > 0 else "上游动态监控中"
-    down_status = upstream_downstream_list[1].get("title", "下游动态监控中") if len(upstream_downstream_list) > 1 else ("主力资金加持" if flow_val > 0 else "抛压较重")
+    down_status = upstream_downstream_list[1].get("title", "下游动态监控中") if len(upstream_downstream_list) > 1 else "暂无可验证下游动态"
 
     return {
         "industryName": industry_name,
@@ -927,35 +1067,19 @@ def get_abnormal_peers(symbol: str):
     is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
     
     if is_hk:
-        hk_sector_map = {
-            "汽车": ["09863", "02015", "09868", "00175", "02333", "01211", "09866", "01958", "00425"],
-            "互联网": ["00700", "09988", "03690", "01024", "09999", "09618", "01810", "09888", "02020", "00241"],
-            "半导体": ["00981", "01347", "00522"],
-            "银行": ["03988", "01398", "00939", "00005", "03328", "01658", "02016"],
-            "医药": ["02269", "01093", "01177", "01548", "02196", "02359", "01066"],
-            "房地产": ["00016", "01109", "00688", "00012", "00960", "02777", "01918"],
-        }
-        company_data = get_company_info(symbol)
-        industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
-        industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else ""
-        peers = hk_sector_map.get(industry_name, ["00700", "09988", "03690", "01810", "00981", "09868", "01024"])
-    else:
-        # 更庞大的半导体/电子/科技类股票池，以确保能找到10个异常的
-        peers = [
-            "002371", "688256", "601138", "600584", "002241", "002475", "603501", 
-            "600111", "603986", "688012", "688036", "002049", "688981", "688008", 
-            "600522", "600745", "600460", "300308", "300474", "300661", "002371",
-            "000063", "000977", "002050", "002156", "002185", "002236", "002384",
-            "002415", "002436", "002456", "002463", "002938", "300014", "300115",
-            "300223", "300327", "300394", "300408", "300433", "300456", "300458",
-            "300474", "300496", "300604", "300628", "300661", "300750", "300782",
-            "600206", "600460", "600584", "600667", "600703", "600745", "603160",
-            "603290", "603501", "603986", "688008", "688012", "688018", "688019",
-            "688036", "688099", "688111", "688126", "688256", "688396", "688521",
-            "688536", "688981"
-        ]
-    # 去重
-    peers = list(set(peers))
+        # 暂无可追溯的港股行业成分接口，不使用手工股票列表冒充真实同行。
+        return {"data": []}
+
+    company_data = get_company_info(symbol)
+    industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
+    industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else ""
+    peers = get_a_share_industry_peer_codes(symbol, industry_name)
+
+    if not peers:
+        return {"data": []}
+
+    # 保持数据源顺序并去重，避免每次刷新结果随机变化。
+    peers = list(dict.fromkeys(peers))
     
     query_list = []
     for c in peers:
@@ -980,8 +1104,8 @@ def get_abnormal_peers(symbol: str):
                     if len(v) > 32:
                         name = v[1]
                         code = v[2]
-                        price = float(v[3])
-                        change_pct = float(v[32])
+                        price = parse_optional_float(v[3] if len(v) > 3 else None)
+                        change_pct = parse_optional_float(v[32] if len(v) > 32 else None)
                         
                         # 排除自身
                         if code == symbol:
@@ -993,12 +1117,12 @@ def get_abnormal_peers(symbol: str):
                                 "stockName": name,
                                 "stockCode": code,
                                 "oneDayChange": change_pct,
-                                "twentyDayChange": round(change_pct * 4.5, 2), # 模拟
-                                "volumeRatio": round(1.5 + (abs(change_pct)/10), 2),
-                                "reason": f"行业资金{'流入' if change_pct>0 else '流出'}驱动",
-                                "riskNote": "短期波动放大" if abs(change_pct)>7 else "温和放量",
-                                "updateTime": "15:00:00",
-                                "fundFlow": f"净{'流入' if change_pct>0 else '流出'} {abs(round(change_pct * 1.25, 2))} 亿元"
+                                "twentyDayChange": None,
+                                "volumeRatio": None,
+                                "reason": None,
+                                "riskNote": None,
+                                "updateTime": format_market_timestamp(v[30] if len(v) > 30 else ""),
+                                "fundFlow": None
                             })
         except Exception as e:
             pass
@@ -1015,47 +1139,22 @@ def get_abnormal_peers(symbol: str):
     # 取前 20 个（前端后续可能过滤）
     top_results = unique_results[:20]
     
-    # 真实量化资金流向：通过东方财富 API 批量获取这批个股的主力净流入
+    # 新浪公开接口返回这批 A 股的真实主力净额。
     if top_results:
-        try:
-            secids = []
-            for r in top_results:
-                code = r["stockCode"]
-                if is_hk:
-                    secids.append(f"116.{code}")
-                else:
-                    prefix = "1." if code.startswith('6') else "0."
-                    secids.append(f"{prefix}{code}")
-                
-            fields = "f12,f137,f138,f147,f148" if is_hk else "f12,f62"
-            url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields={fields}"
-            resp = get_em_data(url, timeout=1.5)
-            if resp.status_code == 200:
-                data = resp.json().get("data", {}).get("diff", [])
-                
-                if is_hk:
-                    flow_map = {}
-                    for item in data:
-                        if not item.get("f12"): continue
-                        f137 = item.get("f137") or 0
-                        f138 = item.get("f138") or 0
-                        f147 = item.get("f147") or 0
-                        f148 = item.get("f148") or 0
-                        flow_map[item.get("f12")] = (f137 + f138) - (f147 + f148)
-                else:
-                    flow_map = {item.get("f12"): item.get("f62", 0) for item in data if item.get("f12")}
-                
-                for r in top_results:
-                    code = r["stockCode"]
-                    raw_flow = flow_map.get(code, 0)
-                    if raw_flow != 0:
-                        flow_yi = raw_flow / 100000000.0
-                        unit = "亿港元" if is_hk else "亿元"
-                        flow_str = f"净流入 {round(flow_yi, 2)} {unit}" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} {unit}"
-                        r["fundFlow"] = flow_str
-                        r["reason"] = f"真实主力{'流入' if flow_yi > 0 else '流出'}驱动"
-        except Exception as e:
-            print("Failed to fetch real fund flow for peers:", e)
+        for item in top_results:
+            raw_flow = get_sina_stock_fund_flow(item["stockCode"])
+            if raw_flow is None:
+                continue
+            flow_yi = raw_flow / 100000000.0
+            if flow_yi > 0:
+                item["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元"
+                item["reason"] = "主力资金净流入"
+            elif flow_yi < 0:
+                item["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
+                item["reason"] = "主力资金净流出"
+            else:
+                item["fundFlow"] = "主力资金净流 0.0 亿元"
+                item["reason"] = "主力资金净流为 0"
             
     return {"data": top_results}
 
@@ -1081,40 +1180,37 @@ def get_finance_data(symbol: str):
             df = ak.stock_financial_hk_analysis_indicator_em(symbol=symbol_pure)
             if df.empty:
                 raise HTTPException(status_code=404, detail="暂无财报数据")
-            df = df.fillna(0)
             reports = df.to_dict('records')
             
-            total_shares = 1
+            total_shares = None
             try:
                 df_ind = ak.stock_hk_financial_indicator_em(symbol=symbol_pure)
                 if not df_ind.empty:
-                    val = df_ind.iloc[0].get("已发行股本(股)", 0)
-                    if val and str(val) != 'nan':
-                        total_shares = float(val)
+                    total_shares = parse_optional_float(df_ind.iloc[0].get("已发行股本(股)"))
             except Exception as e:
                 print("Failed to fetch total shares for HK", e)
             
             formatted_all = []
             for r in reports:
-                per_cash = r.get("PER_NETCASH_OPERATE", 0)
-                ocf = float(per_cash) * total_shares if per_cash and total_shares > 1 else 0
+                per_cash = parse_optional_float(r.get("PER_NETCASH_OPERATE"))
+                ocf = per_cash * total_shares if per_cash is not None and total_shares is not None else None
                 date_str = str(r.get("REPORT_DATE", ""))[:10]
                 formatted_all.append({
                     "reportDate": date_str,
                     "reportName": f"{date_str[:4]}年报", # 港股API通常返回年报或半年报
                     "reportType": "年报",
-                    "revenue": r.get("OPERATE_INCOME", 0),
-                    "revenueYoy": r.get("OPERATE_INCOME_YOY", 0),
-                    "netProfit": r.get("HOLDER_PROFIT", 0),
-                    "netProfitYoy": r.get("HOLDER_PROFIT_YOY", 0),
-                    "deductNetProfit": r.get("HOLDER_PROFIT", 0), # 用净利润兜底
-                    "deductNetProfitYoy": r.get("HOLDER_PROFIT_YOY", 0),
-                    "grossMargin": r.get("GROSS_PROFIT_RATIO", 0),
-                    "netMargin": r.get("NET_PROFIT_RATIO", 0),
-                    "roe": r.get("ROE_YEARLY", 0),
-                    "assetLiabilityRatio": r.get("DEBT_ASSET_RATIO", 0),
+                    "revenue": parse_optional_float(r.get("OPERATE_INCOME")),
+                    "revenueYoy": parse_optional_float(r.get("OPERATE_INCOME_YOY")),
+                    "netProfit": parse_optional_float(r.get("HOLDER_PROFIT")),
+                    "netProfitYoy": parse_optional_float(r.get("HOLDER_PROFIT_YOY")),
+                    "deductNetProfit": None,
+                    "deductNetProfitYoy": None,
+                    "grossMargin": parse_optional_float(r.get("GROSS_PROFIT_RATIO")),
+                    "netMargin": parse_optional_float(r.get("NET_PROFIT_RATIO")),
+                    "roe": parse_optional_float(r.get("ROE_YEARLY")),
+                    "assetLiabilityRatio": parse_optional_float(r.get("DEBT_ASSET_RATIO")),
                     "operateCashFlow": ocf,
-                    "eps": r.get("BASIC_EPS", 0)
+                    "eps": parse_optional_float(r.get("BASIC_EPS"))
                 })
             
             formatted_all.sort(key=lambda x: x["reportDate"], reverse=True)
@@ -1239,81 +1335,15 @@ def get_related_stocks(symbol: str):
         industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else ""
 
         if is_hk:
-            # 港股相关股票映射表
-            hk_sector_map = {
-                "汽车": ["09863", "02015", "09868", "00175", "02333", "01211", "09866"],
-                "互联网": ["00700", "09988", "03690", "01024", "09999", "09618", "01810"],
-                "半导体": ["00981", "01347", "00522"],
-                "银行": ["03988", "01398", "00939", "00005"],
-                "医药": ["02269", "01093", "01177", "01548"],
-                "房地产": ["00016", "01109", "00688", "00012"],
-            }
-            # 如果没匹配到，返回一些大盘股
-            hk_defaults = hk_sector_map.get(industry_name, ["00700", "09988", "03690", "01810", "00981"])
-            
-            # 使用 EastMoney 获取真实报价和真实资金流
-            secids = [f"116.{c.replace('hk','')}" for c in hk_defaults if c.replace('hk','') != symbol.replace('hk','')]
-            secids = secids[:6]
-            if not secids:
-                return {"data": []}
-                
-            url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f14,f2,f3,f137,f138,f147,f148"
-            results = []
-            try:
-                resp = get_em_data(url, timeout=1.5)
-                if resp.status_code == 200:
-                    diff = resp.json().get("data", {}).get("diff", [])
-                    for item in diff:
-                        code = item.get("f12")
-                        name = item.get("f14")
-                        price = float(item.get("f2", 0)) if item.get("f2") != "-" else 0.0
-                        change_pct = float(item.get("f3", 0)) if item.get("f3") != "-" else 0.0
-                        
-                        f137 = item.get("f137") or 0
-                        f138 = item.get("f138") or 0
-                        f147 = item.get("f147") or 0
-                        f148 = item.get("f148") or 0
-                        net_flow = (f137 + f138) - (f147 + f148)
-                        
-                        if net_flow != 0 or f137 != 0:
-                            flow_yi = net_flow / 100000000.0
-                            flow_str = f"流入{round(flow_yi, 2)}亿" if flow_yi > 0 else f"流出{abs(round(flow_yi, 2))}亿"
-                        else:
-                            flow_str = "暂无数据"
+            # 暂无可追溯的港股行业成分接口，不使用手工股票列表冒充真实同行。
+            return {"data": []}
 
-                        results.append({
-                            "stockName": name,
-                            "stockCode": code,
-                            "latestPrice": price,
-                            "changePercent": change_pct,
-                            "fundFlow": flow_str
-                        })
-            except Exception as e:
-                print("HK related fetch error:", e)
-            return {"data": results}
+        peers = get_a_share_industry_peer_codes(symbol, industry_name)
+        if not peers:
+            return {"data": []}
 
-        # 1. 使用预定义的庞大股票池进行匹配 (因为 clist 存在反爬限制)
-        peers = [
-            "002371", "688256", "601138", "600584", "002241", "002475", "603501", 
-            "600111", "603986", "688012", "688036", "002049", "688981", "688008", 
-            "600522", "600745", "600460", "300308", "300474", "300661", "002371",
-            "000063", "000977", "002050", "002156", "002185", "002236", "002384",
-            "002415", "002436", "002456", "002463", "002938", "300014", "300115",
-            "300223", "300327", "300394", "300408", "300433", "300456", "300458",
-            "300474", "300496", "300604", "300628", "300661", "300750", "300782",
-            "600206", "600460", "600584", "600667", "600703", "600745", "603160",
-            "603290", "603501", "603986", "688008", "688012", "688018", "688019",
-            "688036", "688099", "688111", "688126", "688256", "688396", "688521",
-            "688536", "688981", "002241", "300115", "300408", "603986", "002456"
-        ]
-        peers = list(set(peers))
-        if symbol in peers:
-            peers.remove(symbol)
-            
-        import random
-        # 随机挑选30个查腾讯接口，再从中挑选前6个
-        sample_peers = random.sample(peers, min(len(peers), 30))
-        query_list = [f"sh{c}" if c.startswith('6') else f"sz{c}" for c in sample_peers]
+        # 腾讯接口批量请求数量受限，按行业成分原始顺序取前 30 只，结果保持稳定。
+        query_list = [f"sh{c}" if c.startswith('6') else f"sz{c}" for c in peers[:30]]
         
         results = []
         url = f"http://qt.gtimg.cn/q={','.join(query_list)}"
@@ -1336,35 +1366,28 @@ def get_related_stocks(symbol: str):
                             "stockCode": code,
                             "latestPrice": price,
                             "changePercent": change_pct,
-                            "fundFlow": "-"
+                            "fundFlow": None
                         })
         except: pass
         
         # 优先选择涨幅靠前的或者成交活跃的，这里按涨幅排序
-        results.sort(key=lambda x: abs(x["changePercent"]), reverse=True)
+        results.sort(
+            key=lambda item: abs(item["changePercent"]) if item["changePercent"] is not None else -1,
+            reverse=True,
+        )
         top_6 = results[:6]
         
-        if top_6:
-            try:
-                secids = []
-                for r in top_6:
-                    code = r["stockCode"]
-                    prefix = "1." if code.startswith('6') else "0."
-                    secids.append(f"{prefix}{code}")
-                    
-                url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f12,f62"
-                resp = get_em_data(url, timeout=1.5)
-                if resp.status_code == 200:
-                    data = resp.json().get("data", {}).get("diff", [])
-                    flow_map = {item.get("f12"): item.get("f62", 0) for item in data if item.get("f12")}
-                    for r in top_6:
-                        code = r["stockCode"]
-                        raw_flow = flow_map.get(code, 0)
-                        if raw_flow != 0:
-                            flow_yi = raw_flow / 100000000.0
-                            r["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元" if flow_yi > 0 else f"净流出 {abs(round(flow_yi, 2))} 亿元"
-            except Exception as e:
-                print("Failed to fetch ulist flow for top6", e)
+        for item in top_6:
+            raw_flow = get_sina_stock_fund_flow(item["stockCode"])
+            if raw_flow is None:
+                continue
+            flow_yi = raw_flow / 100000000.0
+            if flow_yi > 0:
+                item["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元"
+            elif flow_yi < 0:
+                item["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
+            else:
+                item["fundFlow"] = "主力资金净流 0.0 亿元"
                 
         return {"data": top_6}
     except Exception as e:
@@ -1376,4 +1399,4 @@ def get_related_stocks(symbol: str):
 if __name__ == "__main__":
 
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=8001)

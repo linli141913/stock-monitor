@@ -1,9 +1,9 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
+const API_BASE = '/api/backend';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import styles from './page.module.css';
 
 // Components
@@ -16,36 +16,99 @@ import RelatedStocksCard from '@/components/stock/RelatedStocksCard';
 import AbnormalStocksCard from '@/components/industry/AbnormalStocksCard';
 import AlertSettingCard from '@/components/alert/AlertSettingCard';
 import DataSourceCard from '@/components/common/DataSourceCard';
+import type {
+  AbnormalStock,
+  Announcement,
+  CompanyInfo,
+  KlineItem,
+  News,
+  RelatedStock,
+  StockOverview,
+} from '@/types/stock';
+import type { IndustryMonitor } from '@/types/industry';
 
 // Removed mock data imports
 
-const AUTO_REFRESH_INTERVAL = 5 * 1000; // 5秒高频自动刷新行情
+const OVERVIEW_REFRESH_INTERVAL = 10 * 1000;
+const SLOW_DATA_REFRESH_INTERVAL = 2 * 60 * 1000;
+
+const EMPTY_COMPANY_INFO: CompanyInfo = {
+  mainBusiness: '',
+  coreProducts: [],
+  industryTags: [],
+  companyDescription: '',
+  businessRelation: '',
+  updateTime: '',
+};
+
+const EMPTY_INDUSTRY_MONITOR: IndustryMonitor = {
+  industryName: '',
+  heatScore: null,
+  sectorChangePercent: null,
+  fundFlow: '',
+};
+
+interface OverviewApiResponse {
+  name: string;
+  code: string;
+  marketStatus?: string;
+  marketStatusCode?: StockOverview['marketStatusCode'];
+  latestPrice: number | null;
+  changeAmount: number | null;
+  changePercent: number | null;
+  sourceTime: string | null;
+  fetchedAt: string;
+  fundFlow?: string;
+  details: {
+    open: number | null;
+    high: number | null;
+    low: number | null;
+    previousClose: number | null;
+    volume: string | null;
+    turnoverAmount: string | null;
+    turnoverRate?: number | null;
+    peRatio?: number | null;
+    marketCap?: string | null;
+  };
+}
+
+interface KlineApiItem extends Omit<KlineItem, 'date'> {
+  time: string;
+}
+
+interface CompanyDataResponse {
+  companyInfo?: CompanyInfo;
+  announcements?: Announcement[];
+  news?: News[];
+}
+
+interface ErrorResponse {
+  detail?: string;
+}
 
 function HomeContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const codeParam = searchParams.get('code');
   const stockCode = codeParam || '000725';
   
-  const [isMounted, setIsMounted] = useState(false);
   const [period, setPeriod] = useState<'day'|'week'|'month'|'year'>('day');
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  const [overviewData, setOverviewData] = useState<any>(null);
-  const [klineData, setKlineData] = useState<any[]>([]);
-  const [companyData, setCompanyData] = useState<any>(null);
+  const [overviewData, setOverviewData] = useState<StockOverview | null>(null);
+  const [klineData, setKlineData] = useState<KlineItem[]>([]);
+  const [companyData, setCompanyData] = useState<CompanyDataResponse | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [klineLoading, setKlineLoading] = useState(true);
   const [overviewError, setOverviewError] = useState('');
   const [klineError, setKlineError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [globalNews, setGlobalNews] = useState<any[]>([]);
-  const [industryLoading, setIndustryLoading] = useState(false);
+  const [globalNews, setGlobalNews] = useState<News[]>([]);
+  const [industryLoading, setIndustryLoading] = useState(true);
 
-  const autoRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const overviewRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const slowDataRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const overviewRequestInFlight = useRef(false);
+  const relatedRequestInFlight = useRef(false);
+  const industryRequestInFlight = useRef(false);
 
   // ── 搜索 ──────────────────────────────────────────────────
   const handleSearch = (keyword: string) => {
@@ -59,22 +122,24 @@ function HomeContent() {
 
   // ── 获取实时行情（独立，可单独刷新） ─────────────────────
   const fetchOverview = useCallback(async (isSilent = false) => {
+    if (overviewRequestInFlight.current) return;
+    overviewRequestInFlight.current = true;
     if (!isSilent) setOverviewLoading(true);
-    setOverviewError('');
     try {
       const res = await fetch(`${API_BASE}/api/stock/overview/${stockCode}?_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         cache: 'no-store'
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = await res.json().catch(() => ({})) as ErrorResponse;
         throw new Error(err.detail || `行情请求失败 (${res.status})`);
       }
-      const data = await res.json();
-      const overviewResult = {
+      const data = await res.json() as OverviewApiResponse;
+      const overviewResult: StockOverview = {
         stockName:    data.name,
         stockCode:    data.code,
         marketStatus: data.marketStatus,
+        marketStatusCode: data.marketStatusCode,
         latestPrice:  data.latestPrice,
         changeAmount: data.changeAmount,
         changePercent:data.changePercent,
@@ -84,13 +149,15 @@ function HomeContent() {
         previousClose:data.details.previousClose,
         volume:       data.details.volume,
         turnoverAmount:data.details.turnoverAmount,
-        turnoverRate: parseFloat(data.details.turnoverRate) || 0,
-        peDynamic:    parseFloat(data.details.peRatio) || 0,
+        turnoverRate: data.details.turnoverRate ?? null,
+        peDynamic:    data.details.peRatio ?? null,
         marketCap:    data.details.marketCap,
-        updateTime:   data.updateTime,
+        sourceTime:   data.sourceTime,
+        fetchedAt:    data.fetchedAt,
         fundFlow:     data.fundFlow,
       };
       
+      setOverviewError('');
       setOverviewData(overviewResult);
       setLastRefresh(new Date());
 
@@ -110,46 +177,45 @@ function HomeContent() {
         const newKline = [...prev];
         const last = { ...newKline[newKline.length - 1] };
         const currentPrice = overviewResult.latestPrice;
+        if (currentPrice == null) return prev;
         
         // 动态撑开影线并更新收盘价
         last.close = currentPrice;
         if (currentPrice > last.high) last.high = currentPrice;
         if (currentPrice < last.low) last.low = currentPrice;
-        if (overviewResult.volume > 0) last.value = overviewResult.volume;
         
         newKline[newKline.length - 1] = last;
         return newKline;
       });
 
-    } catch (err: any) {
-      if (!isSilent) setOverviewError(err.message || '行情获取失败');
+    } catch (err: unknown) {
+      if (!isSilent) setOverviewError(err instanceof Error ? err.message : '行情获取失败');
     } finally {
+      overviewRequestInFlight.current = false;
       if (!isSilent) setOverviewLoading(false);
     }
   }, [stockCode]);
 
   // ── 获取 K 线（换股或换周期时触发） ─────────────────────
   const fetchKline = useCallback(async () => {
-    setKlineLoading(true);
-    setKlineError('');
     try {
       const res = await fetch(`${API_BASE}/api/stock/kline/${stockCode}?period=${period}&_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         cache: 'no-store'
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = await res.json().catch(() => ({})) as ErrorResponse;
         throw new Error(err.detail || `K 线请求失败 (${res.status})`);
       }
-      const json = await res.json();
-      const mapped = json.data.map((item: any) => ({
+      const json = await res.json() as { data: KlineApiItem[] };
+      const mapped: KlineItem[] = json.data.map((item) => ({
         ...item,
         date: item.time,       // 对齐前端字段名
-        value: item.volume,    // ECharts 成交量用 value
       }));
+      setKlineError('');
       setKlineData(mapped);
-    } catch (err: any) {
-      setKlineError(err.message || 'K 线获取失败');
+    } catch (err: unknown) {
+      setKlineError(err instanceof Error ? err.message : 'K 线获取失败');
     } finally {
       setKlineLoading(false);
     }
@@ -163,7 +229,7 @@ function HomeContent() {
         cache: 'no-store'
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as CompanyDataResponse;
         setCompanyData(data);
       }
     } catch (err) {
@@ -178,7 +244,7 @@ function HomeContent() {
         cache: 'no-store'
       });
       if (res.ok) {
-        const json = await res.json();
+        const json = await res.json() as { data?: News[] };
         setGlobalNews(json.data || []);
       }
     } catch (err) {
@@ -186,18 +252,20 @@ function HomeContent() {
     }
   }, []);
 
-  const [relatedStocks, setRelatedStocks] = useState<any[]>([]);
-  const [industryMonitorData, setIndustryMonitorData] = useState<any>({});
-  const [abnormalPeers, setAbnormalPeers] = useState<any[]>([]);
+  const [relatedStocks, setRelatedStocks] = useState<RelatedStock[]>([]);
+  const [industryMonitorData, setIndustryMonitorData] = useState<IndustryMonitor>(EMPTY_INDUSTRY_MONITOR);
+  const [abnormalPeers, setAbnormalPeers] = useState<AbnormalStock[]>([]);
   // ── 批量获取相关股票真实价格 ─────────────────────
   const fetchRelatedPrices = useCallback(async (sym: string) => {
+    if (relatedRequestInFlight.current) return;
+    relatedRequestInFlight.current = true;
     try {
       const res = await fetch(`${API_BASE}/api/stock/related/${sym}?_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         cache: 'no-store'
       });
       if (res.ok) {
-        const json = await res.json();
+        const json = await res.json() as { data?: RelatedStock[] };
         if (json.data && json.data.length > 0) {
           setRelatedStocks(json.data);
         } else {
@@ -206,11 +274,15 @@ function HomeContent() {
       }
     } catch (err) {
       console.error('Failed to fetch related prices', err);
+    } finally {
+      relatedRequestInFlight.current = false;
     }
   }, []);
 
   // ── 获取行业资金与异常推荐 ─────────────────────
   const fetchIndustryAndPeers = useCallback(async (sym: string) => {
+    if (industryRequestInFlight.current) return;
+    industryRequestInFlight.current = true;
     setIndustryLoading(true);
     try {
       const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}?_t=${Date.now()}`, {
@@ -218,65 +290,91 @@ function HomeContent() {
         cache: 'no-store'
       });
       if (res1.ok) {
-        setIndustryMonitorData(await res1.json());
+        setIndustryMonitorData(await res1.json() as IndustryMonitor);
       }
       const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}?_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         cache: 'no-store'
       });
       if (res2.ok) {
-        const json2 = await res2.json();
-        let fetchedData = json2.data || [];
+        const json2 = await res2.json() as { data?: AbnormalStock[] };
+        const fetchedData = json2.data || [];
         setAbnormalPeers(fetchedData);
       }
     } catch (err) {
       console.error('Failed to fetch industry/peers', err);
     } finally {
+      industryRequestInFlight.current = false;
       setIndustryLoading(false);
     }
   }, []);
 
+  const handleOverviewRefresh = () => {
+    setOverviewError('');
+    void fetchOverview(false);
+  };
+
+  const handleKlineRefresh = () => {
+    setKlineLoading(true);
+    setKlineError('');
+    void fetchKline();
+  };
+
+  const handlePeriodChange = (nextPeriod: 'day' | 'week' | 'month' | 'year') => {
+    setKlineData([]);
+    setKlineLoading(true);
+    setKlineError('');
+    setPeriod(nextPeriod);
+  };
+
+  const handleIndustryRefresh = () => {
+    void fetchIndustryAndPeers(stockCode);
+  };
+
   // 换股时，行情 + 公司信息 都刷新
   useEffect(() => {
-    // 切换股票时立刻清空旧状态，防止闪烁上次的数据
-    setOverviewData(null);
-    setCompanyData(null);
-    setGlobalNews([]);
-    setRelatedStocks([]);
-    setIndustryMonitorData({});
-    setAbnormalPeers([]);
-
-    fetchOverview();
-    fetchCompanyInfo();
-    fetchRelatedPrices(stockCode);
-    fetchIndustryAndPeers(stockCode);
-    fetchGlobalNews();
+    const timer = window.setTimeout(() => {
+      void fetchOverview();
+      void fetchCompanyInfo();
+      void fetchRelatedPrices(stockCode);
+      void fetchIndustryAndPeers(stockCode);
+      void fetchGlobalNews();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [stockCode, fetchOverview, fetchCompanyInfo, fetchRelatedPrices, fetchIndustryAndPeers, fetchGlobalNews]);
 
   // 换周期或换股时，刷新 K 线
   useEffect(() => {
-    // 切换股票时立刻清空K线数据
-    setKlineData([]);
-    fetchKline();
-  }, [stockCode, period, fetchKline]);
+    const timer = window.setTimeout(() => {
+      void fetchKline();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchKline]);
 
-  // 30 秒自动刷新行情（不影响 K 线）
+  // 行情独立刷新，不触发 K 线或慢数据请求。
   useEffect(() => {
-    if (autoRefreshTimer.current) clearInterval(autoRefreshTimer.current);
-    autoRefreshTimer.current = setInterval(() => {
-      fetchOverview(true);
-      fetchRelatedPrices(stockCode);
-    }, AUTO_REFRESH_INTERVAL);
+    if (overviewRefreshTimer.current) clearInterval(overviewRefreshTimer.current);
+    overviewRefreshTimer.current = setInterval(() => {
+      void fetchOverview(true);
+    }, OVERVIEW_REFRESH_INTERVAL);
     return () => {
-      if (autoRefreshTimer.current) clearInterval(autoRefreshTimer.current);
+      if (overviewRefreshTimer.current) clearInterval(overviewRefreshTimer.current);
     };
-  }, [fetchOverview, fetchRelatedPrices]);
+  }, [fetchOverview]);
+
+  // 相关股票和行业数据使用独立的低频刷新。
+  useEffect(() => {
+    if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
+    slowDataRefreshTimer.current = setInterval(() => {
+      void fetchRelatedPrices(stockCode);
+      void fetchIndustryAndPeers(stockCode);
+    }, SLOW_DATA_REFRESH_INTERVAL);
+    return () => {
+      if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
+    };
+  }, [fetchIndustryAndPeers, fetchRelatedPrices, stockCode]);
 
   // ── 渲染 ──────────────────────────────────────────────────
-  if (!isMounted) {
-    return <div style={{ padding: '24px', textAlign: 'center' }}>加载中...</div>;
-  }
-
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
   // 如果搜索的是中文名称，而返回的数据中 stockName 匹配，或者代码匹配，则不算 stale。
   const isDataStale = overviewData && 
@@ -296,27 +394,27 @@ function HomeContent() {
           ) : overviewError ? (
             <div className={styles.errorContainer}>
               ⚠️ {overviewError}
-              <button onClick={() => fetchOverview(false)} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
+              <button onClick={handleOverviewRefresh} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
             </div>
           ) : overviewData && (
             <StockOverviewCard
               data={overviewData}
               lastRefresh={lastRefresh}
-              onRefresh={() => fetchOverview(false)}
-              onWatchlistToggle={() => fetchIndustryAndPeers(stockCode)}
+              onRefresh={handleOverviewRefresh}
+              onWatchlistToggle={handleIndustryRefresh}
             />
           )}
 
           {klineError ? (
             <div className={styles.errorContainer}>
               ⚠️ {klineError}
-              <button onClick={fetchKline} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
+              <button onClick={handleKlineRefresh} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
             </div>
           ) : klineData.length > 0 && !isDataStale ? (
             <StockChartCard
               data={klineData}
               period={period}
-              onPeriodChange={setPeriod}
+              onPeriodChange={handlePeriodChange}
               loading={klineLoading}
             />
           ) : (
@@ -325,8 +423,7 @@ function HomeContent() {
 
           <StockInfoTabs
             stockCode={stockCode}
-            companyInfo={companyData?.companyInfo || {}}
-            financialData={companyData?.financialData || {}}
+            companyInfo={companyData?.companyInfo || EMPTY_COMPANY_INFO}
             announcements={companyData?.announcements || []}
             news={globalNews.length > 0 ? globalNews : (companyData?.news || [])}
           />
@@ -337,20 +434,20 @@ function HomeContent() {
           <IndustryMonitorCard 
             data={{
                ...industryMonitorData,
-               industryName: companyData?.companyInfo?.industryTags?.length > 0 ? companyData.companyInfo.industryTags[0] : industryMonitorData.industryName
+               industryName: companyData?.companyInfo?.industryTags?.[0] || industryMonitorData.industryName
             }} 
             loading={industryLoading}
           />
           <RelatedStocksCard data={relatedStocks} onStockClick={handleSearch} />
           {(() => {
-            const relatedCodes = new Set(relatedStocks.map((r: any) => r.stockCode));
+            const relatedCodes = new Set(relatedStocks.map((relatedStock) => relatedStock.stockCode));
             const filteredPeers = abnormalPeers.filter(p => !relatedCodes.has(p.stockCode)).slice(0, 10);
             return filteredPeers.length > 0 ? <AbnormalStocksCard data={filteredPeers} onStockClick={handleSearch} /> : null;
           })()}
           <AlertSettingCard initialData={{
             stockCode: stockCode,
             stockName: overviewData ? overviewData.stockName : '',
-            email: 'admin@example.com',
+            email: '',
             priceChangeAlert: true,
             priceChangeThreshold: 5,
             volumeAlert: true,

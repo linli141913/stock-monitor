@@ -9,8 +9,8 @@ export interface DynamicsItem {
 
 export interface IndustryMonitor {
   industryName: string;
-  heatScore: number;
-  sectorChangePercent: number;
+  heatScore: number | null;
+  sectorChangePercent: number | null;
   fundFlow: string;
   policySummary?: string;
   upstreamStatus?: string;

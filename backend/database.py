@@ -1,7 +1,10 @@
 import sqlite3
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import market_calendar
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "stock_monitor.db")
 
@@ -142,107 +145,119 @@ def get_market_by_symbol(symbol: str) -> str:
         return "hk"
     return "cn"
 
-def is_trading_day(dt, market="cn"):
-    # dt is a datetime or date object
-    if dt.weekday() >= 5:  # Saturday or Sunday
-        return False
-    
-    date_str = dt.strftime("%Y-%m-%d")
-    
-    # 2026 CN Holidays (A-Share)
-    cn_holidays = {
-        "2026-01-01", "2026-01-02",
-        "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
-        "2026-04-06",
-        "2026-05-01", "2026-05-04", "2026-05-05",
-        "2026-06-19",
-        "2026-09-25",
-        "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07"
-    }
-    
-    # 2026 HK Holidays
-    hk_holidays = {
-        "2026-01-01",
-        "2026-02-17", "2026-02-18", "2026-02-19",
-        "2026-04-03", "2026-04-04", "2026-04-06",
-        "2026-05-01", "2026-05-25",
-        "2026-06-19",
-        "2026-07-01",
-        "2026-09-26",
-        "2026-10-01", "2026-10-19",
-        "2026-12-25", "2026-12-26"
-    }
-    
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _default_day_kind_resolver(market, day):
+    return market_calendar.get_calendar_day_kind(market, day).kind
+
+
+def _as_market_datetime(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=SHANGHAI_TZ)
+    return value.astimezone(SHANGHAI_TZ)
+
+
+def _analysis_cutoff(value, market, day_kind):
     if market == "hk":
-        return date_str not in hk_holidays
+        hour, minute = (12, 30) if day_kind == "half" else (16, 30)
     else:
-        return date_str not in cn_holidays
+        hour, minute = 15, 30
+    return value.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-def get_previous_trading_day(dt, market="cn"):
-    from datetime import timedelta
+
+def is_trading_day(dt, market="cn", day_kind_resolver=None):
+    resolver = day_kind_resolver or _default_day_kind_resolver
+    kind = resolver(market, dt.date() if isinstance(dt, datetime) else dt)
+    if kind == "unknown":
+        return None
+    return kind in ("full", "half")
+
+
+def get_previous_trading_day(dt, market="cn", day_kind_resolver=None):
+    resolver = day_kind_resolver or _default_day_kind_resolver
     prev = dt - timedelta(days=1)
-    while not is_trading_day(prev, market):
+    for _ in range(370):
+        kind = resolver(market, prev.date())
+        if kind == "unknown":
+            return None
+        if kind in ("full", "half"):
+            return prev, kind
         prev -= timedelta(days=1)
-    return prev
+    return None
 
-def get_next_trading_day(dt, market="cn"):
-    from datetime import timedelta
+
+def get_next_trading_day(dt, market="cn", day_kind_resolver=None):
+    resolver = day_kind_resolver or _default_day_kind_resolver
     nxt = dt + timedelta(days=1)
-    while not is_trading_day(nxt, market):
+    for _ in range(370):
+        kind = resolver(market, nxt.date())
+        if kind == "unknown":
+            return None
+        if kind in ("full", "half"):
+            return nxt, kind
         nxt += timedelta(days=1)
-    return nxt
+    return None
 
-def get_trading_session_bounds_for_symbol(symbol: str):
-    from datetime import timedelta
+
+def get_trading_session_bounds_for_symbol(symbol: str, now=None, day_kind_resolver=None):
+    resolver = day_kind_resolver or _default_day_kind_resolver
     market = get_market_by_symbol(symbol)
-    now = datetime.now()
-    cutoff_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    
-    today_is_trade = is_trading_day(now, market)
-    
-    if today_is_trade:
-        if now < cutoff_time:
-            prev_trade = get_previous_trading_day(now, market)
-            start_time = prev_trade.replace(hour=15, minute=30, second=0, microsecond=0)
-            end_time = cutoff_time
-        else:
-            next_trade = get_next_trading_day(now, market)
-            start_time = cutoff_time
-            end_time = next_trade.replace(hour=15, minute=30, second=0, microsecond=0)
+    current = _as_market_datetime(now or datetime.now(SHANGHAI_TZ))
+    today_kind = resolver(market, current.date())
+    if today_kind == "unknown":
+        return None, None
+
+    today_is_trade = today_kind in ("full", "half")
+    cutoff_time = _analysis_cutoff(current, market, today_kind)
+    previous_result = get_previous_trading_day(current, market, resolver)
+    next_result = get_next_trading_day(current, market, resolver)
+    if previous_result is None or next_result is None:
+        return None, None
+    previous_day, previous_kind = previous_result
+    next_day, next_kind = next_result
+
+    if today_is_trade and current < cutoff_time:
+        start_time = _analysis_cutoff(previous_day, market, previous_kind)
+        end_time = cutoff_time
+    elif today_is_trade:
+        start_time = cutoff_time
+        end_time = _analysis_cutoff(next_day, market, next_kind)
     else:
-        prev_trade = get_previous_trading_day(now, market)
-        next_trade = get_next_trading_day(now, market)
-        start_time = prev_trade.replace(hour=15, minute=30, second=0, microsecond=0)
-        end_time = next_trade.replace(hour=15, minute=30, second=0, microsecond=0)
-        
+        start_time = _analysis_cutoff(previous_day, market, previous_kind)
+        end_time = _analysis_cutoff(next_day, market, next_kind)
+
     return start_time.isoformat(), end_time.isoformat()
 
-def get_target_trading_date_for_timestamp(ts_str: str, market: str) -> str:
+
+def get_target_trading_date_for_timestamp(ts_str: str, market: str, day_kind_resolver=None):
+    resolver = day_kind_resolver or _default_day_kind_resolver
     try:
-        dt = datetime.fromisoformat(ts_str)
+        dt = _as_market_datetime(datetime.fromisoformat(ts_str))
     except Exception:
-        return ts_str.split("T")[0]
-        
-    cutoff_time = dt.replace(hour=15, minute=30, second=0, microsecond=0)
-    today_is_trade = is_trading_day(dt, market)
-    
-    if today_is_trade:
-        if dt < cutoff_time:
-            return dt.strftime("%Y-%m-%d")
-        else:
-            next_trade = get_next_trading_day(dt, market)
-            return next_trade.strftime("%Y-%m-%d")
-    else:
-        next_trade = get_next_trading_day(dt, market)
-        return next_trade.strftime("%Y-%m-%d")
+        return None
+
+    today_kind = resolver(market, dt.date())
+    if today_kind == "unknown":
+        return None
+    if today_kind in ("full", "half") and dt < _analysis_cutoff(dt, market, today_kind):
+        return dt.strftime("%Y-%m-%d")
+
+    next_result = get_next_trading_day(dt, market, resolver)
+    if next_result is None:
+        return None
+    next_trade, _ = next_result
+    return next_trade.strftime("%Y-%m-%d")
 
 def get_today_analysis_history(symbol: str) -> list:
-    """获取某只股票今天的分析历史，用于记忆注入和前端时间轴展示 (按交易日 15:30 到 15:30 划分)"""
+    """获取当前交易周期内的分析历史。"""
+    start_time, end_time = get_trading_session_bounds_for_symbol(symbol)
+    if start_time is None or end_time is None:
+        return []
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     market = get_market_by_symbol(symbol)
-    start_time, end_time = get_trading_session_bounds_for_symbol(symbol)
     
     cursor.execute('''
     SELECT date, time, timestamp, trigger_type, plain_english_summary, full_json 

@@ -1,5 +1,5 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
-import React, { useEffect, useState } from 'react';
+const API_BASE = '/api/backend';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import styles from './FinancialSummaryTab.module.css';
 
@@ -10,8 +10,8 @@ interface ReportData {
   revenueYoy: number;
   netProfit: number;
   netProfitYoy: number;
-  deductNetProfit: number;
-  deductNetProfitYoy: number;
+  deductNetProfit: number | null;
+  deductNetProfitYoy: number | null;
   grossMargin: number;
   netMargin: number;
   roe: number;
@@ -35,7 +35,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -43,18 +43,21 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
       if (!res.ok) {
         throw new Error('暂无真实财报数据或拉取失败');
       }
-      const json = await res.json();
+      const json = await res.json() as FinanceResponse;
       setData(json);
-    } catch (err: any) {
-      setError(err.message || '获取财报失败');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '获取财报失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [stockCode]);
 
   useEffect(() => {
-    fetchData();
-  }, [stockCode]);
+    const timer = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchData]);
 
   if (loading) {
     return (
@@ -75,13 +78,15 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
   }
 
   const { latest, yearly, quarterly } = data;
+  const normalizedCode = stockCode.toLowerCase().replace(/^hk/, '');
+  const isHongKong = stockCode.toLowerCase().startsWith('hk') || normalizedCode.length === 5;
 
   if (!latest) {
     return <div className={styles.infoContainer}>暂无最新财报数据</div>;
   }
 
   // 格式化金额 (亿)
-  const formatMoney = (val?: number) => {
+  const formatMoney = (val?: number | null) => {
     if (val === undefined || val === null) return '-';
     return (val / 100000000).toFixed(2) + ' 亿';
   };
@@ -92,7 +97,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
     return val.toFixed(2) + '%';
   };
 
-  const renderYoy = (val?: number) => {
+  const renderYoy = (val?: number | null) => {
     if (val === undefined || val === null) return <span>-</span>;
     const isUp = val > 0;
     return (
@@ -125,9 +130,11 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
           <div className={styles.cardSub}>同比: {renderYoy(latest.netProfitYoy)}</div>
         </div>
         <div className={styles.card}>
-          <div className={styles.cardTitle}>扣非净利润</div>
-          <div className={styles.cardValue}>{formatMoney(latest.deductNetProfit)}</div>
-          <div className={styles.cardSub}>同比: {renderYoy(latest.deductNetProfitYoy)}</div>
+          <div className={styles.cardTitle}>{isHongKong ? '扣非净利润（港股口径）' : '扣非净利润'}</div>
+          <div className={styles.cardValue}>{isHongKong ? '不适用' : formatMoney(latest.deductNetProfit)}</div>
+          <div className={styles.cardSub}>
+            {isHongKong ? '港股财报通常不强制披露' : <>同比: {renderYoy(latest.deductNetProfitYoy)}</>}
+          </div>
         </div>
         <div className={styles.card}>
           <div className={styles.cardTitle}>净资产收益率 (ROE)</div>
@@ -207,7 +214,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
               <th>报告期</th>
               <th>营业收入</th>
               <th>净利润</th>
-              <th>扣非净利润</th>
+              <th>{isHongKong ? '扣非净利润（港股口径）' : '扣非净利润'}</th>
               <th>毛利率</th>
               <th>净利率</th>
               <th>ROE</th>
@@ -222,7 +229,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
                 <td>{row.reportName}</td>
                 <td>{formatMoney(row.revenue)}</td>
                 <td>{formatMoney(row.netProfit)}</td>
-                <td>{formatMoney(row.deductNetProfit)}</td>
+                <td>{isHongKong ? '不适用' : formatMoney(row.deductNetProfit)}</td>
                 <td>{formatPct(row.grossMargin)}</td>
                 <td>{formatPct(row.netMargin)}</td>
                 <td>{formatPct(row.roe)}</td>

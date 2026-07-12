@@ -8,8 +8,12 @@ export interface WatchlistItem {
   addedAt: string; // ISO datetime
 }
 
+interface WatchlistResponse {
+  data?: WatchlistItem[];
+}
+
 const STORAGE_KEY = 'stock_watchlist';
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://banister-drilling-jawless.ngrok-free.dev';
+const API_BASE = '/api/backend';
 
 export function useWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -17,18 +21,19 @@ export function useWatchlist() {
   // 初始化时从 localStorage 读取，然后从后端同步
   useEffect(() => {
     let localList: WatchlistItem[] = [];
+    let localSyncTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         localList = JSON.parse(raw);
-        setWatchlist(localList);
+        localSyncTimer = setTimeout(() => setWatchlist(localList), 0);
       }
     } catch {}
 
     // 从后端拉取最新数据同步
     fetch(`${API_BASE}/api/watchlist?_t=${Date.now()}`, { headers: { 'ngrok-skip-browser-warning': 'true' }, cache: 'no-store' })
       .then(res => res.json())
-      .then(data => {
+      .then((data: WatchlistResponse) => {
         if (data && data.data && Array.isArray(data.data)) {
           let backendList = data.data as WatchlistItem[];
           
@@ -78,10 +83,14 @@ export function useWatchlist() {
         }
       })
       .catch(err => console.error("读取后台监测列表失败", err));
+
+    return () => {
+      if (localSyncTimer) clearTimeout(localSyncTimer);
+    };
   }, []);
 
   // 写入 localStorage 并同步到后台
-  const persist = (list: WatchlistItem[]): Promise<any> => {
+  const persist = (list: WatchlistItem[]): Promise<Response | null> => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
       // 同步到后台 API
@@ -101,7 +110,7 @@ export function useWatchlist() {
     }
   };
 
-  const addToWatchlist = useCallback((stockCode: string, stockName: string): Promise<any> => {
+  const addToWatchlist = useCallback((stockCode: string, stockName: string): Promise<Response | null> => {
     if (watchlist.find(i => i.stockCode === stockCode)) return Promise.resolve(null);
     if (watchlist.length >= 10) {
       alert("监控列表最多只能添加 10 只股票哦！");
@@ -112,7 +121,7 @@ export function useWatchlist() {
     return persist(next);
   }, [watchlist]);
 
-  const removeFromWatchlist = useCallback((stockCode: string): Promise<any> => {
+  const removeFromWatchlist = useCallback((stockCode: string): Promise<Response | null> => {
     const next = watchlist.filter(i => i.stockCode !== stockCode);
     setWatchlist(next);
     return persist(next);

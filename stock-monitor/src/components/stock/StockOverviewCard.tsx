@@ -10,9 +10,19 @@ interface Props {
 }
 
 export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatchlistToggle }: Props) {
-  const isRise = data.changeAmount > 0;
-  const isFall = data.changeAmount < 0;
+  const isRise = data.changeAmount != null && data.changeAmount > 0;
+  const isFall = data.changeAmount != null && data.changeAmount < 0;
   const priceColorClass = isRise ? 'text-rise' : isFall ? 'text-fall' : '';
+  const formatNumber = (value: number | null, suffix = '') => value == null ? '暂无数据' : `${value.toFixed(2)}${suffix}`;
+  const getTrendClass = (value: number | null, base: number | null) => {
+    if (value == null || base == null) return '';
+    return value > base ? 'text-rise' : value < base ? 'text-fall' : '';
+  };
+  const formatTimestamp = (value: string | null) => {
+    if (!value) return '暂无数据';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN', { hour12: false });
+  };
   
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
   const watched = isInWatchlist(data.stockCode);
@@ -58,7 +68,7 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
           </button>
           {lastRefresh && (
             <span style={{ fontSize: '12px', color: '#999', marginLeft: '4px' }}>
-              刷新于 {lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              页面刷新 {lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
           {onRefresh && (
@@ -75,43 +85,45 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
       <div className={styles.mainInfo}>
         <div className={styles.priceArea}>
           <div className={`${styles.latestPrice} ${priceColorClass}`}>
-            {data.latestPrice.toFixed(2)}
+            {formatNumber(data.latestPrice)}
           </div>
           <div className={styles.changeArea}>
             <div className={`${styles.changeAmount} ${priceColorClass}`}>
-              {data.changeAmount > 0 ? '+' : ''}{data.changeAmount.toFixed(2)}
+              {data.changeAmount != null && data.changeAmount > 0 ? '+' : ''}{formatNumber(data.changeAmount)}
             </div>
             <div className={`${styles.changePercent} ${priceColorClass}`}>
-              {data.changePercent > 0 ? '+' : ''}{data.changePercent.toFixed(2)}%
+              {data.changePercent != null && data.changePercent > 0 ? '+' : ''}{formatNumber(data.changePercent, '%')}
             </div>
           </div>
           <div className={styles.updateTime}>
-            状态：{data.marketStatus || '未知'} &nbsp;|&nbsp; 数据时间：{data.updateTime}
+            状态：{data.marketStatus || '状态未知'}
+            &nbsp;|&nbsp; 数据源时间：{data.sourceTime || '暂无数据'}
+            &nbsp;|&nbsp; 后端抓取：{formatTimestamp(data.fetchedAt)}
           </div>
         </div>
 
         <div className={styles.metricsGrid}>
           <div className={styles.metricItem}>
             <span className={styles.metricLabel}>今开</span>
-            <span className={`${styles.metricValue} ${data.openPrice > data.previousClose ? 'text-rise' : data.openPrice < data.previousClose ? 'text-fall' : ''}`}>
-              {data.openPrice.toFixed(2)}
+            <span className={`${styles.metricValue} ${getTrendClass(data.openPrice, data.previousClose)}`}>
+              {formatNumber(data.openPrice)}
             </span>
           </div>
           <div className={styles.metricItem}>
             <span className={styles.metricLabel}>最高</span>
-            <span className={`${styles.metricValue} ${data.highPrice > data.previousClose ? 'text-rise' : data.highPrice < data.previousClose ? 'text-fall' : ''}`}>
-              {data.highPrice.toFixed(2)}
+            <span className={`${styles.metricValue} ${getTrendClass(data.highPrice, data.previousClose)}`}>
+              {formatNumber(data.highPrice)}
             </span>
           </div>
           <div className={styles.metricItem}>
             <span className={styles.metricLabel}>最低</span>
-            <span className={`${styles.metricValue} ${data.lowPrice > data.previousClose ? 'text-rise' : data.lowPrice < data.previousClose ? 'text-fall' : ''}`}>
-              {data.lowPrice.toFixed(2)}
+            <span className={`${styles.metricValue} ${getTrendClass(data.lowPrice, data.previousClose)}`}>
+              {formatNumber(data.lowPrice)}
             </span>
           </div>
           <div className={styles.metricItem}>
             <span className={styles.metricLabel}>昨收</span>
-            <span className={styles.metricValue}>{data.previousClose.toFixed(2)}</span>
+            <span className={styles.metricValue}>{formatNumber(data.previousClose)}</span>
           </div>
         </div>
       </div>
@@ -119,19 +131,19 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
       <div className={styles.bottomMetrics}>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>成交量</span>
-          <span className={styles.metricValueBold}>{data.volume}</span>
+          <span className={styles.metricValueBold}>{data.volume || '暂无数据'}</span>
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>成交额</span>
-          <span className={styles.metricValueBold}>{data.turnoverAmount}</span>
+          <span className={styles.metricValueBold}>{data.turnoverAmount || '暂无数据'}</span>
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>换手率(动)</span>
-          <span className={styles.metricValueBold}>{data.turnoverRate.toFixed(2)}%</span>
+          <span className={styles.metricValueBold}>{formatNumber(data.turnoverRate, '%')}</span>
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>总市值</span>
-          <span className={styles.metricValueBold}>{data.marketCap}</span>
+          <span className={styles.metricValueBold}>{data.marketCap || '暂无数据'}</span>
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>主力流向</span>

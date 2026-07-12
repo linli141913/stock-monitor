@@ -12,6 +12,24 @@ os.environ['all_proxy'] = ''
 
 from typing import Dict, Any
 
+
+def optional_number(value):
+    if value is None or value == "" or value == "-" or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def format_optional_number(value, *, scale=1.0, suffix="", digits=2, comma=False):
+    number = optional_number(value)
+    if number is None:
+        return "暂无数据"
+    scaled = number / scale
+    formatted = f"{scaled:,.{digits}f}" if comma else f"{scaled:.{digits}f}"
+    return f"{formatted}{suffix}"
+
 class RealDataFetcher:
     def __init__(self):
         pass
@@ -29,21 +47,20 @@ class RealDataFetcher:
                     v = data.split('~')
                     return {
                         "name": v[1],
-                        "price": float(v[3]),
-                        "change_pct": float(v[32]),
-                        "volume_ratio": float(v[49]) if len(v) > 49 and v[49] else 1.0,
-                        "turnover_rate": float(v[38]) if len(v) > 38 and v[38] else 1.0
+                        "price": optional_number(v[3] if len(v) > 3 else None),
+                        "change_pct": optional_number(v[32] if len(v) > 32 else None),
+                        "volume_ratio": optional_number(v[49] if len(v) > 49 else None),
+                        "turnover_rate": optional_number(v[38] if len(v) > 38 else None)
                     }
         except Exception as e:
             print(f"Error fetching quote for {symbol}: {e}")
         
-        # Fallback to avoid breaking the prompt
         return {
-            "name": "未知股票",
-            "price": 0.0,
-            "change_pct": 0.0,
-            "volume_ratio": 1.0,
-            "turnover_rate": 1.0
+            "name": symbol,
+            "price": None,
+            "change_pct": None,
+            "volume_ratio": None,
+            "turnover_rate": None
         }
 
     def get_stock_news(self, symbol: str) -> str:
@@ -171,21 +188,18 @@ class RealDataFetcher:
                 df = ak.stock_financial_hk_analysis_indicator_em(symbol=symbol_pure)
                 if df.empty:
                     return "暂无最新财报财务核心数据。"
-                df = df.fillna(0)
                 reports = df.to_dict('records')
                 summary_lines = []
                 for r in reports[:3]:
                     date_str = str(r.get("REPORT_DATE", ""))[:10]
-                    rev = r.get("OPERATE_INCOME", 0) or 0
-                    rev_yoy = r.get("OPERATE_INCOME_YOY", 0) or 0
-                    net = r.get("HOLDER_PROFIT", 0) or 0
-                    net_yoy = r.get("HOLDER_PROFIT_YOY", 0) or 0
-                    gross = r.get("GROSS_PROFIT_RATIO", 0) or 0
-                    roe = r.get("ROE_YEARLY", 0) or 0
                     summary_lines.append(
-                        f"报告期: {date_str}, 营收: {rev:,.0f}元 (同比 {rev_yoy:.2f}%), "
-                        f"归母净利润: {net:,.0f}元 (同比 {net_yoy:.2f}%), "
-                        f"销售毛利率: {gross:.2f}%, ROE: {roe:.2f}%"
+                        f"报告期: {date_str}, "
+                        f"营收: {format_optional_number(r.get('OPERATE_INCOME'), suffix='元', digits=0, comma=True)} "
+                        f"(同比 {format_optional_number(r.get('OPERATE_INCOME_YOY'), suffix='%')}), "
+                        f"归母净利润: {format_optional_number(r.get('HOLDER_PROFIT'), suffix='元', digits=0, comma=True)} "
+                        f"(同比 {format_optional_number(r.get('HOLDER_PROFIT_YOY'), suffix='%')}), "
+                        f"销售毛利率: {format_optional_number(r.get('GROSS_PROFIT_RATIO'), suffix='%')}, "
+                        f"ROE: {format_optional_number(r.get('ROE_YEARLY'), suffix='%')}"
                     )
                 return "\n".join(summary_lines)
             else:
@@ -198,16 +212,14 @@ class RealDataFetcher:
                 summary_lines = []
                 for r in data[:3]:
                     date_name = r.get("REPORT_DATE_NAME", "")
-                    rev = r.get("TOTALOPERATEREVE") or 0
-                    rev_yoy = r.get("TOTALOPERATEREVETZ") or 0
-                    net = r.get("PARENTNETPROFIT") or 0
-                    net_yoy = r.get("PARENTNETPROFITTZ") or 0
-                    gross = r.get("XSMLL") or 0
-                    roe = r.get("ROEJQ") or 0
                     summary_lines.append(
-                        f"报告期: {date_name}, 营收: {rev/100000000.0:.2f}亿元 (同比 {rev_yoy:.2f}%), "
-                        f"归母净利润: {net/100000000.0:.2f}亿元 (同比 {net_yoy:.2f}%), "
-                        f"销售毛利率: {gross:.2f}%, ROE: {roe:.2f}%"
+                        f"报告期: {date_name}, "
+                        f"营收: {format_optional_number(r.get('TOTALOPERATEREVE'), scale=100000000.0, suffix='亿元')} "
+                        f"(同比 {format_optional_number(r.get('TOTALOPERATEREVETZ'), suffix='%')}), "
+                        f"归母净利润: {format_optional_number(r.get('PARENTNETPROFIT'), scale=100000000.0, suffix='亿元')} "
+                        f"(同比 {format_optional_number(r.get('PARENTNETPROFITTZ'), suffix='%')}), "
+                        f"销售毛利率: {format_optional_number(r.get('XSMLL'), suffix='%')}, "
+                        f"ROE: {format_optional_number(r.get('ROEJQ'), suffix='%')}"
                     )
                 return "\n".join(summary_lines)
         except Exception as e:
