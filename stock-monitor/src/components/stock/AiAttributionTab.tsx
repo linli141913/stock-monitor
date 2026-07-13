@@ -47,6 +47,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [allHistoryList, setAllHistoryList] = useState<HistoryItem[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [fetchingAllHistory, setFetchingAllHistory] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
   const [calendarStatus, setCalendarStatus] = useState<'available' | 'unknown'>('available');
   
@@ -156,29 +157,43 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
 
   const fetchAllHistory = async () => {
     setFetchingAllHistory(true);
+    setHistoryError('');
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history_all/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
-      if (res.ok) {
-        const json = await res.json() as { data?: HistoryItem[] };
-        const historyItems = json.data || [];
-        setAllHistoryList(historyItems);
+      if (!res.ok) {
+        throw new Error(`历史记录接口返回 ${res.status}`);
+      }
 
-        const targetDate = historyItems.find((item) => item.target_date)?.target_date;
-        const today = new Date();
-        const fallbackDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-        const selectedDate = targetDate || fallbackDate;
-        const parts = selectedDate.split('-');
-        if (parts.length === 3) {
-          setCalendarYear(parseInt(parts[0]));
-          setCalendarMonth(parseInt(parts[1]) - 1);
-          setSelectedDateStr(selectedDate);
-        }
+      const json = await res.json() as { data?: HistoryItem[] };
+      const historyItems = json.data || [];
+      setAllHistoryList(historyItems);
+      if (!data && historyItems.length > 0) {
+        setData(historyItems[0].full_json);
+        setLastUpdated(null);
+      }
+
+      const targetDate = historyItems.find((item) => item.target_date)?.target_date;
+      const today = new Date();
+      const fallbackDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const selectedDate = targetDate || fallbackDate;
+      const parts = selectedDate.split('-');
+      if (parts.length === 3) {
+        setCalendarYear(parseInt(parts[0]));
+        setCalendarMonth(parseInt(parts[1]) - 1);
+        setSelectedDateStr(selectedDate);
       }
     } catch (err) {
+      setAllHistoryList([]);
+      setHistoryError('历史记录加载失败，请检查服务连接后重试。');
       console.error('获取所有历史失败', err);
     } finally {
       setFetchingAllHistory(false);
     }
+  };
+
+  const openHistory = () => {
+    setShowHistoryModal(true);
+    void fetchAllHistory();
   };
 
   useEffect(() => {
@@ -247,9 +262,15 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         <BrainCircuit size={64} color="#1890ff" strokeWidth={1.5} />
       </div>
       <div className={styles.emptyText}>今日暂无自动追踪记录。点击下方按钮，立即让大模型结合实时盘口生成归因分析。</div>
-      <button className={styles.refreshBtn} onClick={fetchAttribution} style={{ marginTop: 24, padding: '12px 24px', fontSize: '1.1rem' }}>
-        AI分析原因
-      </button>
+      <div className={styles.emptyActions}>
+        <button className={styles.refreshBtn} onClick={fetchAttribution}>
+          AI分析原因
+        </button>
+        <button className={styles.historyBtn} onClick={openHistory} disabled={fetchingAllHistory}>
+          {fetchingAllHistory ? '加载历史...' : '查看历史记录'}
+        </button>
+      </div>
+      {historyError && <div className={styles.historyError}>{historyError}</div>}
     </div>
   );
 
@@ -364,7 +385,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
               )}
             </div>
             <button 
-              onClick={() => { setShowHistoryModal(true); fetchAllHistory(); }}
+              onClick={openHistory}
               style={{ fontSize: '0.85rem', color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               查看更早历史
@@ -566,6 +587,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
             
             {fetchingAllHistory ? (
               <div style={{ textAlign: 'center', color: '#64748b', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>加载中...</div>
+            ) : historyError ? (
+              <div style={{ textAlign: 'center', color: '#b91c1c', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{historyError}</div>
             ) : allHistoryList.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#64748b', padding: '40px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>暂无历史记录</div>
             ) : (

@@ -72,6 +72,17 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("industryRequestInFlight", home_page)
         self.assertGreaterEqual(home_page.count("setInterval"), 2)
 
+    def test_ai_empty_state_keeps_history_access_and_reports_load_failures(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("查看历史记录", component)
+        self.assertIn("历史记录加载失败", component)
+        self.assertIn("setShowHistoryModal(true)", component)
+        self.assertIn("setData(historyItems[0].full_json)", component)
+        self.assertIn("加载历史...", component)
+
 
 if __name__ == "__main__":
     unittest.main()

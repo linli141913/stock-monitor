@@ -237,6 +237,47 @@
   text-align: center;
 }
 
+.emptyActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.emptyActions .refreshBtn,
+.historyBtn {
+  min-height: 44px;
+  padding: 10px 20px;
+  font-size: 1rem;
+}
+
+.historyBtn {
+  color: #2563eb;
+  background: #ffffff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.historyBtn:hover {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.historyBtn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.historyError {
+  margin-top: 12px;
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
 
 @media (max-width: 768px) {
   .topRow {

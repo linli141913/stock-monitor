@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
@@ -233,12 +234,13 @@ class MarketIntegrityTests(unittest.TestCase):
 
     @staticmethod
     def _quote_response():
-        fields = [""] * 40
+        fields = [""] * 50
         fields[1] = "真实测试股票"
         fields[2] = "600001"
         fields[3] = "10.00"
         fields[30] = "20260711150000"
         fields[32] = "6.50"
+        fields[49] = "1.23"
         response = MagicMock()
         response.text = f'v_sh600001="{"~".join(fields)}";'
         return response
@@ -399,7 +401,7 @@ class MarketIntegrityTests(unittest.TestCase):
     @patch.object(main, "get_a_share_industry_peer_codes", return_value=["600001"])
     @patch.object(main, "get_company_info")
     @patch.object(main.requests, "get")
-    def test_abnormal_peers_do_not_invent_unavailable_metrics(
+    def test_abnormal_peers_use_real_tencent_volume_ratio_without_inventing_other_metrics(
         self,
         mock_get,
         mock_get_company_info,
@@ -416,7 +418,7 @@ class MarketIntegrityTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         item = result[0]
         self.assertIsNone(item["twentyDayChange"])
-        self.assertIsNone(item["volumeRatio"])
+        self.assertEqual(item["volumeRatio"], 1.23)
         self.assertIsNone(item["fundFlow"])
         self.assertIsNone(item["reason"])
         self.assertIsNone(item["riskNote"])
@@ -460,6 +462,30 @@ class MarketIntegrityTests(unittest.TestCase):
 
 
 class ApiSecurityTests(unittest.TestCase):
+    @staticmethod
+    def _request(path: str) -> Request:
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "headers": [],
+            "query_string": b"",
+            "server": ("127.0.0.1", 8001),
+            "client": ("127.0.0.1", 12345),
+            "scheme": "http",
+        })
+
+    def test_read_only_ai_history_is_public_but_ai_generation_stays_protected(self):
+        self.assertFalse(main.request_requires_backend_token(
+            self._request("/api/stock/ai_history/000725")
+        ))
+        self.assertFalse(main.request_requires_backend_token(
+            self._request("/api/stock/ai_history_all/000725")
+        ))
+        self.assertTrue(main.request_requires_backend_token(
+            self._request("/api/stock/ai_attribution/000725")
+        ))
+
     def test_cors_does_not_allow_every_origin(self):
         cors_middleware = next(
             middleware

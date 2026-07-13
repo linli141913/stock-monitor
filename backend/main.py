@@ -40,11 +40,7 @@ def request_requires_backend_token(request: Request) -> bool:
     path = request.url.path
     if request.method in {"GET", "POST"} and path == "/api/watchlist":
         return True
-    protected_ai_prefixes = (
-        "/api/stock/ai_attribution/",
-        "/api/stock/ai_history/",
-        "/api/stock/ai_history_all/",
-    )
+    protected_ai_prefixes = ("/api/stock/ai_attribution/",)
     return request.method == "GET" and path.startswith(protected_ai_prefixes)
 
 
@@ -1118,7 +1114,7 @@ def get_abnormal_peers(symbol: str):
                                 "stockCode": code,
                                 "oneDayChange": change_pct,
                                 "twentyDayChange": None,
-                                "volumeRatio": None,
+                                "volumeRatio": parse_optional_float(v[49] if len(v) > 49 else None),
                                 "reason": None,
                                 "riskNote": None,
                                 "updateTime": format_market_timestamp(v[30] if len(v) > 30 else ""),
