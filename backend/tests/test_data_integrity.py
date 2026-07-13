@@ -187,6 +187,10 @@ class AiIntegrityTests(unittest.TestCase):
 class MarketIntegrityTests(unittest.TestCase):
     def test_industry_fund_flow_uses_explicit_market_status(self):
         self.assertEqual(
+            main.format_industry_fund_flow("trading", False, None, False),
+            "暂无行业资金流数据",
+        )
+        self.assertEqual(
             main.format_industry_fund_flow("lunch_break", False, None, False),
             "暂无资金流数据（午间休市）",
         )

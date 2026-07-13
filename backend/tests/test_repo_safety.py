@@ -72,6 +72,24 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("industryRequestInFlight", home_page)
         self.assertGreaterEqual(home_page.count("setInterval"), 2)
 
+    def test_industry_polling_keeps_cached_card_visible_during_background_refresh(self):
+        home_page = (ROOT / "stock-monitor/src/app/page.tsx").read_text(
+            encoding="utf-8"
+        )
+        card = (
+            ROOT / "stock-monitor/src/components/industry/IndustryMonitorCard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const SLOW_DATA_REQUEST_TIMEOUT = 12 * 1000", home_page)
+        self.assertIn("const fetchIndustry = useCallback", home_page)
+        self.assertIn("const fetchAbnormalPeers = useCallback", home_page)
+        self.assertIn("fetchIndustry(stockCode, true)", home_page)
+        self.assertIn("setIndustryRefreshing(true)", home_page)
+        self.assertIn("AbortController", home_page)
+        self.assertIn("refreshing?: boolean", card)
+        self.assertIn("statusMessage?: string", card)
+        self.assertNotIn("AI 分析中...", card)
+
     def test_ai_empty_state_keeps_history_access_and_reports_load_failures(self):
         component = (
             ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"

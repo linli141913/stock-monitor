@@ -896,7 +896,7 @@ def format_industry_fund_flow(status_code, available, flow_value, is_hk):
             return f"今日收盘 {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
         return "暂无资金流数据（非交易时段）"
     if not available or flow_value is None:
-        return "数据获取中..."
+        return "暂无行业资金流数据"
     if flow_value > 0:
         return f"净流入 {flow_value} 亿元"
     if flow_value < 0:
@@ -915,6 +915,7 @@ def get_industry_monitor(symbol: str):
     is_hk = symbol.lower().startswith("hk") or (symbol.isdigit() and len(symbol) == 5)
     
     market_status = get_market_status_for_symbol(symbol)
+    fetched_at = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(timespec="seconds")
 
     # 同花顺公开行业资金流，按真实行业名称匹配。
     fallback_heat = None
@@ -1000,6 +1001,7 @@ def get_industry_monitor(symbol: str):
                 }
             ],
             "allNews": all_news_list,
+            "fetchedAt": fetched_at,
             "updateTime": "已休眠",
             "refreshInterval": "静态"
         }
@@ -1026,6 +1028,7 @@ def get_industry_monitor(symbol: str):
         "policies": dynamics.get("policies", []),
         "upstreamDownstream": dynamics.get("upstreamDownstream", []),
         "allNews": all_news_list,
+        "fetchedAt": fetched_at,
         "updateTime": "实时监控",
         "refreshInterval": "动态"
     }

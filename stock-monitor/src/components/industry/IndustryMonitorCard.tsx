@@ -6,9 +6,11 @@ import styles from './IndustryMonitorCard.module.css';
 interface Props {
   data: IndustryMonitor;
   loading?: boolean;
+  refreshing?: boolean;
+  statusMessage?: string;
 }
 
-export default function IndustryMonitorCard({ data, loading }: Props) {
+export default function IndustryMonitorCard({ data, loading, refreshing, statusMessage }: Props) {
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
 
@@ -66,7 +68,7 @@ export default function IndustryMonitorCard({ data, loading }: Props) {
           </div>
           <div className={styles.loadingText}>
             <div className={styles.spinner} />
-            <span>AI 分析中...</span>
+            <span>行业数据加载中...</span>
           </div>
         </div>
         <div className={styles.loadingContainer}>
@@ -85,7 +87,21 @@ export default function IndustryMonitorCard({ data, loading }: Props) {
           <BarChart3 className={styles.icon} size={20} />
           <h2 className={styles.title}>行业监测</h2>
         </div>
-        <div className={styles.industryName}>所属行业：{data?.industryName || '-'}</div>
+        <div className={styles.headerMeta}>
+          <div className={styles.industryName}>所属行业：{data?.industryName || '-'}</div>
+          <div className={styles.refreshStatus} aria-live="polite">
+            {refreshing ? (
+              <>
+                <div className={styles.spinner} />
+                <span>后台更新中</span>
+              </>
+            ) : statusMessage ? (
+              <span className={styles.statusWarning}>{statusMessage}</span>
+            ) : data?.fetchedAt ? (
+              <span>后端抓取：{data.fetchedAt.replace('T', ' ').slice(0, 19)}</span>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       <div className={styles.content}>

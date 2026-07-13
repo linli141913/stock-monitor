@@ -31,6 +31,7 @@ import type { IndustryMonitor } from '@/types/industry';
 
 const OVERVIEW_REFRESH_INTERVAL = 10 * 1000;
 const SLOW_DATA_REFRESH_INTERVAL = 2 * 60 * 1000;
+const SLOW_DATA_REQUEST_TIMEOUT = 12 * 1000;
 
 const EMPTY_COMPANY_INFO: CompanyInfo = {
   mainBusiness: '',
@@ -47,6 +48,12 @@ const EMPTY_INDUSTRY_MONITOR: IndustryMonitor = {
   sectorChangePercent: null,
   fundFlow: '',
 };
+
+const hasUsableIndustryMetrics = (data: IndustryMonitor) => (
+  data.heatScore != null
+  || data.sectorChangePercent != null
+  || Boolean(data.fundFlow && !data.fundFlow.startsWith('暂无'))
+);
 
 interface OverviewApiResponse {
   name: string;
@@ -103,12 +110,16 @@ function HomeContent() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [globalNews, setGlobalNews] = useState<News[]>([]);
   const [industryLoading, setIndustryLoading] = useState(true);
+  const [industryRefreshing, setIndustryRefreshing] = useState(false);
+  const [industryStatusMessage, setIndustryStatusMessage] = useState('');
 
   const overviewRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const slowDataRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const overviewRequestInFlight = useRef(false);
   const relatedRequestInFlight = useRef(false);
   const industryRequestInFlight = useRef(false);
+  const abnormalPeersRequestInFlight = useRef(false);
+  const industryHasUsableData = useRef(false);
 
   // ── 搜索 ──────────────────────────────────────────────────
   const handleSearch = (keyword: string) => {
@@ -280,32 +291,74 @@ function HomeContent() {
   }, []);
 
   // ── 获取行业资金与异常推荐 ─────────────────────
-  const fetchIndustryAndPeers = useCallback(async (sym: string) => {
+  const fetchIndustry = useCallback(async (sym: string, isSilent = false) => {
     if (industryRequestInFlight.current) return;
     industryRequestInFlight.current = true;
-    setIndustryLoading(true);
+    if (isSilent) {
+      setIndustryRefreshing(true);
+    } else {
+      setIndustryLoading(true);
+    }
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), SLOW_DATA_REQUEST_TIMEOUT);
     try {
-      const res1 = await fetch(`${API_BASE}/api/stock/industry/${sym}?_t=${Date.now()}`, {
+      const response = await fetch(`${API_BASE}/api/stock/industry/${sym}?_t=${Date.now()}`, {
         headers: { 'ngrok-skip-browser-warning': 'true' },
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal,
       });
-      if (res1.ok) {
-        setIndustryMonitorData(await res1.json() as IndustryMonitor);
+      if (!response.ok) {
+        throw new Error(`行业数据请求失败 (${response.status})`);
       }
-      const res2 = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}?_t=${Date.now()}`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-        cache: 'no-store'
-      });
-      if (res2.ok) {
-        const json2 = await res2.json() as { data?: AbnormalStock[] };
-        const fetchedData = json2.data || [];
-        setAbnormalPeers(fetchedData);
+      const nextData = await response.json() as IndustryMonitor;
+      const nextHasUsableData = hasUsableIndustryMetrics(nextData);
+      if (!nextHasUsableData && industryHasUsableData.current) {
+        setIndustryStatusMessage('本次指标暂不可用，继续显示上次成功数据');
+      } else {
+        setIndustryMonitorData(nextData);
+        industryHasUsableData.current = nextHasUsableData;
+        setIndustryStatusMessage(nextHasUsableData ? '' : '当前行业指标暂无可用数据');
       }
     } catch (err) {
-      console.error('Failed to fetch industry/peers', err);
+      const timedOut = err instanceof DOMException && err.name === 'AbortError';
+      setIndustryStatusMessage(
+        industryHasUsableData.current
+          ? `${timedOut ? '行业更新超时' : '行业更新失败'}，继续显示上次成功数据`
+          : `${timedOut ? '行业数据请求超时' : '行业数据加载失败'}，请稍后重试`,
+      );
+      console.error('Failed to fetch industry data', err);
     } finally {
+      window.clearTimeout(timeoutId);
       industryRequestInFlight.current = false;
-      setIndustryLoading(false);
+      if (isSilent) {
+        setIndustryRefreshing(false);
+      } else {
+        setIndustryLoading(false);
+      }
+    }
+  }, []);
+
+  const fetchAbnormalPeers = useCallback(async (sym: string) => {
+    if (abnormalPeersRequestInFlight.current) return;
+    abnormalPeersRequestInFlight.current = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), SLOW_DATA_REQUEST_TIMEOUT);
+    try {
+      const response = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}?_t=${Date.now()}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`异常同行请求失败 (${response.status})`);
+      }
+      const json = await response.json() as { data?: AbnormalStock[] };
+      setAbnormalPeers(json.data || []);
+    } catch (err) {
+      console.error('Failed to fetch abnormal peers', err);
+    } finally {
+      window.clearTimeout(timeoutId);
+      abnormalPeersRequestInFlight.current = false;
     }
   }, []);
 
@@ -328,7 +381,8 @@ function HomeContent() {
   };
 
   const handleIndustryRefresh = () => {
-    void fetchIndustryAndPeers(stockCode);
+    void fetchIndustry(stockCode, true);
+    void fetchAbnormalPeers(stockCode);
   };
 
   // 换股时，行情 + 公司信息 都刷新
@@ -337,11 +391,12 @@ function HomeContent() {
       void fetchOverview();
       void fetchCompanyInfo();
       void fetchRelatedPrices(stockCode);
-      void fetchIndustryAndPeers(stockCode);
+      void fetchIndustry(stockCode);
+      void fetchAbnormalPeers(stockCode);
       void fetchGlobalNews();
     }, 0);
     return () => clearTimeout(timer);
-  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchRelatedPrices, fetchIndustryAndPeers, fetchGlobalNews]);
+  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchRelatedPrices, fetchIndustry, fetchAbnormalPeers, fetchGlobalNews]);
 
   // 换周期或换股时，刷新 K 线
   useEffect(() => {
@@ -367,12 +422,13 @@ function HomeContent() {
     if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     slowDataRefreshTimer.current = setInterval(() => {
       void fetchRelatedPrices(stockCode);
-      void fetchIndustryAndPeers(stockCode);
+      void fetchIndustry(stockCode, true);
+      void fetchAbnormalPeers(stockCode);
     }, SLOW_DATA_REFRESH_INTERVAL);
     return () => {
       if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     };
-  }, [fetchIndustryAndPeers, fetchRelatedPrices, stockCode]);
+  }, [fetchIndustry, fetchAbnormalPeers, fetchRelatedPrices, stockCode]);
 
   // ── 渲染 ──────────────────────────────────────────────────
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
@@ -437,6 +493,8 @@ function HomeContent() {
                industryName: companyData?.companyInfo?.industryTags?.[0] || industryMonitorData.industryName
             }} 
             loading={industryLoading}
+            refreshing={industryRefreshing}
+            statusMessage={industryStatusMessage}
           />
           <RelatedStocksCard data={relatedStocks} onStockClick={handleSearch} />
           {(() => {

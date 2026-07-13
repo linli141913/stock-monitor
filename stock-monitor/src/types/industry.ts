@@ -15,6 +15,7 @@ export interface IndustryMonitor {
   policySummary?: string;
   upstreamStatus?: string;
   downstreamStatus?: string;
+  fetchedAt?: string;
   updateTime?: string;
   refreshInterval?: string;
   policies?: DynamicsItem[];

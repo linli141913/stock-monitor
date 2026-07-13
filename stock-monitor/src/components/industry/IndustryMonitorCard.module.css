@@ -37,6 +37,32 @@
   color: var(--color-text-secondary);
 }
 
+.headerMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.refreshStatus {
+  min-height: 16px;
+  max-width: 230px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.statusWarning {
+  color: #c47b00;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .content {
   display: flex;
   flex-direction: column;
@@ -417,5 +443,4 @@
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-
 
