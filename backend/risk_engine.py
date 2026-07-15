@@ -222,12 +222,12 @@ def merge_verified_market_history(
 
     funds = keyed(fund_rows)
     klines = keyed(kline_rows)
-    dates = sorted(set(funds) & set(klines))
+    dates = sorted(klines)
     if not dates or dates[-1] != expected_trade_date:
         return []
     merged = []
     for trade_date in dates:
-        fund_row = funds[trade_date]
+        fund_row = funds.get(trade_date) or {}
         kline_row = klines[trade_date]
         merged.append({
             **fund_row,
@@ -369,8 +369,28 @@ def _verified_market_signals(
         "label": "暂无判断",
         "reason": "真实历史资金数据不足3个交易日",
     }
-    if len(rows) >= 3:
-        recent = rows[-3:]
+    def has_complete_fund_data(row: Dict[str, Any]) -> bool:
+        return (
+            _number(row.get("fund_flow")) is not None
+            and _number(row.get("fund_close", row.get("close"))) is not None
+        )
+
+    latest_complete_index = next(
+        (
+            index for index in range(len(rows) - 1, -1, -1)
+            if has_complete_fund_data(rows[index])
+        ),
+        None,
+    )
+    if latest_complete_index is not None:
+        candidate_rows = rows[:latest_complete_index + 1]
+        recent = candidate_rows[-3:]
+        if len(recent) < 3 or not all(has_complete_fund_data(row) for row in recent):
+            fund_risk["reason"] = "最近3个交易日资金或收盘价存在缺失，暂无判断"
+            recent = []
+    else:
+        recent = []
+    if len(recent) == 3:
         flows = [_number(row.get("fund_flow")) for row in recent]
         closes = [
             _number(row.get("fund_close", row.get("close")))
@@ -556,45 +576,98 @@ def evaluate_market_risk(
 def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     signals = []
     sector = snapshot.get("sector") or {}
-    sector_evaluated = False
+    sector_dimensions = {
+        "decline": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "板块涨跌幅数据缺失或口径未验证",
+        },
+        "breadth": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "板块成分行情未完整返回，上涨家数暂无判断",
+        },
+        "leader": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "板块成分行情或市值数据不完整，龙头暂无判断",
+        },
+        "fundFlow": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "板块资金流排名缺失或口径未验证",
+        },
+    }
     if sector.get("status") == "available":
         change_percent = _number(sector.get("change_percent"))
         if change_percent is not None:
-            sector_evaluated = True
-            if change_percent <= -3:
+            decline_triggered = change_percent <= -3
+            decline_reason = (
+                f"{sector.get('name') or '所属板块'}下跌 {abs(change_percent):.2f}%"
+                if decline_triggered
+                else f"板块涨跌幅 {change_percent:+.2f}%，未达到下跌3%阈值"
+            )
+            sector_dimensions["decline"] = {
+                "status": "triggered" if decline_triggered else "no_signal",
+                "label": "已触发" if decline_triggered else "未触发",
+                "reason": decline_reason,
+            }
+            if decline_triggered:
                 signals.append({
                     "code": "sector_decline",
-                    "label": f"{sector.get('name') or '所属板块'}下跌 {abs(change_percent):.2f}%",
+                    "label": decline_reason,
                     "direction": "negative",
                 })
 
         advancers = _number(sector.get("advancers"))
         total = _number(sector.get("total"))
         if advancers is not None and total is not None and total > 0:
-            sector_evaluated = True
             ratio = advancers / total
-            if ratio < 0.2:
+            breadth_triggered = ratio < 0.2
+            breadth_reason = (
+                f"板块上涨家数占比 {ratio * 100:.1f}%"
+                if breadth_triggered
+                else f"板块上涨家数占比 {ratio * 100:.1f}%，未低于20%"
+            )
+            sector_dimensions["breadth"] = {
+                "status": "triggered" if breadth_triggered else "no_signal",
+                "label": "已触发" if breadth_triggered else "未触发",
+                "reason": breadth_reason,
+            }
+            if breadth_triggered:
                 signals.append({
                     "code": "sector_breadth_weak",
-                    "label": f"板块上涨家数占比 {ratio * 100:.1f}%",
+                    "label": breadth_reason,
                     "direction": "negative",
                 })
 
         leader = sector.get("leader") or {}
         leader_change = _number(leader.get("change_percent"))
         if leader_change is not None or leader.get("is_limit_down") is True:
-            sector_evaluated = True
-            if leader.get("is_limit_down") is True or (
+            leader_triggered = leader.get("is_limit_down") is True or (
                 leader_change is not None and leader_change <= -8
-            ):
+            )
+            if leader_triggered:
+                leader_reason = (
+                    f"板块龙头{leader.get('name') or leader.get('symbol') or ''}"
+                    f"下跌 {abs(leader_change):.2f}%"
+                    if leader_change is not None
+                    else "板块龙头触及跌停"
+                )
+            else:
+                leader_reason = (
+                    f"板块龙头{leader.get('name') or leader.get('symbol') or ''}"
+                    f"涨跌幅 {leader_change:+.2f}%，未达到下跌8%或跌停阈值"
+                )
+            sector_dimensions["leader"] = {
+                "status": "triggered" if leader_triggered else "no_signal",
+                "label": "已触发" if leader_triggered else "未触发",
+                "reason": leader_reason,
+            }
+            if leader_triggered:
                 signals.append({
                     "code": "sector_leader_decline",
-                    "label": (
-                        f"板块龙头{leader.get('name') or leader.get('symbol') or ''}"
-                        f"下跌 {abs(leader_change):.2f}%"
-                        if leader_change is not None
-                        else "板块龙头触及跌停"
-                    ),
+                    "label": leader_reason,
                     "direction": "negative",
                 })
 
@@ -609,15 +682,29 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             and rank_total >= rank > 0
             and direction in {"inflow", "outflow"}
         ):
-            sector_evaluated = True
-            if rank <= 5:
+            flow_triggered = rank <= 5
+            flow_label = f"板块资金净{'流入' if direction == 'inflow' else '流出'}排名第 {int(rank)}"
+            sector_dimensions["fundFlow"] = {
+                "status": "triggered" if flow_triggered else "no_signal",
+                "label": "已触发" if flow_triggered else "未触发",
+                "reason": flow_label if flow_triggered else f"{flow_label}，未进入前5",
+            }
+            if flow_triggered:
                 flow_direction = "positive" if direction == "inflow" else "negative"
                 signals.append({
                     "code": f"sector_fund_{direction}_top",
-                    "label": f"板块资金净{'流入' if direction == 'inflow' else '流出'}排名第 {int(rank)}",
+                    "label": flow_label,
                     "direction": flow_direction,
                 })
 
+    sector_evaluated = any(
+        item["status"] != "unavailable"
+        for item in sector_dimensions.values()
+    )
+    sector_complete = all(
+        item["status"] != "unavailable"
+        for item in sector_dimensions.values()
+    )
     sector_signals = [item for item in signals if item["code"].startswith("sector_")]
     sector_risk = {
         "status": "triggered" if sector_signals else ("no_signal" if sector_evaluated else "unavailable"),
@@ -627,6 +714,8 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             if sector_signals
             else ("已验证板块字段未触发固定阈值" if sector_evaluated else "板块数据缺失或口径未验证")
         ),
+        "dataComplete": sector_complete,
+        "dimensions": sector_dimensions,
     }
 
     overseas_evaluated = False
@@ -677,7 +766,7 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "sectorRisk": sector_risk,
         "overseasRisk": overseas_risk,
         "reason": "；".join(item["label"] for item in signals) if signals else "板块与海外联动暂无触发信号",
-        "dataComplete": sector_evaluated or overseas_evaluated,
+        "dataComplete": sector_complete or overseas_evaluated,
     }
 
 
@@ -716,20 +805,86 @@ def build_linkage_alert_event(
     }
 
 
+def _prepare_episode_alert(
+    event: Dict[str, Any],
+    snapshot: Dict[str, Any],
+    risk_kind: str,
+) -> Optional[Dict[str, Any]]:
+    import alert_repository
+
+    source_time = str(snapshot.get("source_time") or "")
+    if not source_time:
+        return event
+    recent_states = alert_repository.get_recent_risk_states(
+        snapshot["symbol"],
+        source_time,
+        risk_kind,
+        limit=2,
+    )
+    direction = str(event.get("direction") or "neutral")
+    two_cleared = len(recent_states) >= 2 and all(
+        not state.get("priority") for state in recent_states[:2]
+    )
+    same_episode_active = [
+        state for state in recent_states
+        if state.get("priority")
+        and state.get("direction") in {None, "", direction}
+    ]
+    trade_date = source_time[:10]
+    if same_episode_active and not two_cleared:
+        existing = alert_repository.get_latest_risk_episode_alert(
+            snapshot["symbol"],
+            str(event["event_type"]),
+            direction,
+            trade_date,
+        )
+        if existing is None:
+            return event
+        incoming_rank = {"P1": 1, "P2": 2, "P3": 3}.get(
+            str(event.get("priority")),
+            99,
+        )
+        existing_rank = {"P1": 1, "P2": 2, "P3": 3}.get(
+            str(existing.get("priority")),
+            99,
+        )
+        if incoming_rank >= existing_rank:
+            return None
+        return {
+            **event,
+            "source_event_id": existing["sourceEventId"],
+        }
+
+    episode_time = source_time[11:19].replace(":", "") or "unknown"
+    prefix = "linkage" if risk_kind == "linkage" else "risk"
+    return {
+        **event,
+        "source_event_id": (
+            f"{prefix}:{trade_date}:{direction}:episode:{episode_time}"
+        ),
+    }
+
+
 def process_linkage_snapshot(
     snapshot: Dict[str, Any],
     create_alert: bool = False,
+    persist_snapshot: bool = True,
 ) -> Dict[str, Any]:
     import alert_repository
 
     result = evaluate_linkage_risk(snapshot)
+    episode_event = None
     if create_alert and result.get("priority"):
         event = build_linkage_alert_event(snapshot, result)
         if event is not None:
-            alert, created = alert_repository.save_alert_event(event)
-            if created:
-                from notification_service import process_new_alert
-                process_new_alert(alert)
+            episode_event = _prepare_episode_alert(event, snapshot, "linkage")
+    if persist_snapshot:
+        alert_repository.save_linkage_snapshot(snapshot, result)
+    if episode_event is not None:
+        alert, created = alert_repository.save_alert_event(episode_event)
+        if created:
+            from notification_service import process_new_alert
+            process_new_alert(alert)
     return result
 
 
@@ -814,14 +969,17 @@ def process_market_snapshot(
             "multiple": None,
             "reason": "行情原始时间缺失",
         }
-    if persist_snapshot and source_time:
-        alert_repository.save_signal_snapshot({**snapshot, "risk": result})
-
+    episode_event = None
     if create_alert and result.get("priority"):
         event = build_risk_alert_event(snapshot, result)
         if event is not None:
-            alert, created = alert_repository.save_alert_event(event)
-            if created:
-                from notification_service import process_new_alert
-                process_new_alert(alert)
+            episode_event = _prepare_episode_alert(event, snapshot, "market")
+    if persist_snapshot and source_time:
+        alert_repository.save_signal_snapshot({**snapshot, "risk": result})
+
+    if episode_event is not None:
+        alert, created = alert_repository.save_alert_event(episode_event)
+        if created:
+            from notification_service import process_new_alert
+            process_new_alert(alert)
     return result

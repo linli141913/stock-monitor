@@ -46,10 +46,10 @@ def quote_prefix(symbol: str, stock_name: str = "") -> str:
     asset_type = detect_asset_type(code, stock_name)
     if asset_type == "hk_stock":
         return "hk"
+    if code.startswith(("4", "8", "920")):
+        return "bj"
     if code.startswith(("5", "6", "9")):
         return "sh"
-    if code.startswith(("4", "8")):
-        return "bj"
     return "sz"
 
 

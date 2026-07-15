@@ -7,6 +7,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class RepositorySafetyTests(unittest.TestCase):
 
+    def test_industry_card_exposes_four_sector_rule_states(self):
+        component = (
+            ROOT / "stock-monitor/src/components/industry/IndustryMonitorCard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("sectorRisk?.dimensions", component)
+        for label in ("板块跌幅", "上涨家数", "板块龙头", "资金排名"):
+            self.assertIn(label, component)
+
+    def test_industry_news_page_distinguishes_empty_and_unavailable_states(self):
+        page = (ROOT / "stock-monitor/src/app/industry/page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("payload.status === 'unavailable'", page)
+        self.assertIn("payload.status === 'available_empty'", page)
+        self.assertIn("资讯数据暂不可用", page)
+        self.assertIn("当前分类下暂无权威资讯", page)
+        self.assertIn("payload.data", page)
+
     def test_market_risk_card_does_not_claim_original_article_is_missing(self):
         alerts_page = (ROOT / "stock-monitor/src/app/alerts/page.tsx").read_text(
             encoding="utf-8"

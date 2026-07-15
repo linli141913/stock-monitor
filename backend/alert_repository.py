@@ -436,6 +436,15 @@ def _snapshot_time_parts(source_time: str):
     return parsed.strftime("%Y-%m-%d"), bucket.strftime("%H:%M")
 
 
+def _decode_snapshot_details(raw_value: Optional[str]) -> Dict[str, Any]:
+    parsed = json.loads(raw_value or "[]")
+    if isinstance(parsed, dict):
+        return dict(parsed)
+    return {
+        "signals": parsed if isinstance(parsed, list) else [],
+    }
+
+
 def save_signal_snapshot(snapshot: Dict[str, Any]) -> None:
     init_alert_tables()
     trade_date, time_bucket = _snapshot_time_parts(snapshot["source_time"])
@@ -443,6 +452,7 @@ def save_signal_snapshot(snapshot: Dict[str, Any]) -> None:
     turnover_risk = risk.get("turnoverRisk") or {}
     risk_details = {
         "signals": risk.get("signals") or [],
+        "direction": risk.get("direction"),
         "fundFlowRisk": risk.get("fundFlowRisk"),
         "movingAverageRisk": risk.get("movingAverageRisk"),
     }
@@ -453,6 +463,15 @@ def save_signal_snapshot(snapshot: Dict[str, Any]) -> None:
     if high is not None and low is not None and previous_close:
         amplitude = round((float(high) - float(low)) / float(previous_close) * 100, 2)
     conn = _connect()
+    existing = conn.execute('''
+    SELECT signals_json FROM signal_snapshots
+    WHERE symbol=? AND trade_date=? AND time_bucket=?
+    ''', (snapshot["symbol"], trade_date, time_bucket)).fetchone()
+    if existing:
+        existing_details = _decode_snapshot_details(existing["signals_json"])
+        for key in ("linkageRisk", "linkageSnapshot"):
+            if key in existing_details:
+                risk_details[key] = existing_details[key]
     conn.execute('''
     INSERT INTO signal_snapshots (
         symbol, trade_date, time_bucket, source_time, fetched_at,
@@ -501,6 +520,52 @@ def save_signal_snapshot(snapshot: Dict[str, Any]) -> None:
     conn.close()
 
 
+def save_linkage_snapshot(
+    snapshot: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    init_alert_tables()
+    source_time = str(snapshot.get("source_time") or "")
+    fetched_at = str(snapshot.get("fetched_at") or "")
+    if not source_time or not fetched_at:
+        return
+    trade_date, time_bucket = _snapshot_time_parts(source_time)
+    conn = _connect()
+    existing = conn.execute('''
+    SELECT signals_json FROM signal_snapshots
+    WHERE symbol=? AND trade_date=? AND time_bucket=?
+    ''', (snapshot["symbol"], trade_date, time_bucket)).fetchone()
+    details = _decode_snapshot_details(
+        existing["signals_json"] if existing else None
+    )
+    details["linkageRisk"] = result
+    details["linkageSnapshot"] = {
+        "sourceTime": source_time,
+        "fetchedAt": fetched_at,
+        "sector": snapshot.get("sector") or {"status": "unavailable"},
+        "overseas": snapshot.get("overseas") or [],
+    }
+    conn.execute('''
+    INSERT INTO signal_snapshots (
+        symbol, trade_date, time_bucket, source_time, fetched_at,
+        signals_json, data_complete
+    ) VALUES (?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(symbol, trade_date, time_bucket) DO UPDATE SET
+        source_time=excluded.source_time,
+        fetched_at=excluded.fetched_at,
+        signals_json=excluded.signals_json
+    ''', (
+        snapshot["symbol"],
+        trade_date,
+        time_bucket,
+        source_time,
+        fetched_at,
+        json.dumps(details, ensure_ascii=False),
+    ))
+    conn.commit()
+    conn.close()
+
+
 def get_signal_history(
     symbol: str,
     source_time: str,
@@ -525,6 +590,86 @@ def get_signal_history(
     } for row in rows]
 
 
+def get_latest_linkage_state(
+    symbol: str,
+    trade_date: str,
+) -> Optional[Dict[str, Any]]:
+    init_alert_tables()
+    conn = _connect()
+    rows = conn.execute('''
+    SELECT signals_json FROM signal_snapshots
+    WHERE symbol=? AND trade_date=?
+    ORDER BY source_time DESC
+    ''', (symbol, trade_date)).fetchall()
+    conn.close()
+    for row in rows:
+        details = _decode_snapshot_details(row["signals_json"])
+        linkage_risk = details.get("linkageRisk")
+        if isinstance(linkage_risk, dict):
+            return linkage_risk
+    return None
+
+
+def get_recent_risk_states(
+    symbol: str,
+    source_time: str,
+    risk_kind: str,
+    limit: int = 2,
+) -> List[Dict[str, Any]]:
+    init_alert_tables()
+    trade_date, _time_bucket = _snapshot_time_parts(source_time)
+    conn = _connect()
+    rows = conn.execute('''
+    SELECT * FROM signal_snapshots
+    WHERE symbol=? AND trade_date=? AND source_time<?
+    ORDER BY source_time DESC
+    LIMIT ?
+    ''', (symbol, trade_date, source_time, max(1, int(limit)))).fetchall()
+    conn.close()
+    states = []
+    for row in rows:
+        details = _decode_snapshot_details(row["signals_json"])
+        if risk_kind == "linkage":
+            state = details.get("linkageRisk")
+            if not isinstance(state, dict):
+                continue
+            states.append({
+                "sourceTime": row["source_time"],
+                "riskStatus": state.get("riskStatus") or "normal",
+                "priority": state.get("priority"),
+                "direction": state.get("direction"),
+            })
+            continue
+        if risk_kind != "market":
+            raise ValueError("risk_kind 只能是 market 或 linkage")
+        states.append({
+            "sourceTime": row["source_time"],
+            "riskStatus": row["risk_status"] or "normal",
+            "priority": row["priority"],
+            "direction": details.get("direction"),
+        })
+    return states
+
+
+def get_latest_risk_episode_alert(
+    symbol: str,
+    event_type: str,
+    direction: str,
+    trade_date: str,
+) -> Optional[Dict[str, Any]]:
+    init_alert_tables()
+    conn = _connect()
+    row = conn.execute('''
+    SELECT * FROM alert_events
+    WHERE symbol=? AND event_type=? AND direction=?
+      AND published_at LIKE ?
+    ORDER BY triggered_at DESC
+    LIMIT 1
+    ''', (symbol, event_type, direction, f"{trade_date}%")).fetchone()
+    conn.close()
+    return _alert_from_row(row) if row else None
+
+
 def get_latest_signal_state(symbol: str) -> Optional[Dict[str, Any]]:
     init_alert_tables()
     conn = _connect()
@@ -537,7 +682,7 @@ def get_latest_signal_state(symbol: str) -> Optional[Dict[str, Any]]:
     conn.close()
     if not row:
         return None
-    stored_details = json.loads(row["signals_json"] or "[]")
+    stored_details = _decode_snapshot_details(row["signals_json"])
     if isinstance(stored_details, dict):
         signals = stored_details.get("signals") or []
         fund_flow_risk = stored_details.get("fundFlowRisk")

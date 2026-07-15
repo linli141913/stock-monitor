@@ -88,6 +88,8 @@ _AI_ANALYSIS_COMPLETED_ROUNDS = set()
 _AI_ANALYSIS_ROUND_ORDER = []
 _EXTENDED_RISK_CACHE: Dict[str, Dict[str, Any]] = {}
 _EXTENDED_RISK_CACHE_LOCK = threading.Lock()
+_VERIFIED_MARKET_HISTORY_CACHE: Dict[str, Dict[str, Any]] = {}
+_VERIFIED_MARKET_HISTORY_CACHE_LOCK = threading.Lock()
 
 
 def build_ai_analysis_round_id(slot: str, now: Optional[datetime] = None) -> str:
@@ -685,25 +687,51 @@ def get_a_share_industry_peer_codes(symbol: str, industry_name: str) -> list[str
         return []
 
 
+def fetch_eastmoney_fund_history(symbol: str) -> list[dict]:
+    market = asset_context.quote_prefix(symbol)
+    market_id = {"sh": 1, "sz": 0, "bj": 0}.get(market)
+    if market_id is None:
+        return []
+    session = requests.Session()
+    session.trust_env = False
+    response = session.get(
+        "http://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+        params={
+            "lmt": "0",
+            "klt": "101",
+            "secid": f"{market_id}.{symbol}",
+            "fields1": "f1,f2,f3,f7",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+        },
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=8,
+    )
+    response.raise_for_status()
+    content = ((response.json().get("data") or {}).get("klines") or [])
+    rows = []
+    for item in content:
+        fields = str(item).split(",")
+        if len(fields) < 12:
+            continue
+        rows.append({
+            "trade_date": fields[0][:10],
+            "fund_close": parse_optional_float(fields[11]),
+            "fund_flow": parse_optional_float(fields[1]),
+        })
+    return rows
+
+
 def get_verified_market_history(symbol: str, expected_trade_date: str) -> list[dict]:
     context = asset_context.build_asset_context(symbol)
     if context["asset_type"] != "a_stock":
         return []
     try:
-        import akshare as ak
-
-        fund_df = ak.stock_individual_fund_flow(
-            stock=symbol,
-            market=asset_context.quote_prefix(symbol),
-        )
+        fund_rows = fetch_eastmoney_fund_history(symbol)
+    except Exception as exc:
+        print(f"Failed to fetch verified fund history for {symbol}: {exc}")
         fund_rows = []
-        for _, row in fund_df.iterrows():
-            trade_date = str(row.get("日期") or "")[:10]
-            fund_rows.append({
-                "trade_date": trade_date,
-                "fund_close": parse_optional_float(row.get("收盘价")),
-                "fund_flow": parse_optional_float(row.get("主力净流入-净额")),
-            })
+    try:
         kline_rows = [
             {
                 "trade_date": str(item.get("time") or "")[:10],
@@ -714,14 +742,40 @@ def get_verified_market_history(symbol: str, expected_trade_date: str) -> list[d
             }
             for item in get_stock_kline(symbol, period="day").get("data", [])
         ]
-        return risk_engine.merge_verified_market_history(
-            fund_rows,
-            kline_rows,
-            expected_trade_date=expected_trade_date,
-        )
     except Exception as exc:
-        print(f"Failed to fetch verified market history for {symbol}: {exc}")
-        return []
+        print(f"Failed to fetch verified K-line history for {symbol}: {exc}")
+        kline_rows = []
+    return risk_engine.merge_verified_market_history(
+        fund_rows,
+        kline_rows,
+        expected_trade_date=expected_trade_date,
+    )
+
+
+def get_cached_verified_market_history(
+    symbol: str,
+    expected_trade_date: str,
+) -> list[dict]:
+    import time
+
+    now_monotonic = time.monotonic()
+    with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+        cached = _VERIFIED_MARKET_HISTORY_CACHE.get(symbol)
+        if (
+            cached
+            and cached.get("expected_trade_date") == expected_trade_date
+            and now_monotonic - float(cached.get("cached_at") or 0) < 180
+        ):
+            return [dict(item) for item in cached.get("data") or []]
+
+    rows = get_verified_market_history(symbol, expected_trade_date)
+    with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+        _VERIFIED_MARKET_HISTORY_CACHE[symbol] = {
+            "expected_trade_date": expected_trade_date,
+            "cached_at": now_monotonic,
+            "data": [dict(item) for item in rows],
+        }
+    return rows
 
 
 def get_constituent_quote_snapshot(symbols: list[str]) -> list[dict]:
@@ -867,7 +921,7 @@ def get_extended_risk_inputs(
     ])
     mappings = risk_engine.build_exact_overseas_mappings(context, business_text)
     data = {
-        "verified_history": get_verified_market_history(symbol, source_date),
+        "verified_history": get_cached_verified_market_history(symbol, source_date),
         "sector": get_verified_sector_risk_snapshot(
             symbol,
             context["industry_name"],
@@ -885,15 +939,19 @@ def get_extended_risk_inputs(
 
 
 def get_cached_linkage_risk(symbol: str) -> Optional[dict]:
+    normalized_symbol = asset_context.normalize_symbol(symbol)
     with _EXTENDED_RISK_CACHE_LOCK:
-        cached = _EXTENDED_RISK_CACHE.get(
-            asset_context.normalize_symbol(symbol)
-        )
-        if not cached:
-            return None
-        data = cached.get("data") or {}
-        linkage_snapshot = data.get("linkage_snapshot")
-        return risk_engine.evaluate_linkage_risk(linkage_snapshot) if linkage_snapshot else None
+        cached = _EXTENDED_RISK_CACHE.get(normalized_symbol)
+        if cached:
+            data = cached.get("data") or {}
+            linkage_snapshot = data.get("linkage_snapshot")
+            if linkage_snapshot:
+                return risk_engine.evaluate_linkage_risk(linkage_snapshot)
+    trade_date = datetime.now(market_calendar.SHANGHAI_TZ).strftime("%Y-%m-%d")
+    return alert_repository.get_latest_linkage_state(
+        normalized_symbol,
+        trade_date,
+    )
 
 
 # ── 接口实现 ──────────────────────────────────────────────────
@@ -1159,8 +1217,12 @@ def get_stock_overview(symbol: str):
         if is_monitored is not True:
             market_risk = risk_engine.evaluate_market_risk(market_snapshot, [])
         else:
+            verified_history = get_cached_verified_market_history(
+                symbol,
+                source_time[:10],
+            ) if source_time else []
             market_risk = risk_engine.process_market_snapshot(
-                market_snapshot,
+                {**market_snapshot, "verified_history": verified_history},
                 persist_snapshot=True,
                 create_alert=market_status.get("marketStatusCode") == "trading",
             )

@@ -216,6 +216,38 @@
   font-size: 11px;
 }
 
+.sectorDimensionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sectorDimensionItem {
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.sectorDimensionTriggered {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #991b1b;
+}
+
+.sectorDimensionNormal {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.sectorDimensionUnavailable {
+  border-color: #d8e0e7;
+  background: #f1f5f9;
+  color: #617080;
+}
+
 .linkageFootnote {
   color: #7a8793;
   font-size: 11px;

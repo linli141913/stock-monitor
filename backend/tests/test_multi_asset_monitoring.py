@@ -38,6 +38,7 @@ class AssetContextTests(unittest.TestCase):
             "腾讯控股",
             ["软件服务"],
         )
+        bse_new_code = asset_context.build_asset_context("920001", "纬达光电")
         sh_etf = asset_context.build_asset_context("510300", "沪深300ETF")
         sz_etf = asset_context.build_asset_context("159915", "创业板ETF")
 
@@ -49,6 +50,9 @@ class AssetContextTests(unittest.TestCase):
         self.assertEqual(hk_stock["asset_type"], "hk_stock")
         self.assertEqual(hk_stock["quote_prefix"], "hk")
         self.assertEqual(hk_stock["industry_name"], "软件服务")
+
+        self.assertEqual(bse_new_code["asset_type"], "a_stock")
+        self.assertEqual(bse_new_code["quote_prefix"], "bj")
 
         self.assertEqual(sh_etf["asset_type"], "domestic_etf")
         self.assertEqual(sh_etf["quote_prefix"], "sh")

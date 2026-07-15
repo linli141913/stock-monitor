@@ -14,10 +14,20 @@ export interface DynamicsItem {
   categoryKey?: 'company-announcements' | 'industry-policy' | 'industry-dynamics' | 'overseas-controls';
 }
 
-export interface LinkageRuleState {
+export interface LinkageDimensionState {
   status: 'triggered' | 'no_signal' | 'unavailable';
   label: '已触发' | '未触发' | '暂无判断';
   reason: string;
+}
+
+export interface LinkageRuleState extends LinkageDimensionState {
+  dataComplete?: boolean;
+  dimensions?: {
+    decline: LinkageDimensionState;
+    breadth: LinkageDimensionState;
+    leader: LinkageDimensionState;
+    fundFlow: LinkageDimensionState;
+  };
 }
 
 export interface LinkageRisk {

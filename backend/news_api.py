@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 import hashlib
 import re
 import asset_context
@@ -31,6 +31,13 @@ class RadarNews(BaseModel):
     verification_status: str
     direction: str
     priority: str
+
+
+class RadarNewsFeed(BaseModel):
+    status: Literal["available", "available_empty", "unavailable"]
+    data: List[RadarNews]
+    error: Optional[str] = None
+    checkedAt: str
 
 def md5_hash(text: str) -> str:
     return hashlib.md5(text.encode('utf-8', errors='ignore')).hexdigest()
@@ -392,7 +399,10 @@ def is_market_relevant(item: dict, classification: dict) -> bool:
     combined_text = f"{item.get('title') or ''}\n{item.get('content') or ''}".lower()
     return any(keyword.lower() in combined_text for keyword in MARKET_RELEVANCE_KEYWORDS)
 
-def get_real_news_from_db(category: str) -> List[dict]:
+def get_real_news_from_db(
+    category: str,
+    raise_on_error: bool = False,
+) -> List[dict]:
     """从数据库读取真实抓取的去重新闻和公告，并转换为前端需要的 RadarNews 格式"""
     try:
         watchlist = database.get_watchlist()
@@ -527,33 +537,60 @@ def get_real_news_from_db(category: str) -> List[dict]:
             })
         return results
     except Exception as e:
-        print(f"Error getting real news from DB: {e}")
+        print(f"Error getting real news from DB: {type(e).__name__}")
+        if raise_on_error:
+            raise
         return []
 
-def get_integrated_news(category: str) -> List[dict]:
+def get_integrated_news(
+    category: str,
+    raise_on_error: bool = False,
+) -> List[dict]:
     # 生产接口只返回真实抓取且可追溯的资讯；没有数据时返回空列表。
-    return get_real_news_from_db(category)
+    return get_real_news_from_db(category, raise_on_error=raise_on_error)
 
-@router.get("/latest", response_model=List[RadarNews])
+
+def get_news_feed(category: str) -> dict:
+    checked_at = datetime.now(
+        market_calendar.SHANGHAI_TZ
+    ).isoformat(timespec="seconds")
+    try:
+        items = get_integrated_news(category, raise_on_error=True)
+    except Exception as exc:
+        print(f"News feed unavailable: {type(exc).__name__}")
+        return {
+            "status": "unavailable",
+            "data": [],
+            "error": "资讯数据读取失败",
+            "checkedAt": checked_at,
+        }
+    return {
+        "status": "available" if items else "available_empty",
+        "data": items,
+        "error": None,
+        "checkedAt": checked_at,
+    }
+
+@router.get("/latest", response_model=RadarNewsFeed)
 def get_latest_news(category: str = "all"):
-    return get_integrated_news(category)
+    return get_news_feed(category)
 
-@router.get("/domestic", response_model=List[RadarNews])
+@router.get("/domestic", response_model=RadarNewsFeed)
 def get_domestic_news():
-    return get_integrated_news("domestic")
+    return get_news_feed("domestic")
 
-@router.get("/global", response_model=List[RadarNews])
+@router.get("/global", response_model=RadarNewsFeed)
 def get_global_news():
-    return get_integrated_news("global")
+    return get_news_feed("global")
 
-@router.get("/policies", response_model=List[RadarNews])
+@router.get("/policies", response_model=RadarNewsFeed)
 def get_policies_news():
-    return get_integrated_news("policies")
+    return get_news_feed("policies")
 
-@router.get("/company-events", response_model=List[RadarNews])
+@router.get("/company-events", response_model=RadarNewsFeed)
 def get_company_events_news():
-    return get_integrated_news("company-events")
+    return get_news_feed("company-events")
 
-@router.get("/export-control", response_model=List[RadarNews])
+@router.get("/export-control", response_model=RadarNewsFeed)
 def get_export_control_news():
-    return get_integrated_news("export-control")
+    return get_news_feed("export-control")

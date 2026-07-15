@@ -62,6 +62,13 @@ const getSourceTimeLabel = (item: DynamicsItem) => {
 export default function IndustryMonitorCard({ data, loading, refreshing, statusMessage }: Props) {
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
+  const sectorDimensions = data?.linkageRisk?.sectorRisk?.dimensions;
+  const sectorRuleStates = [
+    { label: '板块跌幅', state: sectorDimensions?.decline },
+    { label: '上涨家数', state: sectorDimensions?.breadth },
+    { label: '板块龙头', state: sectorDimensions?.leader },
+    { label: '资金排名', state: sectorDimensions?.fundFlow },
+  ];
 
   const getSourceClass = (source: string) => {
     if (source.includes('巨潮')) return styles.sourceCninfo;
@@ -266,6 +273,23 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
             <span title={data?.linkageRisk?.overseasRisk?.reason}>
               海外：{data?.linkageRisk?.overseasRisk?.label || '暂无判断'}
             </span>
+          </div>
+          <div className={styles.sectorDimensionGrid}>
+            {sectorRuleStates.map(({ label, state }) => (
+              <span
+                key={label}
+                title={state?.reason || `${label}数据缺失或口径未验证`}
+                className={`${styles.sectorDimensionItem} ${
+                  state?.status === 'triggered'
+                    ? styles.sectorDimensionTriggered
+                    : state?.status === 'no_signal'
+                      ? styles.sectorDimensionNormal
+                      : styles.sectorDimensionUnavailable
+                }`}
+              >
+                {label}：{state?.label || '暂无判断'}
+              </span>
+            ))}
           </div>
           <p className={styles.linkageFootnote}>
             海外标的仅在公司业务精确映射后参与；同属科技股不会自动关联。

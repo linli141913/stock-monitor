@@ -15,22 +15,45 @@ const TABS = [
   { id: 'overseas-controls', label: '海外与管制' },
 ];
 
+type NewsFeedStatus = 'available' | 'available_empty' | 'unavailable';
+
+interface NewsFeedPayload {
+  status: NewsFeedStatus;
+  data: RadarNews[];
+  error: string | null;
+  checkedAt: string;
+}
+
 export default function IndustryInsightPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [newsList, setNewsList] = useState<RadarNews[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dataStatus, setDataStatus] = useState<NewsFeedStatus>('available_empty');
 
   const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
       const endpoint = `/latest?category=${encodeURIComponent(tabId)}`;
       const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('获取资讯失败');
-      const data = await res.json();
+      const payload = await res.json() as NewsFeedPayload;
+      if (!Array.isArray(payload.data)) throw new Error('资讯接口格式错误');
+      if (payload.status === 'unavailable') {
+        setDataStatus('unavailable');
+        setError(payload.error || '资讯数据暂不可用');
+        return;
+      }
       setError('');
-      setNewsList(data);
+      if (payload.status === 'available_empty') {
+        setDataStatus('available_empty');
+        setNewsList([]);
+        return;
+      }
+      setDataStatus('available');
+      setNewsList(payload.data);
     } catch (err: unknown) {
-      if (!isSilent) setError(err instanceof Error ? err.message : '网络错误');
+      setDataStatus('unavailable');
+      if (!isSilent) setError(err instanceof Error ? err.message : '资讯数据暂不可用');
     } finally {
       if (!isSilent) setLoading(false);
     }
@@ -85,6 +108,8 @@ export default function IndustryInsightPage() {
 
       {loading ? (
         <div className={styles.loading}>雷达扫描中，请稍候...</div>
+      ) : dataStatus === 'unavailable' && newsList.length === 0 ? (
+        null
       ) : newsList.length === 0 ? (
         <div className={styles.empty}>当前分类下暂无权威资讯</div>
       ) : (

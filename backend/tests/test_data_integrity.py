@@ -128,6 +128,31 @@ class NewsIntegrityTests(unittest.TestCase):
     def test_news_api_returns_empty_when_no_real_news_exists(self, _mock_get_real_news):
         self.assertEqual(news_api.get_integrated_news("all"), [])
 
+    @patch.object(news_api, "get_integrated_news", return_value=[])
+    def test_news_feed_distinguishes_verified_empty_from_failure(self, _mock_news):
+        result = news_api.get_news_feed("all")
+
+        self.assertEqual(result["status"], "available_empty")
+        self.assertEqual(result["data"], [])
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["checkedAt"].endswith("+08:00"))
+
+    @patch.object(
+        news_api,
+        "get_integrated_news",
+        side_effect=RuntimeError("/private/secret/database.db"),
+    )
+    def test_news_feed_reports_generic_unavailable_without_leaking_error(
+        self,
+        _mock_news,
+    ):
+        result = news_api.get_news_feed("all")
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["data"], [])
+        self.assertEqual(result["error"], "资讯数据读取失败")
+        self.assertNotIn("/private/secret", str(result))
+
     def test_news_source_classification_uses_traceability_and_real_verification_status(self):
         cases = (
             ("巨潮公告", "https://static.cninfo.com.cn/notice.pdf", 1, "S", "来源已核验"),
@@ -1276,6 +1301,12 @@ class MarketIntegrityTests(unittest.TestCase):
             "http://qt.gtimg.cn/q=hk00700",
         )
 
+    @patch.object(
+        main,
+        "get_cached_verified_market_history",
+        create=True,
+        return_value=[{"trade_date": "2026-07-10", "close": 7.59, "ma5": 7.5}],
+    )
     @patch.object(main, "get_sina_stock_fund_flow", return_value=None)
     @patch.object(main.database, "is_in_watchlist", return_value=True)
     @patch.object(risk_engine, "process_market_snapshot", create=True)
@@ -1299,6 +1330,7 @@ class MarketIntegrityTests(unittest.TestCase):
         mock_process_market_snapshot,
         _mock_is_in_watchlist,
         _mock_get_fund_flow,
+        mock_get_verified_history,
     ):
         mock_process_market_snapshot.return_value = {
             "riskStatus": "normal",
@@ -1337,6 +1369,11 @@ class MarketIntegrityTests(unittest.TestCase):
         self.assertEqual(result["details"].get("turnoverRisk", {}).get("label"), "样本不足")
         self.assertEqual(result.get("risk", {}).get("riskStatus"), "normal")
         self.assertNotIn("updateTime", result)
+        mock_get_verified_history.assert_called_once_with("000725", "2026-07-10")
+        self.assertEqual(
+            mock_process_market_snapshot.call_args.args[0]["verified_history"],
+            [{"trade_date": "2026-07-10", "close": 7.59, "ma5": 7.5}],
+        )
 
     @patch.object(alert_repository, "get_latest_signal_state")
     @patch.object(main, "get_sina_stock_fund_flow", return_value=None)

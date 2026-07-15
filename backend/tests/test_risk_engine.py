@@ -2,7 +2,7 @@ import importlib
 import tempfile
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import alert_repository
 import database
@@ -171,6 +171,93 @@ class RiskEngineTests(unittest.TestCase):
         self.assertEqual(result["priority"], "P2")
         self.assertEqual(result["direction"], "negative")
 
+    def test_fund_rules_use_latest_complete_history_when_today_flow_is_delayed(self):
+        verified_history = [
+            {
+                "trade_date": "2026-07-10",
+                "close": 10.0,
+                "fund_close": 10.0,
+                "fund_flow": -1.0,
+            },
+            {
+                "trade_date": "2026-07-13",
+                "close": 10.2,
+                "fund_close": 10.2,
+                "fund_flow": -2.0,
+            },
+            {
+                "trade_date": "2026-07-14",
+                "close": 10.6,
+                "fund_close": 10.6,
+                "fund_flow": -3.0,
+                "ma5": 10.0,
+                "ma10": 9.9,
+                "ma20": 9.8,
+            },
+            {
+                "trade_date": "2026-07-15",
+                "close": 9.7,
+                "fund_close": None,
+                "fund_flow": None,
+                "ma5": 9.5,
+                "ma10": 9.4,
+                "ma20": 9.3,
+            },
+        ]
+
+        result = risk_engine.evaluate_market_risk(
+            snapshot(close=9.7),
+            history(1.0),
+            verified_history=verified_history,
+        )
+
+        self.assertIn(
+            "consecutive_fund_outflow",
+            {item["code"] for item in result["signals"]},
+        )
+        self.assertEqual(result["fundFlowRisk"]["status"], "triggered")
+        self.assertEqual(result["movingAverageRisk"]["status"], "no_signal")
+
+    def test_fund_rules_reject_a_gap_inside_latest_three_history_rows(self):
+        verified_history = [
+            {
+                "trade_date": "2026-07-10",
+                "close": 10.0,
+                "fund_close": 10.0,
+                "fund_flow": -1.0,
+            },
+            {
+                "trade_date": "2026-07-13",
+                "close": 10.2,
+                "fund_close": None,
+                "fund_flow": None,
+            },
+            {
+                "trade_date": "2026-07-14",
+                "close": 10.3,
+                "fund_close": 10.3,
+                "fund_flow": -3.0,
+            },
+            {
+                "trade_date": "2026-07-15",
+                "close": 10.1,
+                "fund_close": 10.1,
+                "fund_flow": -4.0,
+            },
+        ]
+
+        result = risk_engine.evaluate_market_risk(
+            snapshot(close=10.1),
+            history(1.0),
+            verified_history=verified_history,
+        )
+
+        self.assertEqual(result["fundFlowRisk"]["status"], "unavailable")
+        self.assertNotIn(
+            "consecutive_fund_outflow",
+            {item["code"] for item in result["signals"]},
+        )
+
     def test_incomplete_fund_history_stays_unavailable_without_fake_signal(self):
         incomplete = [
             {"trade_date": "2026-07-10", "close": 10.0, "fund_flow": -1.0},
@@ -283,6 +370,82 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(merged[-1]["ma5"], 9.95)
         self.assertEqual(stale, [])
 
+    def test_market_history_keeps_verified_kline_when_fund_source_is_missing(self):
+        merged = risk_engine.merge_verified_market_history(
+            [],
+            [
+                {"trade_date": "2026-07-14", "close": 10.2, "ma5": 10.0},
+                {"trade_date": "2026-07-15", "close": 9.7, "ma5": 9.9},
+            ],
+            expected_trade_date="2026-07-15",
+        )
+
+        result = risk_engine.evaluate_market_risk(
+            snapshot(close=9.7),
+            history(1.0),
+            verified_history=merged,
+        )
+
+        self.assertEqual(len(merged), 2)
+        self.assertIsNone(merged[-1]["fund_flow"])
+        self.assertEqual(result["fundFlowRisk"]["label"], "暂无判断")
+        self.assertEqual(result["movingAverageRisk"]["status"], "triggered")
+        self.assertEqual(result["movingAverageRisk"]["periods"], ["MA5"])
+
+    def test_eastmoney_fund_history_uses_direct_http_and_parses_fields(self):
+        self.assertTrue(hasattr(main, "fetch_eastmoney_fund_history"))
+        response = MagicMock()
+        response.json.return_value = {
+            "data": {
+                "klines": [
+                    "2026-07-15,-123,1,2,3,4,5,6,7,8,9,9.70,-4.90,0,0",
+                ],
+            },
+        }
+        session = MagicMock()
+        session.get.return_value = response
+
+        with patch.object(main.requests, "Session", return_value=session):
+            rows = main.fetch_eastmoney_fund_history("000725")
+
+        self.assertIs(session.trust_env, False)
+        request_url = session.get.call_args.args[0]
+        self.assertEqual(
+            request_url,
+            "http://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+        )
+        self.assertEqual(rows, [{
+            "trade_date": "2026-07-15",
+            "fund_close": 9.7,
+            "fund_flow": -123.0,
+        }])
+
+    def test_verified_history_keeps_kline_when_fund_fetch_fails(self):
+        kline_payload = {
+            "data": [
+                {"time": "2026-07-14", "close": 10.2, "ma5": 10.0},
+                {"time": "2026-07-15", "close": 9.7, "ma5": 9.9},
+            ],
+        }
+        with patch(
+            "akshare.stock_individual_fund_flow",
+            side_effect=ConnectionError("fund source unavailable"),
+        ), patch.object(
+            main,
+            "fetch_eastmoney_fund_history",
+            create=True,
+            side_effect=ConnectionError("fund source unavailable"),
+        ), patch.object(
+            main,
+            "get_stock_kline",
+            return_value=kline_payload,
+        ):
+            rows = main.get_verified_market_history("000725", "2026-07-15")
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1]["close"], 9.7)
+        self.assertIsNone(rows[-1]["fund_flow"])
+
     def test_sector_snapshot_uses_complete_constituents_and_real_flow_ranking(self):
         sector_rows = [
             {"行业": "汽车整车", "行业-涨跌幅": 1.0, "净额": "5.0亿"},
@@ -316,6 +479,18 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(complete["fund_flow"]["rank"], 1)
         self.assertIsNone(incomplete["advancers"])
         self.assertIsNone(incomplete["leader"])
+
+        incomplete_result = risk_engine.evaluate_linkage_risk({
+            "sector": incomplete,
+            "overseas": [],
+        })
+        self.assertIn("dimensions", incomplete_result["sectorRisk"])
+        dimensions = incomplete_result["sectorRisk"]["dimensions"]
+        self.assertEqual(dimensions["decline"]["status"], "triggered")
+        self.assertEqual(dimensions["breadth"]["status"], "unavailable")
+        self.assertEqual(dimensions["leader"]["status"], "unavailable")
+        self.assertEqual(dimensions["fundFlow"]["status"], "triggered")
+        self.assertIs(incomplete_result["sectorRisk"]["dataComplete"], False)
 
     def test_sector_rules_use_verified_decline_breadth_leader_and_flow_rank(self):
         linkage = {
@@ -360,6 +535,20 @@ class LinkageRiskTests(unittest.TestCase):
             },
         )
         self.assertEqual(result["sectorRisk"]["status"], "triggered")
+        self.assertIn("dimensions", result["sectorRisk"])
+        self.assertEqual(
+            {
+                key: state["status"]
+                for key, state in result["sectorRisk"]["dimensions"].items()
+            },
+            {
+                "decline": "triggered",
+                "breadth": "triggered",
+                "leader": "triggered",
+                "fundFlow": "triggered",
+            },
+        )
+        self.assertIs(result["sectorRisk"]["dataComplete"], True)
 
     def test_unverified_or_merely_tech_overseas_relation_is_never_used(self):
         result = risk_engine.evaluate_linkage_risk({
@@ -439,7 +628,11 @@ class LinkageRiskTests(unittest.TestCase):
             "save_alert_event",
             return_value=(saved_alert, True),
         ), patch("notification_service.process_new_alert", create=True) as mock_process:
-            result = risk_engine.process_linkage_snapshot(linkage, create_alert=True)
+            result = risk_engine.process_linkage_snapshot(
+                linkage,
+                create_alert=True,
+                persist_snapshot=False,
+            )
 
         self.assertEqual(result["priority"], "P2")
         mock_process.assert_called_once()
@@ -496,6 +689,196 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
         self.db_patcher.stop()
         self.temp_dir.cleanup()
 
+    @staticmethod
+    def _linkage_snapshot(source_time, *, decline=-3.2, advancers=10, fund_rank=10):
+        return {
+            "symbol": "000725",
+            "stock_name": "京东方A",
+            "source_time": source_time,
+            "fetched_at": source_time.replace(" ", "T") + "+08:00",
+            "sector": {
+                "status": "available",
+                "name": "光学光电子",
+                "change_percent": decline,
+                "advancers": advancers,
+                "total": 20,
+                "leader": {
+                    "symbol": "000100",
+                    "name": "TCL科技",
+                    "change_percent": -1.0,
+                    "is_limit_down": False,
+                },
+                "fund_flow": {
+                    "value": -12.4,
+                    "direction": "outflow",
+                    "rank": fund_rank,
+                    "total": 86,
+                    "verified": True,
+                },
+            },
+            "overseas": [],
+        }
+
+    def test_recent_risk_states_read_market_and_linkage_from_existing_snapshots(self):
+        source_time = "2026-07-15 10:00:00"
+        current = snapshot(
+            symbol="000725",
+            stock_name="京东方A",
+            source_time=source_time,
+            fetched_at="2026-07-15T10:00:02+08:00",
+            change_percent=-5.5,
+        )
+        market_risk = risk_engine.evaluate_market_risk(current, history(1.0))
+        linkage = self._linkage_snapshot(
+            source_time,
+            decline=-3.2,
+            fund_rank=2,
+        )
+        linkage_risk = risk_engine.evaluate_linkage_risk(linkage)
+
+        alert_repository.save_signal_snapshot({**current, "risk": market_risk})
+        alert_repository.save_linkage_snapshot(linkage, linkage_risk)
+
+        market_states = alert_repository.get_recent_risk_states(
+            "000725",
+            "2026-07-15 10:05:00",
+            "market",
+        )
+        linkage_states = alert_repository.get_recent_risk_states(
+            "000725",
+            "2026-07-15 10:05:00",
+            "linkage",
+        )
+
+        self.assertEqual(market_states[0]["priority"], "P3")
+        self.assertEqual(market_states[0]["direction"], "negative")
+        self.assertEqual(linkage_states[0]["priority"], "P2")
+        self.assertEqual(linkage_states[0]["direction"], "negative")
+
+    def test_linkage_signal_changes_do_not_repeat_inside_same_risk_episode(self):
+        first = self._linkage_snapshot(
+            "2026-07-15 10:00:00",
+            decline=-3.2,
+            advancers=10,
+            fund_rank=2,
+        )
+        changed = self._linkage_snapshot(
+            "2026-07-15 10:05:00",
+            decline=-2.5,
+            advancers=2,
+            fund_rank=2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            risk_engine.process_linkage_snapshot(first, create_alert=True)
+            risk_engine.process_linkage_snapshot(changed, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 1)
+        mock_process.assert_called_once()
+
+    def test_linkage_priority_upgrade_updates_same_episode_alert(self):
+        p3 = self._linkage_snapshot(
+            "2026-07-15 10:00:00",
+            decline=-2.5,
+            advancers=10,
+            fund_rank=2,
+        )
+        p2 = self._linkage_snapshot(
+            "2026-07-15 10:05:00",
+            decline=-3.2,
+            advancers=10,
+            fund_rank=2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            risk_engine.process_linkage_snapshot(p3, create_alert=True)
+            risk_engine.process_linkage_snapshot(p2, create_alert=True)
+
+        alerts = alert_repository.list_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["priority"], "P2")
+        self.assertEqual(mock_process.call_count, 2)
+
+    def test_linkage_reentry_requires_two_cleared_snapshot_buckets(self):
+        active = self._linkage_snapshot(
+            "2026-07-15 10:00:00",
+            decline=-3.2,
+            fund_rank=2,
+        )
+        first_clear = self._linkage_snapshot(
+            "2026-07-15 10:05:00",
+            decline=0.2,
+            advancers=12,
+            fund_rank=10,
+        )
+        flicker = self._linkage_snapshot(
+            "2026-07-15 10:10:00",
+            decline=-3.2,
+            fund_rank=2,
+        )
+        second_clear = self._linkage_snapshot(
+            "2026-07-15 10:15:00",
+            decline=0.2,
+            advancers=12,
+            fund_rank=10,
+        )
+        third_clear = self._linkage_snapshot(
+            "2026-07-15 10:20:00",
+            decline=0.2,
+            advancers=12,
+            fund_rank=10,
+        )
+        reentered = self._linkage_snapshot(
+            "2026-07-15 10:25:00",
+            decline=-3.2,
+            fund_rank=2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            for item in (
+                active,
+                first_clear,
+                flicker,
+                second_clear,
+                third_clear,
+                reentered,
+            ):
+                risk_engine.process_linkage_snapshot(item, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 2)
+        self.assertEqual(mock_process.call_count, 2)
+
+    def test_market_signal_changes_do_not_repeat_inside_same_risk_episode(self):
+        first = snapshot(
+            symbol="000519",
+            stock_name="中兵红箭",
+            source_time="2026-07-15 10:00:00",
+            fetched_at="2026-07-15T10:00:02+08:00",
+            change_percent=-5.5,
+            high=5.5,
+            low=5.0,
+            previous_close=5.0,
+            volume_ratio=1.0,
+        )
+        changed = snapshot(
+            symbol="000519",
+            stock_name="中兵红箭",
+            source_time="2026-07-15 10:05:00",
+            fetched_at="2026-07-15T10:05:02+08:00",
+            change_percent=-5.5,
+            high=5.1,
+            low=5.0,
+            previous_close=5.0,
+            volume_ratio=2.2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            risk_engine.process_market_snapshot(first, create_alert=True)
+            risk_engine.process_market_snapshot(changed, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 1)
+        mock_process.assert_called_once()
+
     def test_snapshot_history_uses_same_time_bucket_and_excludes_current_day(self):
         self.assertTrue(hasattr(alert_repository, "save_signal_snapshot"))
         self.assertTrue(hasattr(alert_repository, "get_signal_history"))
@@ -546,6 +929,89 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(state["fundFlowRisk"]["label"], "暂无判断")
         self.assertEqual(state["movingAverageRisk"]["status"], "triggered")
         self.assertEqual(state["movingAverageRisk"]["periods"], ["MA20"])
+
+    def test_linkage_snapshot_merges_without_overwriting_market_risk(self):
+        self.assertTrue(hasattr(alert_repository, "save_linkage_snapshot"))
+        self.assertTrue(hasattr(alert_repository, "get_latest_linkage_state"))
+
+        def linkage_snapshot(symbol):
+            return {
+                "symbol": symbol,
+                "stock_name": "测试股票",
+                "source_time": "2026-07-13 10:30:00",
+                "fetched_at": "2026-07-13T10:30:02+08:00",
+                "sector": {
+                    "status": "available",
+                    "name": "测试板块",
+                    "change_percent": -3.2,
+                    "advancers": 2,
+                    "total": 20,
+                    "leader": {
+                        "symbol": "000001",
+                        "name": "测试龙头",
+                        "change_percent": -8.1,
+                    },
+                    "fund_flow": {
+                        "verified": True,
+                        "direction": "outflow",
+                        "rank": 2,
+                        "total": 31,
+                    },
+                },
+                "overseas": [],
+            }
+
+        current = snapshot(symbol="000725")
+        market_risk = risk_engine.evaluate_market_risk(current, history(1.0, count=19))
+        market_risk["fundFlowRisk"] = {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "资金历史数据不完整",
+        }
+        market_risk["movingAverageRisk"] = {
+            "status": "triggered",
+            "label": "已触发",
+            "periods": ["MA20"],
+            "reason": "已验证跌破MA20",
+        }
+        linkage = linkage_snapshot("000725")
+        linkage_risk = risk_engine.evaluate_linkage_risk(linkage)
+
+        alert_repository.save_signal_snapshot({**current, "risk": market_risk})
+        alert_repository.save_linkage_snapshot(linkage, linkage_risk)
+
+        market_state = alert_repository.get_latest_signal_state("000725")
+        linkage_state = alert_repository.get_latest_linkage_state(
+            "000725",
+            "2026-07-13",
+        )
+        self.assertEqual(market_state["fundFlowRisk"]["label"], "暂无判断")
+        self.assertEqual(market_state["movingAverageRisk"]["periods"], ["MA20"])
+        self.assertEqual(linkage_state["priority"], "P2")
+        self.assertEqual(
+            linkage_state["sectorRisk"]["dimensions"]["leader"]["status"],
+            "triggered",
+        )
+        self.assertIsNone(
+            alert_repository.get_latest_linkage_state("000725", "2026-07-14")
+        )
+
+        reverse_linkage = linkage_snapshot("000519")
+        reverse_risk = risk_engine.evaluate_linkage_risk(reverse_linkage)
+        reverse_market = snapshot(symbol="000519")
+        reverse_market_risk = risk_engine.evaluate_market_risk(
+            reverse_market,
+            history(1.0, count=19),
+        )
+        alert_repository.save_linkage_snapshot(reverse_linkage, reverse_risk)
+        alert_repository.save_signal_snapshot({**reverse_market, "risk": reverse_market_risk})
+
+        self.assertEqual(
+            alert_repository.get_latest_linkage_state("000519", "2026-07-13")[
+                "sectorRisk"
+            ]["dimensions"]["fundFlow"]["status"],
+            "triggered",
+        )
 
     def test_new_p1_risk_alert_uses_the_event_ai_trigger_chain(self):
         with patch(
