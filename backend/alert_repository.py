@@ -685,12 +685,18 @@ def get_latest_signal_state(symbol: str) -> Optional[Dict[str, Any]]:
     stored_details = _decode_snapshot_details(row["signals_json"])
     if isinstance(stored_details, dict):
         signals = stored_details.get("signals") or []
+        direction = stored_details.get("direction")
         fund_flow_risk = stored_details.get("fundFlowRisk")
         moving_average_risk = stored_details.get("movingAverageRisk")
+        linkage_risk = stored_details.get("linkageRisk")
+        linkage_snapshot = stored_details.get("linkageSnapshot")
     else:
         signals = stored_details if isinstance(stored_details, list) else []
+        direction = None
         fund_flow_risk = None
         moving_average_risk = None
+        linkage_risk = None
+        linkage_snapshot = None
     if not isinstance(fund_flow_risk, dict):
         fund_flow_risk = {
             "status": "unavailable",
@@ -721,10 +727,15 @@ def get_latest_signal_state(symbol: str) -> Optional[Dict[str, Any]]:
         "fetchedAt": row["fetched_at"],
         "riskStatus": row["risk_status"] or "normal",
         "priority": row["priority"],
+        "direction": direction,
         "reason": row["risk_reason"] or "当前未触发量价风险规则",
         "signals": signals,
         "fundFlowRisk": fund_flow_risk,
         "movingAverageRisk": moving_average_risk,
+        "linkageRisk": linkage_risk if isinstance(linkage_risk, dict) else None,
+        "linkageSnapshot": (
+            linkage_snapshot if isinstance(linkage_snapshot, dict) else None
+        ),
         "turnoverRisk": {
             "status": turnover_status,
             "label": {

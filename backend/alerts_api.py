@@ -254,6 +254,7 @@ def get_monitoring_health():
             "recipientConfigured": email_settings["recipientConfigured"],
             "senderConfigured": email_settings["senderConfigured"],
         },
+        "watchlistSync": monitoring_health.get_watchlist_sync_state(),
         "tasks": tasks,
         "fetchedAt": datetime.now(
             market_calendar.SHANGHAI_TZ

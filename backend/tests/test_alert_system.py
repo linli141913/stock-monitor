@@ -350,17 +350,30 @@ class NotificationServiceTests(unittest.TestCase):
         self.assertEqual(result, "skipped_priority")
 
     def test_p2_alert_starts_one_background_analysis_per_event(self):
-        if not hasattr(notification_service, "threading"):
-            self.fail("事件 AI 后台线程尚未实现")
+        executor = getattr(notification_service, "_EVENT_AI_EXECUTOR", None)
+        self.assertIsNotNone(executor, "事件 AI 有界执行器尚未实现")
 
-        with patch.object(notification_service.threading, "Thread") as mock_thread:
+        with patch.object(executor, "submit") as mock_submit:
             first = notification_service.trigger_event_ai_analysis(self.alert)
             second = notification_service.trigger_event_ai_analysis(self.alert)
 
         self.assertEqual(first, "started")
         self.assertEqual(second, "skipped_duplicate")
-        mock_thread.assert_called_once()
-        mock_thread.return_value.start.assert_called_once_with()
+        mock_submit.assert_called_once()
+
+    def test_event_ai_queue_is_bounded_without_blocking_alert_delivery(self):
+        max_pending = getattr(notification_service, "EVENT_AI_MAX_PENDING", None)
+        executor = getattr(notification_service, "_EVENT_AI_EXECUTOR", None)
+        self.assertEqual(max_pending, 8)
+        self.assertIsNotNone(executor)
+        pending = getattr(notification_service, "_EVENT_AI_PENDING", set())
+        pending.update({f"event:pending-{index}" for index in range(max_pending)})
+
+        with patch.object(executor, "submit") as mock_submit:
+            result = notification_service.trigger_event_ai_analysis(self.alert)
+
+        self.assertEqual(result, "skipped_capacity")
+        mock_submit.assert_not_called()
 
     def test_persisted_event_analysis_prevents_duplicate_after_restart(self):
         trigger = f"event:{self.alert['id']}"
@@ -460,8 +473,9 @@ class AlertsApiTests(unittest.TestCase):
 
     @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     def test_alert_list_unread_count_and_read_endpoint(self):
-        list_response = self.client.get("/api/alerts")
-        count_response = self.client.get("/api/alerts/unread-count")
+        auth_headers = {"X-Backend-Token": "test-token"}
+        list_response = self.client.get("/api/alerts", headers=auth_headers)
+        count_response = self.client.get("/api/alerts/unread-count", headers=auth_headers)
         denied_response = self.client.patch(
             f"/api/alerts/{self.alert['id']}/read"
         )
@@ -477,6 +491,7 @@ class AlertsApiTests(unittest.TestCase):
         self.assertEqual(read_response.status_code, 200)
         self.assertEqual(alert_repository.get_unread_count(), 0)
 
+    @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     def test_today_alert_center_includes_system_health_events(self):
         system_alert, _created = alert_repository.save_alert_event({
             "symbol": "SYSTEM",
@@ -495,7 +510,10 @@ class AlertsApiTests(unittest.TestCase):
             ).isoformat(timespec="seconds"),
         })
 
-        response = self.client.get("/api/alerts")
+        response = self.client.get(
+            "/api/alerts",
+            headers={"X-Backend-Token": "test-token"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
@@ -545,6 +563,26 @@ class AlertsApiTests(unittest.TestCase):
         self.assertFalse(response.json()["data"]["emailEnabled"])
 
     @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
+    def test_sensitive_alert_reads_require_backend_token(self):
+        paths = (
+            "/api/alerts",
+            "/api/alerts/unread-count",
+            "/api/alerts/preferences?symbol=000725",
+            "/api/alerts/email-settings",
+            "/api/monitoring/health",
+            "/api/stock/risk/000725",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                denied = self.client.get(path)
+                allowed = self.client.get(
+                    path,
+                    headers={"X-Backend-Token": "test-token"},
+                )
+                self.assertEqual(denied.status_code, 401)
+                self.assertEqual(allowed.status_code, 200)
+
+    @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     def test_global_email_settings_validate_and_replace_recipient(self):
         denied_response = self.client.put(
             "/api/alerts/email-settings",
@@ -565,7 +603,10 @@ class AlertsApiTests(unittest.TestCase):
             json={"recipientEmail": "new-owner@example.com"},
             headers={"X-Backend-Token": "test-token"},
         )
-        get_response = self.client.get("/api/alerts/email-settings")
+        get_response = self.client.get(
+            "/api/alerts/email-settings",
+            headers={"X-Backend-Token": "test-token"},
+        )
 
         self.assertEqual(denied_response.status_code, 401)
         self.assertEqual(invalid_response.status_code, 400)
@@ -626,13 +667,18 @@ class AlertsApiTests(unittest.TestCase):
         self.assertEqual(data["email"]["status"], "not_configured")
         self.assertEqual(data["watchlistCount"], 1)
 
+    @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     def test_stock_risk_endpoint_returns_truthful_missing_state(self):
-        response = self.client.get("/api/stock/risk/000725")
+        response = self.client.get(
+            "/api/stock/risk/000725",
+            headers={"X-Backend-Token": "test-token"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["data"])
         self.assertEqual(response.json()["status"], "unavailable")
 
+    @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     @patch.object(alerts_api.database, "get_watchlist")
     @patch.object(alerts_api.alert_repository, "list_alerts")
     def test_alert_center_only_returns_events_published_today(
@@ -743,6 +789,7 @@ class AlertsApiTests(unittest.TestCase):
         )
         self.assertIn("旧提醒未保存触发瞬间的具体数值", result[0]["summary"])
 
+    @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     @patch.object(alerts_api.database, "get_watchlist")
     @patch.object(alerts_api.alert_repository, "list_alerts")
     def test_alert_history_returns_saved_events_from_previous_days(
@@ -773,7 +820,10 @@ class AlertsApiTests(unittest.TestCase):
             },
         ]
 
-        response = self.client.get("/api/alerts?scope=history")
+        response = self.client.get(
+            "/api/alerts?scope=history",
+            headers={"X-Backend-Token": "test-token"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -899,6 +949,11 @@ class MonitoringHealthAlertTests(unittest.TestCase):
         self.assertFalse(mismatched)
         save_alert.assert_called_once()
         self.assertIn("监测列表不同步", save_alert.call_args.args[0]["title"])
+        state = monitoring_health.get_watchlist_sync_state()
+        self.assertEqual(state["status"], "mismatched")
+        self.assertEqual(state["frontendCount"], 1)
+        self.assertEqual(state["backendCount"], 1)
+        self.assertIsNotNone(state["lastCheckedAt"])
 
     @patch.object(monitoring_health, "_save_system_alert", create=True)
     def test_unresolved_code_or_company_mapping_creates_reminder(self, save_alert):

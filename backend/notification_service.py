@@ -1,6 +1,7 @@
 import os
 import smtplib
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Any, Dict, Optional
@@ -11,8 +12,13 @@ import market_calendar
 
 
 RETRY_DELAYS_MINUTES = (1, 5, 15)
+EVENT_AI_MAX_PENDING = 8
 _EVENT_AI_PENDING = set()
 _EVENT_AI_LOCK = threading.Lock()
+_EVENT_AI_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="event-ai",
+)
 
 
 def _now() -> datetime:
@@ -202,15 +208,11 @@ def trigger_event_ai_analysis(alert: Dict[str, Any]) -> str:
             return "skipped_duplicate"
         if database.get_analysis_history_by_trigger(symbol, trigger) is not None:
             return "skipped_duplicate"
+        if len(_EVENT_AI_PENDING) >= EVENT_AI_MAX_PENDING:
+            return "skipped_capacity"
         _EVENT_AI_PENDING.add(trigger)
-    worker = threading.Thread(
-        target=_run_event_ai_analysis,
-        args=(symbol, trigger),
-        name=f"event-ai-{alert_id[:8]}",
-        daemon=True,
-    )
     try:
-        worker.start()
+        _EVENT_AI_EXECUTOR.submit(_run_event_ai_analysis, symbol, trigger)
     except Exception:
         with _EVENT_AI_LOCK:
             _EVENT_AI_PENDING.discard(trigger)

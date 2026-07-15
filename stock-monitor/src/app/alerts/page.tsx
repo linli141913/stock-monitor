@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { AlertDelivery, AlertDirection, AlertEvent } from '@/types/alert-event';
 import styles from './page.module.css';
 
@@ -44,6 +45,10 @@ function deliveryText(delivery: AlertDelivery | undefined) {
   if (delivery.status === 'not_configured') return '邮件未配置';
   if (delivery.status === 'failed') return '邮件发送失败';
   return '邮件等待发送';
+}
+
+function canOpenStockExplanation(symbol: string) {
+  return /^(?:(?:sh|sz|bj)\d{6}|hk\d{5}|\d{6})$/i.test(symbol);
 }
 
 export default function AlertsPage() {
@@ -219,6 +224,11 @@ export default function AlertsPage() {
                   >
                     {deliveryText(emailDelivery)}
                   </span>
+                  {alert.priority !== 'P3' && canOpenStockExplanation(alert.symbol) && (
+                    <Link href={`/?code=${encodeURIComponent(alert.symbol)}`}>
+                      查看事件与风险解释
+                    </Link>
+                  )}
                   {!alert.isRead && (
                     <button type="button" onClick={() => void markRead(alert.id)}>
                       标记已读

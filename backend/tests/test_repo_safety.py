@@ -44,8 +44,13 @@ class RepositorySafetyTests(unittest.TestCase):
             ".env",
             "backend/venv/",
             "*.db",
+            "*.db.backup*",
+            "*.db.bak*",
             "*.log",
             ".DS_Store",
+            ".playwright-cli/",
+            "backend/data/",
+            "output/",
         ):
             self.assertIn(expected, content)
 
@@ -78,6 +83,8 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertNotIn("admin@example.com", home_page)
         self.assertIn("/api/backend/api/monitoring/health", component)
         self.assertIn("监测运行状态", component)
+        self.assertIn("health?.watchlistSync", component)
+        self.assertIn("列表同步", component)
         self.assertIn("邮件未配置", component)
         self.assertNotIn("提醒功能准备中", component)
 
@@ -123,6 +130,9 @@ class RepositorySafetyTests(unittest.TestCase):
 
         self.assertNotIn("RelatedStocksCard", home_page)
         self.assertNotIn("fetchRelatedPrices", home_page)
+        self.assertNotIn("AbnormalStocksCard", home_page)
+        self.assertNotIn("fetchAbnormalPeers", home_page)
+        self.assertNotIn("/api/stock/abnormal_peers/", home_page)
         self.assertNotIn("globalNews.length > 0 ? globalNews", home_page)
         self.assertIn("news={companyData?.news || []}", home_page)
 
@@ -253,13 +263,22 @@ class RepositorySafetyTests(unittest.TestCase):
 
         self.assertIn("const SLOW_DATA_REQUEST_TIMEOUT = 12 * 1000", home_page)
         self.assertIn("const fetchIndustry = useCallback", home_page)
-        self.assertIn("const fetchAbnormalPeers = useCallback", home_page)
         self.assertIn("fetchIndustry(stockCode, true)", home_page)
         self.assertIn("setIndustryRefreshing(true)", home_page)
         self.assertIn("AbortController", home_page)
+        self.assertNotIn("fetchAbnormalPeers", home_page)
         self.assertIn("refreshing?: boolean", card)
         self.assertIn("statusMessage?: string", card)
         self.assertNotIn("AI 分析中...", card)
+
+    def test_industry_feed_requests_a_bounded_page_and_exposes_total_count(self):
+        page = (ROOT / "stock-monitor/src/app/industry/page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("limit=100", page)
+        self.assertIn("total: number", page)
+        self.assertIn("payload.total", page)
 
     def test_ai_empty_state_keeps_history_access_and_reports_load_failures(self):
         component = (
@@ -271,6 +290,32 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("setShowHistoryModal(true)", component)
         self.assertIn("setData(historyItems[0].full_json)", component)
         self.assertIn("加载历史...", component)
+
+    def test_ai_explanation_ui_uses_safe_text_and_truthful_evidence_labels(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("dangerouslySetInnerHTML", component)
+        self.assertIn("生成事件与风险解释", component)
+        self.assertIn("资金数据与缺口", component)
+        self.assertIn("板块与海外映射", component)
+        self.assertIn("条件情景分析（非预测）", component)
+        self.assertIn("模型解释（非事实结论）", component)
+        self.assertIn("证据完整度", component)
+        self.assertIn("scenarioAnalysis", component)
+        self.assertIn("data.sources", component)
+        self.assertIn("triggerLabel", component)
+        self.assertIn("startsWith('event:')", component)
+        self.assertIn("startsWith('auto:')", component)
+
+    def test_alert_center_links_p1_p2_events_to_stock_explanation(self):
+        page = (ROOT / "stock-monitor/src/app/alerts/page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("查看事件与风险解释", page)
+        self.assertIn("/?code=", page)
 
 
 if __name__ == "__main__":

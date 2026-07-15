@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Literal, Optional
 import hashlib
@@ -36,6 +36,10 @@ class RadarNews(BaseModel):
 class RadarNewsFeed(BaseModel):
     status: Literal["available", "available_empty", "unavailable"]
     data: List[RadarNews]
+    total: int
+    limit: int
+    offset: int
+    hasMore: bool
     error: Optional[str] = None
     checkedAt: str
 
@@ -550,7 +554,9 @@ def get_integrated_news(
     return get_real_news_from_db(category, raise_on_error=raise_on_error)
 
 
-def get_news_feed(category: str) -> dict:
+def get_news_feed(category: str, limit: int = 100, offset: int = 0) -> dict:
+    bounded_limit = max(1, min(int(limit), 200))
+    bounded_offset = max(0, int(offset))
     checked_at = datetime.now(
         market_calendar.SHANGHAI_TZ
     ).isoformat(timespec="seconds")
@@ -561,19 +567,33 @@ def get_news_feed(category: str) -> dict:
         return {
             "status": "unavailable",
             "data": [],
+            "total": 0,
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "hasMore": False,
             "error": "资讯数据读取失败",
             "checkedAt": checked_at,
         }
+    total = len(items)
+    page_items = items[bounded_offset:bounded_offset + bounded_limit]
     return {
-        "status": "available" if items else "available_empty",
-        "data": items,
+        "status": "available" if total else "available_empty",
+        "data": page_items,
+        "total": total,
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+        "hasMore": bounded_offset + len(page_items) < total,
         "error": None,
         "checkedAt": checked_at,
     }
 
 @router.get("/latest", response_model=RadarNewsFeed)
-def get_latest_news(category: str = "all"):
-    return get_news_feed(category)
+def get_latest_news(
+    category: str = "all",
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    return get_news_feed(category, limit=limit, offset=offset)
 
 @router.get("/domestic", response_model=RadarNewsFeed)
 def get_domestic_news():

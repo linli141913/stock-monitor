@@ -12,11 +12,9 @@ import StockOverviewCard from '@/components/stock/StockOverviewCard';
 import StockChartCard from '@/components/stock/StockChartCard';
 import StockInfoTabs from '@/components/stock/StockInfoTabs';
 import IndustryMonitorCard from '@/components/industry/IndustryMonitorCard';
-import AbnormalStocksCard from '@/components/industry/AbnormalStocksCard';
 import AlertSettingCard from '@/components/alert/AlertSettingCard';
 import DataSourceCard from '@/components/common/DataSourceCard';
 import type {
-  AbnormalStock,
   Announcement,
   CompanyInfo,
   KlineItem,
@@ -120,7 +118,6 @@ function HomeContent() {
   const slowDataRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const overviewRequestInFlight = useRef(false);
   const industryRequestInFlight = useRef(false);
-  const abnormalPeersRequestInFlight = useRef(false);
   const industryHasUsableData = useRef(false);
 
   // ── 搜索 ──────────────────────────────────────────────────
@@ -257,9 +254,8 @@ function HomeContent() {
   }, [stockCode]);
 
   const [industryMonitorData, setIndustryMonitorData] = useState<IndustryMonitor>(EMPTY_INDUSTRY_MONITOR);
-  const [abnormalPeers, setAbnormalPeers] = useState<AbnormalStock[]>([]);
 
-  // ── 获取行业资金与异常推荐 ─────────────────────
+  // ── 获取行业资金与联动风险 ─────────────────────
   const fetchIndustry = useCallback(async (sym: string, isSilent = false) => {
     if (industryRequestInFlight.current) return;
     industryRequestInFlight.current = true;
@@ -307,30 +303,6 @@ function HomeContent() {
     }
   }, []);
 
-  const fetchAbnormalPeers = useCallback(async (sym: string) => {
-    if (abnormalPeersRequestInFlight.current) return;
-    abnormalPeersRequestInFlight.current = true;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), SLOW_DATA_REQUEST_TIMEOUT);
-    try {
-      const response = await fetch(`${API_BASE}/api/stock/abnormal_peers/${sym}?_t=${Date.now()}`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`异常同行请求失败 (${response.status})`);
-      }
-      const json = await response.json() as { data?: AbnormalStock[] };
-      setAbnormalPeers(json.data || []);
-    } catch (err) {
-      console.error('Failed to fetch abnormal peers', err);
-    } finally {
-      window.clearTimeout(timeoutId);
-      abnormalPeersRequestInFlight.current = false;
-    }
-  }, []);
-
   const handleOverviewRefresh = () => {
     setOverviewError('');
     void fetchOverview(false);
@@ -351,7 +323,6 @@ function HomeContent() {
 
   const handleIndustryRefresh = () => {
     void fetchIndustry(stockCode, true);
-    void fetchAbnormalPeers(stockCode);
   };
 
   // 换股时，行情 + 公司信息 都刷新
@@ -360,10 +331,9 @@ function HomeContent() {
       void fetchOverview();
       void fetchCompanyInfo();
       void fetchIndustry(stockCode);
-      void fetchAbnormalPeers(stockCode);
     }, 0);
     return () => clearTimeout(timer);
-  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchIndustry, fetchAbnormalPeers]);
+  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchIndustry]);
 
   // 换周期或换股时，刷新 K 线
   useEffect(() => {
@@ -389,12 +359,11 @@ function HomeContent() {
     if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     slowDataRefreshTimer.current = setInterval(() => {
       void fetchIndustry(stockCode, true);
-      void fetchAbnormalPeers(stockCode);
     }, SLOW_DATA_REFRESH_INTERVAL);
     return () => {
       if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     };
-  }, [fetchIndustry, fetchAbnormalPeers, stockCode]);
+  }, [fetchIndustry, stockCode]);
 
   // ── 渲染 ──────────────────────────────────────────────────
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
@@ -462,9 +431,6 @@ function HomeContent() {
             refreshing={industryRefreshing}
             statusMessage={industryStatusMessage}
           />
-          {abnormalPeers.length > 0 && (
-            <AbnormalStocksCard data={abnormalPeers.slice(0, 10)} onStockClick={handleSearch} />
-          )}
           <AlertSettingCard />
           <DataSourceCard />
         </div>

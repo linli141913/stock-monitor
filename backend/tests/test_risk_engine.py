@@ -926,6 +926,7 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
         alert_repository.save_signal_snapshot({**current, "risk": risk})
         state = alert_repository.get_latest_signal_state("000725")
 
+        self.assertEqual(state["direction"], risk["direction"])
         self.assertEqual(state["fundFlowRisk"]["label"], "暂无判断")
         self.assertEqual(state["movingAverageRisk"]["status"], "triggered")
         self.assertEqual(state["movingAverageRisk"]["periods"], ["MA20"])
@@ -987,6 +988,12 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(market_state["fundFlowRisk"]["label"], "暂无判断")
         self.assertEqual(market_state["movingAverageRisk"]["periods"], ["MA20"])
+        self.assertEqual(market_state["linkageRisk"]["priority"], "P2")
+        self.assertEqual(
+            market_state["linkageRisk"]["sectorRisk"]["dimensions"]["leader"]["status"],
+            "triggered",
+        )
+        self.assertEqual(market_state["linkageSnapshot"]["sector"]["name"], "测试板块")
         self.assertEqual(linkage_state["priority"], "P2")
         self.assertEqual(
             linkage_state["sectorRisk"]["dimensions"]["leader"]["status"],

@@ -276,6 +276,23 @@ def get_recent_successful_analysis(
             return payload
     return None
 
+
+def get_latest_successful_analysis(symbol: str):
+    """读取最近一次成功结果，不受时间窗口限制；用于相同证据指纹复用。"""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute('''
+    SELECT full_json
+    FROM ai_analysis_history
+    WHERE symbol=?
+    ORDER BY timestamp DESC, id DESC
+    ''', (symbol,)).fetchall()
+    conn.close()
+    for row in rows:
+        payload = json.loads(row[0]) if row[0] else {}
+        if payload and payload.get("analysisStatus") not in {"running", "failed"}:
+            return payload
+    return None
+
 def get_market_by_symbol(symbol: str) -> str:
     sym = symbol.lower()
     if sym.startswith("hk") or (sym.isdigit() and len(sym) == 5):

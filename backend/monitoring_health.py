@@ -10,6 +10,7 @@ import market_calendar
 
 _LOCK = Lock()
 _TASKS: Dict[str, Dict[str, Any]] = {}
+_WATCHLIST_SYNC: Dict[str, Any] = {}
 
 
 def _now_iso() -> str:
@@ -50,6 +51,7 @@ def _save_system_alert(event: Dict[str, Any]) -> bool:
 def reset_runtime_health() -> None:
     with _LOCK:
         _TASKS.clear()
+        _WATCHLIST_SYNC.clear()
 
 
 def record_task_started(task_name: str) -> None:
@@ -126,6 +128,15 @@ def audit_watchlist_sync(
 ) -> bool:
     frontend_codes = _watchlist_codes(frontend_items)
     backend_codes = _watchlist_codes(backend_items)
+    sync_state = {
+        "status": "synced" if frontend_codes == backend_codes else "mismatched",
+        "frontendCount": len(frontend_codes),
+        "backendCount": len(backend_codes),
+        "lastCheckedAt": _now_iso(),
+    }
+    with _LOCK:
+        _WATCHLIST_SYNC.clear()
+        _WATCHLIST_SYNC.update(sync_state)
     if frontend_codes == backend_codes:
         return True
     frontend_only = sorted(frontend_codes - backend_codes)
@@ -142,6 +153,18 @@ def audit_watchlist_sync(
         ),
     ))
     return False
+
+
+def get_watchlist_sync_state() -> Dict[str, Any]:
+    with _LOCK:
+        if not _WATCHLIST_SYNC:
+            return {
+                "status": "not_checked",
+                "frontendCount": None,
+                "backendCount": None,
+                "lastCheckedAt": None,
+            }
+        return deepcopy(_WATCHLIST_SYNC)
 
 
 def _parse_source_time(value: Any) -> Optional[datetime]:

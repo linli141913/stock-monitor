@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import sqlite3
 import tempfile
 import unittest
@@ -27,6 +28,21 @@ def _today_timestamp(offset_seconds: int = 0) -> int:
 
 
 class NewsIntegrityTests(unittest.TestCase):
+    @patch.object(news_api, "get_integrated_news")
+    def test_news_feed_supports_bounded_pagination(self, mock_get_news):
+        mock_get_news.return_value = [
+            {"id": f"news-{index}"}
+            for index in range(5)
+        ]
+
+        result = news_api.get_news_feed("all", limit=2, offset=1)
+
+        self.assertEqual([item["id"] for item in result["data"]], ["news-1", "news-2"])
+        self.assertEqual(result["total"], 5)
+        self.assertEqual(result["limit"], 2)
+        self.assertEqual(result["offset"], 1)
+        self.assertTrue(result["hasMore"])
+
     @patch.object(news_collector.requests, "Session")
     def test_cninfo_request_does_not_inherit_broken_local_proxy(self, mock_session):
         response = MagicMock()
@@ -726,6 +742,29 @@ class NewsIntegrityTests(unittest.TestCase):
         self.assertEqual(result["policies"], [])
         self.assertEqual(result["upstreamDownstream"], [])
 
+    @patch.object(ai_analysis.database, "get_latest_crawled_news", return_value=[])
+    @patch.object(ai_analysis.database, "get_cached_dynamics")
+    def test_ai_industry_evidence_ignores_legacy_classification_cache(
+        self,
+        mock_get_cache,
+        _mock_get_news,
+    ):
+        mock_get_cache.return_value = {
+            "policies": [{
+                "title": "测试夹具政策",
+                "source": "测试来源",
+                "url": "https://example.com/fixture",
+                "ctime": _today_timestamp(-10),
+                "category": "policy",
+            }],
+            "upstreamDownstream": [],
+        }
+
+        result = ai_analysis.fetch_real_industry_dynamics("000725", "光学光电子")
+
+        self.assertEqual(result, {"policies": [], "upstreamDownstream": []})
+        mock_get_cache.assert_not_called()
+
     @patch.dict(ai_analysis.os.environ, {"LLM_API_KEY": ""}, clear=False)
     @patch.object(ai_analysis.database, "get_cached_dynamics", return_value=None)
     @patch.object(ai_analysis.database, "get_latest_crawled_news")
@@ -832,6 +871,7 @@ class AiIntegrityTests(unittest.TestCase):
             "credibility": "高",
             "riskNotice": "注意风险",
             "sourceDate": "2026-07-14",
+            "promptVersion": "evidence-v2",
         }
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             database,
@@ -879,6 +919,7 @@ class AiIntegrityTests(unittest.TestCase):
 
         self.assertEqual(result["sourceDate"], payload["sourceDate"])
         self.assertTrue(result["resultReused"])
+        self.assertEqual(result["reuseReason"], "manual_cache_20m")
         mock_quote.assert_called_once_with("000725")
 
     def test_p1_p2_event_bypasses_recent_cache_and_failure_is_not_retried(self):
@@ -1135,6 +1176,240 @@ class AiIntegrityTests(unittest.TestCase):
         )
         for phrase in forbidden_phrases:
             self.assertNotIn(phrase, source)
+
+    def test_ai_output_contract_rejects_urls_html_trading_directives_and_unknown_sources(self):
+        validator = getattr(ai_analysis, "validate_ai_payload", None)
+        self.assertIsNotNone(validator, "AI 输出安全校验尚未实现")
+        valid_payload = {
+            "evidenceChain": {
+                "technicalAndSentiment": "行情快照显示涨跌幅为1.2%，来源日期可确认。[S1]",
+                "fundFactor": "历史资金样本不完整，暂无判断。",
+                "fundamentalAndNews": "官方公告披露了半年度业绩信息。[S1]",
+                "sectorAndMacro": "板块与海外精确映射数据暂无法确认。",
+            },
+            "scenarioAnalysis": "若公告口径后续得到正式财报确认，影响再进一步验证。",
+            "plainEnglishSummary": "当前只有行情和一条可追溯公告，资金及板块证据仍不完整，应继续核对正式披露。",
+            "aiJudgment": "已确认事实有限，现阶段只能给出条件性解释。",
+            "riskNotice": "缺少完整资金与板块证据，不能形成确定性结论。",
+            "confirmedFacts": ["公告已发布。[S1]"],
+            "inferences": ["可能影响仍需后续财报验证。"],
+            "unknowns": ["资金数据暂无法确认。"],
+            "sourceIds": ["S1"],
+        }
+
+        validated = validator(valid_payload, {"S1"})
+
+        self.assertEqual(validated["sourceIds"], ["S1"])
+        for unsafe_text in (
+            "建议买入并设置目标价",
+            "详情见 https://example.com/news",
+            "<a href='https://example.com'>来源</a>",
+        ):
+            unsafe_payload = {**valid_payload, "aiJudgment": unsafe_text}
+            with self.assertRaises(ValueError):
+                validator(unsafe_payload, {"S1"})
+        with self.assertRaises(ValueError):
+            validator({**valid_payload, "sourceIds": ["S9"]}, {"S1"})
+
+    def test_evidence_snapshot_uses_verified_risk_and_exact_linkage_only(self):
+        builder = getattr(ai_analysis, "build_evidence_snapshot", None)
+        self.assertIsNotNone(builder, "统一 AI 证据快照尚未实现")
+        snapshot = builder(
+            symbol="000725",
+            stock_name="京东方A",
+            asset_type="A股",
+            industry_name="面板",
+            quote_data={
+                "change_pct": -3.2,
+                "volume_ratio": 1.8,
+                "source_date": "2026-07-15",
+                "source_time": "2026-07-15 14:50:00",
+            },
+            market_risk={
+                "sourceTime": "2026-07-15 14:50:00",
+                "riskStatus": "warning",
+                "priority": "P2",
+                "direction": "negative",
+                "signals": [{"code": "high_volume_ratio"}],
+                "fundFlowRisk": {"status": "unavailable", "label": "暂无判断"},
+                "movingAverageRisk": {"status": "triggered", "periods": ["MA20"]},
+            },
+            linkage_risk={
+                "riskStatus": "warning",
+                "priority": "P2",
+                "direction": "negative",
+                "sectorRisk": {"status": "triggered", "sector": "面板"},
+                "overseasRisk": {
+                    "status": "unavailable",
+                    "reason": "无精确公司业务映射",
+                },
+            },
+            finance_summary={"status": "unavailable", "reason": "财务摘要暂缺"},
+            dynamics={
+                "policies": [{
+                    "title": "工信部发布显示产业政策",
+                    "source": "工信部",
+                    "url": "https://www.miit.gov.cn/policy",
+                    "time": "2026-07-15 09:00:00",
+                    "evidenceLevel": "S",
+                }],
+                "upstreamDownstream": [],
+            },
+            trigger_event=None,
+        )
+
+        self.assertEqual(snapshot["marketRisk"]["priority"], "P2")
+        self.assertEqual(snapshot["linkageRisk"]["sectorRisk"]["sector"], "面板")
+        self.assertEqual(
+            snapshot["linkageRisk"]["overseasRisk"]["status"],
+            "unavailable",
+        )
+        self.assertEqual(snapshot["sources"][0]["sourceId"], "S1")
+        self.assertNotIn("macroEnvironment", snapshot)
+        self.assertNotIn("broadTechnologyPeers", snapshot)
+
+    def test_evidence_snapshot_accepts_real_string_finance_summary(self):
+        builder = getattr(ai_analysis, "build_evidence_snapshot", None)
+        self.assertIsNotNone(builder)
+
+        snapshot = builder(
+            symbol="000725",
+            stock_name="京东方A",
+            asset_type="A股",
+            industry_name="面板",
+            quote_data={"source_date": "2026-07-15", "change_pct": -3.2},
+            market_risk=None,
+            linkage_risk=None,
+            finance_summary="报告期: 2026一季报, 营收: 510.01亿元",
+            dynamics={"policies": [], "upstreamDownstream": []},
+            trigger_event=None,
+        )
+
+        self.assertEqual(snapshot["finance"]["status"], "available")
+        self.assertEqual(
+            snapshot["finance"]["summary"],
+            "报告期: 2026一季报, 营收: 510.01亿元",
+        )
+
+    def test_evidence_fingerprint_is_stable_and_changes_with_material_risk(self):
+        fingerprint = getattr(ai_analysis, "build_evidence_fingerprint", None)
+        self.assertIsNotNone(fingerprint, "AI 证据指纹尚未实现")
+        first = {
+            "quote": {"sourceDate": "2026-07-15", "changePercent": -3.2},
+            "marketRisk": {"priority": "P2", "signals": ["high_volume_ratio"]},
+            "sources": [{"sourceId": "S1", "url": "https://example.com/1"}],
+        }
+        reordered = {
+            "sources": [{"url": "https://example.com/1", "sourceId": "S1"}],
+            "marketRisk": {"signals": ["high_volume_ratio"], "priority": "P2"},
+            "quote": {"changePercent": -3.2, "sourceDate": "2026-07-15"},
+        }
+        changed = copy.deepcopy(first)
+        changed["marketRisk"]["priority"] = "P1"
+
+        self.assertEqual(fingerprint(first), fingerprint(reordered))
+        self.assertNotEqual(fingerprint(first), fingerprint(changed))
+
+    def test_unchanged_single_attempt_reuses_latest_success_without_model_call(self):
+        reuse = getattr(ai_analysis, "reuse_unchanged_single_attempt", None)
+        self.assertIsNotNone(reuse, "AI 相同证据复用尚未实现")
+        previous = {
+            "stockName": "京东方A",
+            "stockCode": "000725",
+            "sourceDate": "2026-07-15",
+            "analysisAt": "2026-07-15T10:30:00+08:00",
+            "plainEnglishSummary": "此前已按相同证据完成解释。",
+            "analysisStatus": "success",
+            "evidenceFingerprint": "same-fingerprint",
+        }
+        trigger = "auto:2026-07-15T11:30"
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            database,
+            "DB_PATH",
+            f"{temp_dir}/fingerprint-reuse.db",
+        ):
+            database.init_db()
+            database.save_analysis_history("000725", "manual", "此前分析", previous)
+            self.assertTrue(database.claim_analysis_trigger("000725", trigger))
+
+            result = reuse(
+                "000725",
+                trigger,
+                {"source_date": "2026-07-15"},
+                "same-fingerprint",
+            )
+            saved = database.get_analysis_history_by_trigger("000725", trigger)
+
+        self.assertTrue(result["resultReused"])
+        self.assertEqual(result["reuseReason"], "evidence_unchanged")
+        self.assertEqual(saved["full_json"], result)
+
+    def test_database_latest_success_skips_newer_running_and_failed_rows(self):
+        latest_success = getattr(database, "get_latest_successful_analysis", None)
+        self.assertIsNotNone(latest_success, "最近成功 AI 结果读取尚未实现")
+        success = {
+            "plainEnglishSummary": "有效结果",
+            "analysisStatus": "success",
+            "evidenceFingerprint": "fingerprint",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            database,
+            "DB_PATH",
+            f"{temp_dir}/latest-success.db",
+        ):
+            database.init_db()
+            database.save_analysis_history("000725", "manual", "有效结果", success)
+            database.save_analysis_history(
+                "000725",
+                "manual-failed",
+                "失败",
+                {"analysisStatus": "failed"},
+            )
+            database.save_analysis_history(
+                "000725",
+                "auto:running",
+                "执行中",
+                {"analysisStatus": "running"},
+            )
+
+            result = latest_success("000725")
+
+        self.assertEqual(result, success)
+
+    def test_ai_prompt_does_not_feed_previous_ai_text_or_broad_market_guesses(self):
+        source = __import__("inspect").getsource(ai_analysis.get_ai_attribution)
+
+        for forbidden_call in (
+            "get_today_analysis_history",
+            "get_stock_news",
+            "get_macro_environment",
+            "get_industry_news_dehydrated",
+        ):
+            self.assertNotIn(forbidden_call, source)
+        for forbidden_phrase in (
+            "机构健康度综合评分",
+            "主力资金真实意图",
+            "涨跌归因分析",
+            "催化作用",
+        ):
+            self.assertNotIn(forbidden_phrase, source)
+        self.assertIn("evidence_snapshot", source)
+        self.assertIn("scenarioAnalysis", source)
+
+    def test_industry_evidence_selection_is_deterministic_without_extra_llm_call(self):
+        source = __import__("inspect").getsource(
+            ai_analysis.fetch_real_industry_dynamics
+        )
+
+        self.assertNotIn("chat.completions.create", source)
+        self.assertNotIn("LLM_API_KEY", source)
+
+    def test_model_call_has_timeout_retry_and_output_limits(self):
+        source = __import__("inspect").getsource(ai_analysis.get_ai_attribution)
+
+        self.assertIn("timeout=60", source)
+        self.assertIn("max_retries=0", source)
+        self.assertIn("max_tokens=1800", source)
 
 
 class MarketIntegrityTests(unittest.TestCase):
@@ -1566,6 +1841,18 @@ class ApiSecurityTests(unittest.TestCase):
             self._request("/api/stock/ai_attribution/000725")
         ))
 
+    def test_alert_monitoring_and_risk_reads_stay_behind_server_proxy(self):
+        for path in (
+            "/api/alerts",
+            "/api/alerts/unread-count",
+            "/api/alerts/preferences",
+            "/api/alerts/email-settings",
+            "/api/monitoring/health",
+            "/api/stock/risk/000725",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(main.request_requires_backend_token(self._request(path)))
+
     def test_cors_does_not_allow_every_origin(self):
         cors_middleware = next(
             middleware
@@ -1621,6 +1908,23 @@ class SchedulerResponsivenessTests(unittest.TestCase):
         if hasattr(main, "_AI_ANALYSIS_COMPLETED_ROUNDS"):
             main._AI_ANALYSIS_COMPLETED_ROUNDS.clear()
         monitoring_health.reset_runtime_health()
+
+    @patch.object(main, "AsyncIOScheduler")
+    def test_daytime_official_scan_runs_each_minute_for_two_minute_target(
+        self,
+        scheduler_class,
+    ):
+        main.start_scheduler()
+
+        official_cron_calls = [
+            call
+            for call in scheduler_class.return_value.add_job.call_args_list
+            if call.args[:2] == (main.auto_collect_official_alerts, "cron")
+            and call.kwargs.get("hour") == "7-23"
+        ]
+        self.assertEqual(len(official_cron_calls), 1)
+        self.assertEqual(official_cron_calls[0].kwargs.get("minute"), "*")
+        self.assertEqual(official_cron_calls[0].kwargs.get("max_instances"), 1)
 
     @patch.object(news_collector, "run_collection", return_value=7)
     def test_general_news_collection_records_runtime_health(self, _mock_collection):

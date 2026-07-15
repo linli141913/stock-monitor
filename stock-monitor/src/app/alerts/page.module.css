@@ -206,6 +206,14 @@
   font-weight: 700;
 }
 
+.alertActions a {
+  color: #0b5f9a;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  text-decoration: none;
+}
+
 .read {
   opacity: 0.72;
   box-shadow: none;

@@ -23,10 +23,17 @@ stock-monitor/.vercel/
 *.tsbuildinfo
 
 # Runtime data and logs
+backend/data/
 *.db
 *.db-shm
 *.db-wal
+*.db.backup*
+*.db.bak*
 *.log
+
+# Local browser acceptance and generated outputs
+.playwright-cli/
+output/
 
 # Local tunnel binaries and archives
 ngrok

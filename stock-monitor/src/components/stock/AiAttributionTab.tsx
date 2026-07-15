@@ -2,15 +2,32 @@
 
 const API_BASE = '/api/backend';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import { BrainCircuit } from 'lucide-react';
 import styles from './AiAttributionTab.module.css';
 
 interface EvidenceChain {
-  technicalAndSentiment: string;
-  fundFactor: string;
-  fundamentalAndNews: string;
-  sectorAndMacro: string;
+  technicalAndSentiment?: string;
+  fundFactor?: string;
+  fundamentalAndNews?: string;
+  sectorAndMacro?: string;
+}
+
+interface AttributionSource {
+  sourceId: string;
+  title: string;
+  source: string;
+  url: string;
+  time?: string | null;
+  evidenceLevel?: string | null;
+}
+
+interface EvidenceCompleteness {
+  available?: string[];
+  missing?: string[];
+  availableCount?: number;
+  totalCount?: number;
+  label?: string;
 }
 
 interface AttributionData {
@@ -18,6 +35,8 @@ interface AttributionData {
   stockCode: string;
   changePercent: number | null;
   evidenceChain: EvidenceChain;
+  scenarioAnalysis?: string;
+  futureTrendPrediction?: string;
   plainEnglishSummary?: string;
   aiJudgment: string;
   credibility: string;
@@ -27,6 +46,14 @@ interface AttributionData {
   analysisAt?: string | null;
   resultReused?: boolean;
   analysisStatus?: string | null;
+  sources?: AttributionSource[];
+  sourceIds?: string[];
+  confirmedFacts?: string[];
+  inferences?: string[];
+  unknowns?: string[];
+  evidenceCompleteness?: EvidenceCompleteness | null;
+  reuseReason?: string | null;
+  promptVersion?: string | null;
 }
 
 interface HistoryItem {
@@ -38,6 +65,34 @@ interface HistoryItem {
   plain_english_summary: string;
   full_json: AttributionData;
   period_bounds?: { start: string; end: string } | null;
+}
+
+function triggerLabel(triggerType: string) {
+  if (triggerType.startsWith('event:')) return '事件触发';
+  if (triggerType.startsWith('auto:')) return '定时复盘';
+  return '手动生成';
+}
+
+function safeSourceUrl(value?: string) {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderSafeText(text?: string) {
+  const normalized = (text || '暂无判断')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\\n/g, '\n');
+  return normalized.split('\n').map((line, index) => (
+    <Fragment key={`${index}-${line.slice(0, 12)}`}>
+      {index > 0 && <br />}
+      {line}
+    </Fragment>
+  ));
 }
 
 export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
@@ -129,9 +184,25 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           bounds?: { start: string; end: string } | null;
           calendarStatus?: 'available' | 'unknown';
         };
-        setHistoryList(json.data || []);
+        const currentItems = json.data || [];
+        setHistoryList(currentItems);
         setBounds(json.bounds || null);
         setCalendarStatus(json.calendarStatus || 'unknown');
+        if (currentItems.length === 0) {
+          const allResponse = await fetch(
+            `${API_BASE}/api/stock/ai_history_all/${stockCode}`,
+            { headers: { 'ngrok-skip-browser-warning': 'true' } },
+          );
+          if (allResponse.ok) {
+            const allPayload = await allResponse.json() as { data?: HistoryItem[] };
+            const latest = (allPayload.data || [])[0];
+            if (latest) {
+              setData(latest.full_json);
+              setAnalysisAt(latest.full_json.analysisAt || null);
+              setSelectedHistoryItem(latest);
+            }
+          }
+        }
       }
     } catch (err) {
       setBounds(null);
@@ -260,7 +331,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       <div className={styles.emptyText}>当前交易周期暂无自动追踪记录。点击下方按钮，可基于最新可追溯行情快照生成分析。</div>
       <div className={styles.emptyActions}>
         <button className={styles.refreshBtn} onClick={fetchAttribution}>
-          AI分析原因
+          生成事件与风险解释
         </button>
         <button className={styles.historyBtn} onClick={openHistory} disabled={fetchingAllHistory}>
           {fetchingAllHistory ? '加载历史...' : '查看历史记录'}
@@ -269,25 +340,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       {historyError && <div className={styles.historyError}>{historyError}</div>}
     </div>
   );
-
-  const renderRichText = (text: string) => {
-    if (!text) return '';
-    let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    
-    // Parse Markdown links [text](url)
-    html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:500;">$1</a>');
-    
-    // Parse escaped <br/> tags
-    html = html.replace(/&lt;br\/?&gt;/gi, '<br/>');
-    html = html.replace(/\\n/g, '<br/>');
-
-    // Colorize positive keywords and numbers
-    html = html.replace(/(净流入|流入|上涨|大涨|暴涨|涨跌幅)([\s\d\.\+\-%亿元万千万]+)?/g, `<span class="${styles.textRise}">$1$2</span>`);
-    // Colorize negative keywords and numbers
-    html = html.replace(/(净流出|流出|下跌|大跌|暴跌|回调)([\s\d\.\+\-%亿元万千万]+)?/g, `<span class="${styles.textFall}">$1$2</span>`);
-
-    return html;
-  };
 
   const isUp = data?.changePercent != null && data.changePercent > 0;
   const isDown = data?.changePercent != null && data.changePercent < 0;
@@ -310,7 +362,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                 ? `历史复盘：${formatBoundsDate(selectedHistoryItem.period_bounds.start)} 至 ${formatBoundsDate(selectedHistoryItem.period_bounds.end)}`
                 : '历史复盘周期暂不可用'}
             >
-              <span className={styles.historyPeriodLabel}>历史</span>
+              <span className={styles.historyPeriodLabel}>最近一次历史解释</span>
               <span>
                 {selectedHistoryItem.period_bounds
                   ? `${formatBoundsDate(selectedHistoryItem.period_bounds.start).replace(/ \([^)]+\)/, '').replace('-', '/')}–${formatBoundsDate(selectedHistoryItem.period_bounds.end).replace(/ \([^)]+\)/, '').replace('-', '/')}`
@@ -325,9 +377,15 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         <div className={styles.headerRight}>
           {data?.sourceTime && <span className={styles.lastUpdated}>行情源 {data.sourceTime}</span>}
           {analysisAt && <span className={styles.lastUpdated}>分析于 {analysisAt.replace('T', ' ').slice(0, 19)}</span>}
-          {data?.resultReused && <span className={styles.lastUpdated}>20分钟内复用</span>}
+          {data?.resultReused && (
+            <span className={styles.lastUpdated}>
+              {data.reuseReason === 'evidence_unchanged'
+                ? '证据未变化，复用上次解释'
+                : '20分钟内复用'}
+            </span>
+          )}
           <button className={styles.refreshBtn} onClick={fetchAttribution} disabled={loading}>
-            手动分析当前快照
+            生成事件与风险解释
           </button>
         </div>
       </div>
@@ -369,7 +427,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                 }}
               >
                 <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '4px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span>{item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})</span>
+                  <span>{item.time} ({triggerLabel(item.trigger_type)})</span>
                 </div>
                 <div style={{ color: '#0f172a', fontWeight: 500, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {item.plain_english_summary}
@@ -395,28 +453,64 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         </div>
       )}
 
-      {data && (
+      {data && data.promptVersion !== 'evidence-v2' && (
+        <div className={styles.legacyNotice}>
+          <strong>旧版历史解释已停止展示详细结论</strong>
+          <span>该记录生成于证据化规则上线前，可能包含未经当前来源校验的推断。原始记录仍保留用于审计，请生成一次新的事件与风险解释。</span>
+          <button type="button" className={styles.refreshBtn} onClick={fetchAttribution}>
+            生成新版解释
+          </button>
+        </div>
+      )}
+
+      {data && data.promptVersion === 'evidence-v2' && (
         <>
       <div className={styles.sectionTitle}>事件与风险解释</div>
       
       <div className={styles.evidenceList}>
         <div className={styles.evidenceItem}>
           <div className={styles.evidenceLabel}>1. 量价与情绪面</div>
-          <div className={styles.evidenceText} dangerouslySetInnerHTML={{ __html: renderRichText(data.evidenceChain.technicalAndSentiment) }} />
+          <div className={styles.evidenceText}>{renderSafeText(data.evidenceChain?.technicalAndSentiment)}</div>
         </div>
         <div className={styles.evidenceItem}>
-          <div className={styles.evidenceLabel}>2. 资金面博弈</div>
-          <div className={styles.evidenceText} dangerouslySetInnerHTML={{ __html: renderRichText(data.evidenceChain.fundFactor) }} />
+          <div className={styles.evidenceLabel}>2. 资金数据与缺口</div>
+          <div className={styles.evidenceText}>{renderSafeText(data.evidenceChain?.fundFactor)}</div>
         </div>
         <div className={styles.evidenceItem}>
           <div className={styles.evidenceLabel}>3. 基本面与资讯</div>
-          <div className={styles.evidenceText} dangerouslySetInnerHTML={{ __html: renderRichText(data.evidenceChain.fundamentalAndNews) }} />
+          <div className={styles.evidenceText}>{renderSafeText(data.evidenceChain?.fundamentalAndNews)}</div>
         </div>
         <div className={styles.evidenceItem}>
-          <div className={styles.evidenceLabel}>4. 板块与宏观共振</div>
-          <div className={styles.evidenceText} dangerouslySetInnerHTML={{ __html: renderRichText(data.evidenceChain.sectorAndMacro) }} />
+          <div className={styles.evidenceLabel}>4. 板块与海外映射</div>
+          <div className={styles.evidenceText}>{renderSafeText(data.evidenceChain?.sectorAndMacro)}</div>
         </div>
       </div>
+
+      {(data.confirmedFacts?.length || data.inferences?.length || data.unknowns?.length) ? (
+        <div className={styles.factGrid}>
+          <div className={styles.factColumn}>
+            <strong>已确认事实</strong>
+            {(data.confirmedFacts || []).map((item, index) => <p key={index}>{renderSafeText(item)}</p>)}
+          </div>
+          <div className={styles.factColumn}>
+            <strong>基于事实的推断</strong>
+            {(data.inferences || []).map((item, index) => <p key={index}>{renderSafeText(item)}</p>)}
+          </div>
+          <div className={styles.factColumn}>
+            <strong>暂无法确认</strong>
+            {(data.unknowns || []).map((item, index) => <p key={index}>{renderSafeText(item)}</p>)}
+          </div>
+        </div>
+      ) : null}
+
+      {data.scenarioAnalysis && (
+        <div className={styles.scenarioCard}>
+          <div className={styles.scenarioTitle}>条件情景分析（非预测）</div>
+          <div className={styles.scenarioText}>
+            {renderSafeText(data.scenarioAnalysis)}
+          </div>
+        </div>
+      )}
 
       {data.plainEnglishSummary && (
         <div className={styles.plainEnglishCard} style={{ marginTop: '16px', padding: '16px', borderRadius: '8px', border: '2px solid #1890ff', background: '#e6f4ff', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -432,16 +526,37 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
 
       <div className={styles.judgmentCard} style={{ marginTop: '16px' }}>
         <div className={styles.judgmentHeader}>
-          <span className={styles.judgmentTitle}>AI 综合判断</span>
-          <span className={styles.credibilityTag}>可信度：{data.credibility}</span>
+          <span className={styles.judgmentTitle}>模型解释（非事实结论）</span>
+          <span className={styles.credibilityTag}>证据完整度：{data.credibility}</span>
         </div>
-        <div className={styles.judgmentText} dangerouslySetInnerHTML={{ __html: renderRichText(data.aiJudgment) }} />
+        <div className={styles.judgmentText}>{renderSafeText(data.aiJudgment)}</div>
       </div>
 
       <div className={styles.riskCard}>
         <div className={styles.riskTitle}>风险提示</div>
-        <div className={styles.riskText} dangerouslySetInnerHTML={{ __html: renderRichText(data.riskNotice) }} />
+        <div className={styles.riskText}>{renderSafeText(data.riskNotice)}</div>
       </div>
+
+      {data.sources && data.sources.length > 0 && (
+        <div className={styles.sourceCard}>
+          <div className={styles.sourceTitle}>本次实际引用来源</div>
+          <div className={styles.sourceList}>
+            {data.sources.map((source) => {
+              const url = safeSourceUrl(source.url);
+              return (
+                <div key={source.sourceId} className={styles.sourceItem}>
+                  <span>{source.sourceId}</span>
+                  <div>
+                    <strong>{source.title}</strong>
+                    <small>{source.source} · {source.time || '发布时间暂缺'} · 证据 {source.evidenceLevel || '待核验'}</small>
+                  </div>
+                  {url ? <a href={url} target="_blank" rel="noreferrer">查看原文</a> : <em>链接不可用</em>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       </>
       )}
       
@@ -649,10 +764,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                               <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <span>{item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})</span>
+                                <span>{item.time} ({triggerLabel(item.trigger_type)})</span>
                               </span>
                               <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: item.trigger_type === 'manual' ? '#fffbeb' : '#eff6ff', color: item.trigger_type === 'manual' ? '#b45309' : '#1d4ed8', fontWeight: 500 }}>
-                                {item.trigger_type === 'manual' ? '手动' : '定时自动'}
+                                {triggerLabel(item.trigger_type)}
                               </span>
                             </div>
                             <div style={{ color: '#475569', fontSize: '0.9rem', lineHeight: 1.5 }}>

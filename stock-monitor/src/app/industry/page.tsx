@@ -20,6 +20,10 @@ type NewsFeedStatus = 'available' | 'available_empty' | 'unavailable';
 interface NewsFeedPayload {
   status: NewsFeedStatus;
   data: RadarNews[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
   error: string | null;
   checkedAt: string;
 }
@@ -30,10 +34,11 @@ export default function IndustryInsightPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dataStatus, setDataStatus] = useState<NewsFeedStatus>('available_empty');
+  const [total, setTotal] = useState(0);
 
   const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
-      const endpoint = `/latest?category=${encodeURIComponent(tabId)}`;
+      const endpoint = `/latest?category=${encodeURIComponent(tabId)}&limit=100&offset=0`;
       const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('获取资讯失败');
       const payload = await res.json() as NewsFeedPayload;
@@ -43,6 +48,7 @@ export default function IndustryInsightPage() {
         setError(payload.error || '资讯数据暂不可用');
         return;
       }
+      setTotal(payload.total);
       setError('');
       if (payload.status === 'available_empty') {
         setDataStatus('available_empty');
@@ -88,7 +94,7 @@ export default function IndustryInsightPage() {
         <h1 className={styles.title}>行业洞察</h1>
         <div className={styles.radarBadge}>
           <Activity size={18} />
-          当日公开资讯（抽样）
+          当日公开资讯（最新 {newsList.length} / {total} 条）
         </div>
       </div>
 

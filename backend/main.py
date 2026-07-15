@@ -46,9 +46,11 @@ def request_requires_backend_token(request: Request) -> bool:
     path = request.url.path
     if request.method in {"GET", "POST"} and path == "/api/watchlist":
         return True
-    if path.startswith("/api/alerts") and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+    if path.startswith("/api/alerts"):
         return True
-    if path == "/api/monitoring/health/watchlist-sync" and request.method == "POST":
+    if path.startswith("/api/monitoring/health"):
+        return True
+    if request.method == "GET" and path.startswith("/api/stock/risk/"):
         return True
     protected_ai_prefixes = ("/api/stock/ai_attribution/",)
     return request.method == "GET" and path.startswith(protected_ai_prefixes)
@@ -426,19 +428,19 @@ def start_scheduler():
     scheduler.add_job(auto_collect_official_alerts, 'date', run_date=datetime.now())
     # 随后每 30 分钟拉取一次新闻
     scheduler.add_job(auto_collect_news, 'interval', minutes=30)
-    # 官方公告独立高频扫描；夜间降低频率，避免普通媒体跟随高频抓取。
+    # 官方公告独立高频扫描；一分钟轮询为“P95 两分钟内提醒”预留抓取和处理时间。
     scheduler.add_job(
         auto_collect_official_alerts,
         'cron',
-        hour='7-22',
-        minute='*/5',
+        hour='7-23',
+        minute='*',
         max_instances=1,
         coalesce=True,
     )
     scheduler.add_job(
         auto_collect_official_alerts,
         'cron',
-        hour='0-6,23',
+        hour='0-6',
         minute='0,30',
         max_instances=1,
         coalesce=True,

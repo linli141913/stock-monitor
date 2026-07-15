@@ -13,14 +13,14 @@ interface Props {
   news: News[];
 }
 
-type TabType = 'AI归因' | '公司概览' | '财务摘要' | '公告' | '相关新闻';
+type TabType = '事件解释' | '公司概览' | '财务摘要' | '公告' | '相关新闻';
 
 export default function StockInfoTabs({ stockCode, companyInfo, announcements, news }: Props) {
-  const [activeTab, setActiveTab] = useState<TabType>('AI归因');
+  const [activeTab, setActiveTab] = useState<TabType>('事件解释');
   // We now always show the Financial Data tab
   const hasNews = news && news.length > 0;
 
-  const tabs: TabType[] = ['AI归因', '公司概览', '财务摘要', '公告'];
+  const tabs: TabType[] = ['事件解释', '公司概览', '财务摘要', '公告'];
   if (hasNews) tabs.push('相关新闻');
 
   // ensure activeTab is valid if the currently selected tab disappeared
@@ -43,7 +43,7 @@ export default function StockInfoTabs({ stockCode, companyInfo, announcements, n
       </div>
 
       <div className={styles.content}>
-        {activeTab === 'AI归因' && (
+        {activeTab === '事件解释' && (
           <div className={styles.tabPanel}>
             <AiAttributionTab stockCode={stockCode} />
           </div>

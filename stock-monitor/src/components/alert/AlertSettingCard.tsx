@@ -22,6 +22,12 @@ interface MonitoringHealth {
     recipientConfigured?: boolean;
     senderConfigured?: boolean;
   };
+  watchlistSync: {
+    status: 'synced' | 'mismatched' | 'not_checked';
+    frontendCount: number | null;
+    backendCount: number | null;
+    lastCheckedAt: string | null;
+  };
   tasks: Record<string, TaskHealth>;
   fetchedAt: string;
 }
@@ -220,6 +226,23 @@ export default function AlertSettingCard() {
           <div className={styles.statusRow}>
             <span>后台监测</span>
             <strong>{health ? `${health.watchlistCount} 只股票` : '—'}</strong>
+          </div>
+          <div className={styles.statusRow}>
+            <span>列表同步</span>
+            <strong
+              className={health?.watchlistSync.status === 'synced'
+                ? styles.healthy
+                : health?.watchlistSync.status === 'mismatched'
+                  ? styles.warning
+                  : styles.unknown}
+              title={formatTime(health?.watchlistSync.lastCheckedAt || undefined)}
+            >
+              {health?.watchlistSync.status === 'synced'
+                ? '前后端一致'
+                : health?.watchlistSync.status === 'mismatched'
+                  ? '发现不一致'
+                  : '等待页面核对'}
+            </strong>
           </div>
           <div className={styles.statusRow}>
             <span>官方公告扫描</span>

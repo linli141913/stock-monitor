@@ -80,6 +80,17 @@ npm run lint
 npm run build
 ```
 
+## 部署前备份本地运行数据
+
+后端运行期间也可以执行一致性备份；脚本会保留旧文件，并为新备份生成 SHA-256 校验文件：
+
+```bash
+cd backend
+./venv/bin/python backup_database.py
+```
+
+默认备份到 `backend/data/backups/`。数据库、备份和校验文件都属于本地运行数据，不提交到 Git。
+
 ## 数据真实性
 
 - 行情、新闻、公告和财务信息必须来自可追溯公开来源。
