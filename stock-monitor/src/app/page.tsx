@@ -12,7 +12,6 @@ import StockOverviewCard from '@/components/stock/StockOverviewCard';
 import StockChartCard from '@/components/stock/StockChartCard';
 import StockInfoTabs from '@/components/stock/StockInfoTabs';
 import IndustryMonitorCard from '@/components/industry/IndustryMonitorCard';
-import RelatedStocksCard from '@/components/stock/RelatedStocksCard';
 import AbnormalStocksCard from '@/components/industry/AbnormalStocksCard';
 import AlertSettingCard from '@/components/alert/AlertSettingCard';
 import DataSourceCard from '@/components/common/DataSourceCard';
@@ -22,7 +21,6 @@ import type {
   CompanyInfo,
   KlineItem,
   News,
-  RelatedStock,
   StockOverview,
 } from '@/types/stock';
 import type { IndustryMonitor } from '@/types/industry';
@@ -60,12 +58,17 @@ interface OverviewApiResponse {
   code: string;
   marketStatus?: string;
   marketStatusCode?: StockOverview['marketStatusCode'];
+  isMonitored?: boolean | null;
+  monitoringStatus?: StockOverview['monitoringStatus'];
+  monitoringError?: string | null;
   latestPrice: number | null;
   changeAmount: number | null;
   changePercent: number | null;
   sourceTime: string | null;
   fetchedAt: string;
   fundFlow?: string;
+  fundFlowTimeScope?: string;
+  risk?: StockOverview['risk'];
   details: {
     open: number | null;
     high: number | null;
@@ -74,6 +77,7 @@ interface OverviewApiResponse {
     volume: string | null;
     turnoverAmount: string | null;
     turnoverRate?: number | null;
+    turnoverRisk?: StockOverview['turnoverRisk'];
     peRatio?: number | null;
     marketCap?: string | null;
   };
@@ -108,7 +112,6 @@ function HomeContent() {
   const [overviewError, setOverviewError] = useState('');
   const [klineError, setKlineError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [globalNews, setGlobalNews] = useState<News[]>([]);
   const [industryLoading, setIndustryLoading] = useState(true);
   const [industryRefreshing, setIndustryRefreshing] = useState(false);
   const [industryStatusMessage, setIndustryStatusMessage] = useState('');
@@ -116,7 +119,6 @@ function HomeContent() {
   const overviewRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const slowDataRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const overviewRequestInFlight = useRef(false);
-  const relatedRequestInFlight = useRef(false);
   const industryRequestInFlight = useRef(false);
   const abnormalPeersRequestInFlight = useRef(false);
   const industryHasUsableData = useRef(false);
@@ -151,6 +153,9 @@ function HomeContent() {
         stockCode:    data.code,
         marketStatus: data.marketStatus,
         marketStatusCode: data.marketStatusCode,
+        isMonitored: data.isMonitored,
+        monitoringStatus: data.monitoringStatus,
+        monitoringError: data.monitoringError,
         latestPrice:  data.latestPrice,
         changeAmount: data.changeAmount,
         changePercent:data.changePercent,
@@ -161,11 +166,14 @@ function HomeContent() {
         volume:       data.details.volume,
         turnoverAmount:data.details.turnoverAmount,
         turnoverRate: data.details.turnoverRate ?? null,
+        turnoverRisk: data.details.turnoverRisk,
+        risk: data.risk,
         peDynamic:    data.details.peRatio ?? null,
         marketCap:    data.details.marketCap,
         sourceTime:   data.sourceTime,
         fetchedAt:    data.fetchedAt,
         fundFlow:     data.fundFlow,
+        fundFlowTimeScope: data.fundFlowTimeScope,
       };
       
       setOverviewError('');
@@ -248,47 +256,8 @@ function HomeContent() {
     }
   }, [stockCode]);
 
-  // ── 获取自建的新浪财经新闻 (方案A) ─────────────────────
-  const fetchGlobalNews = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/news?num=30&_t=${Date.now()}`, {
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const json = await res.json() as { data?: News[] };
-        setGlobalNews(json.data || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch global news', err);
-    }
-  }, []);
-
-  const [relatedStocks, setRelatedStocks] = useState<RelatedStock[]>([]);
   const [industryMonitorData, setIndustryMonitorData] = useState<IndustryMonitor>(EMPTY_INDUSTRY_MONITOR);
   const [abnormalPeers, setAbnormalPeers] = useState<AbnormalStock[]>([]);
-  // ── 批量获取相关股票真实价格 ─────────────────────
-  const fetchRelatedPrices = useCallback(async (sym: string) => {
-    if (relatedRequestInFlight.current) return;
-    relatedRequestInFlight.current = true;
-    try {
-      const res = await fetch(`${API_BASE}/api/stock/related/${sym}?_t=${Date.now()}`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const json = await res.json() as { data?: RelatedStock[] };
-        if (json.data && json.data.length > 0) {
-          setRelatedStocks(json.data);
-        } else {
-          setRelatedStocks([]);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch related prices', err);
-    } finally {
-      relatedRequestInFlight.current = false;
-    }
-  }, []);
 
   // ── 获取行业资金与异常推荐 ─────────────────────
   const fetchIndustry = useCallback(async (sym: string, isSilent = false) => {
@@ -390,13 +359,11 @@ function HomeContent() {
     const timer = window.setTimeout(() => {
       void fetchOverview();
       void fetchCompanyInfo();
-      void fetchRelatedPrices(stockCode);
       void fetchIndustry(stockCode);
       void fetchAbnormalPeers(stockCode);
-      void fetchGlobalNews();
     }, 0);
     return () => clearTimeout(timer);
-  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchRelatedPrices, fetchIndustry, fetchAbnormalPeers, fetchGlobalNews]);
+  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchIndustry, fetchAbnormalPeers]);
 
   // 换周期或换股时，刷新 K 线
   useEffect(() => {
@@ -417,18 +384,17 @@ function HomeContent() {
     };
   }, [fetchOverview]);
 
-  // 相关股票和行业数据使用独立的低频刷新。
+  // 行业数据使用独立的低频刷新。
   useEffect(() => {
     if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     slowDataRefreshTimer.current = setInterval(() => {
-      void fetchRelatedPrices(stockCode);
       void fetchIndustry(stockCode, true);
       void fetchAbnormalPeers(stockCode);
     }, SLOW_DATA_REFRESH_INTERVAL);
     return () => {
       if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     };
-  }, [fetchIndustry, fetchAbnormalPeers, fetchRelatedPrices, stockCode]);
+  }, [fetchIndustry, fetchAbnormalPeers, stockCode]);
 
   // ── 渲染 ──────────────────────────────────────────────────
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
@@ -481,7 +447,7 @@ function HomeContent() {
             stockCode={stockCode}
             companyInfo={companyData?.companyInfo || EMPTY_COMPANY_INFO}
             announcements={companyData?.announcements || []}
-            news={globalNews.length > 0 ? globalNews : (companyData?.news || [])}
+            news={companyData?.news || []}
           />
         </div>
 
@@ -496,25 +462,10 @@ function HomeContent() {
             refreshing={industryRefreshing}
             statusMessage={industryStatusMessage}
           />
-          <RelatedStocksCard data={relatedStocks} onStockClick={handleSearch} />
-          {(() => {
-            const relatedCodes = new Set(relatedStocks.map((relatedStock) => relatedStock.stockCode));
-            const filteredPeers = abnormalPeers.filter(p => !relatedCodes.has(p.stockCode)).slice(0, 10);
-            return filteredPeers.length > 0 ? <AbnormalStocksCard data={filteredPeers} onStockClick={handleSearch} /> : null;
-          })()}
-          <AlertSettingCard initialData={{
-            stockCode: stockCode,
-            stockName: overviewData ? overviewData.stockName : '',
-            email: '',
-            priceChangeAlert: true,
-            priceChangeThreshold: 5,
-            volumeAlert: true,
-            volumeRatioThreshold: 2.0,
-            announcementAlert: true,
-            industryAlert: true,
-            abnormalStockAlert: true,
-            enabled: true
-          }} />
+          {abnormalPeers.length > 0 && (
+            <AbnormalStocksCard data={abnormalPeers.slice(0, 10)} onStockClick={handleSearch} />
+          )}
+          <AlertSettingCard />
           <DataSourceCard />
         </div>
       </div>

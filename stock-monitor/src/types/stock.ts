@@ -1,8 +1,31 @@
+export interface TurnoverRisk {
+  status: 'normal' | 'active' | 'warning' | 'insufficient' | 'unavailable';
+  label: '正常' | '活跃' | '警惕' | '样本不足' | '暂无判断';
+  baseline: number | null;
+  multiple: number | null;
+  reason: string;
+}
+
+export interface MarketRisk {
+  riskStatus: 'normal' | 'watch' | 'warning' | 'critical' | 'unavailable';
+  priority: 'P1' | 'P2' | 'P3' | null;
+  direction?: 'positive' | 'negative' | 'neutral';
+  reason: string;
+  signals?: Array<{ code: string; label: string }>;
+  turnoverRisk?: TurnoverRisk;
+  sourceTime?: string;
+  fetchedAt?: string;
+  dataComplete?: boolean;
+}
+
 export interface StockOverview {
   stockName: string;
   stockCode: string;
   marketStatus?: string;
   marketStatusCode?: "pre_open" | "trading" | "lunch_break" | "closed" | "holiday" | "unknown";
+  isMonitored?: boolean | null;
+  monitoringStatus?: "active" | "inactive" | "unknown";
+  monitoringError?: string | null;
   latestPrice: number | null;
   changeAmount: number | null;
   changePercent: number | null;
@@ -13,6 +36,8 @@ export interface StockOverview {
   volume: string | null;
   turnoverAmount: string | null;
   turnoverRate: number | null;
+  turnoverRisk?: TurnoverRisk;
+  risk?: MarketRisk;
   peDynamic?: number | null;
   marketCap?: string | null;
   sourceTime: string | null;
@@ -24,6 +49,7 @@ export interface StockOverview {
   industry?: string;
   concepts?: string[];
   fundFlow?: string;
+  fundFlowTimeScope?: string;
 }
 
 export interface KlineItem {

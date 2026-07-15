@@ -5,6 +5,7 @@ const API_BASE = '/api/backend';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWatchlist } from '@/hooks/useWatchlist';
+import type { MarketRisk } from '@/types/stock';
 import styles from './page.module.css';
 
 
@@ -15,6 +16,7 @@ interface StockLiveData {
   changePercent: number | null;
   volume: number | null;
   amount: number | null;
+  risk: MarketRisk | null;
   addedAt: string;
   loading: boolean;
   error: boolean;
@@ -26,7 +28,29 @@ interface BatchOverviewItem {
   changePercent?: number | null;
   volume?: number | null;
   amount?: number | null;
+  risk?: MarketRisk | null;
 }
+
+interface AlertPreference {
+  symbol: string;
+  enabled: boolean;
+  emailEnabled: boolean;
+  p2Email: boolean;
+}
+
+interface PreferenceStatus {
+  loading?: boolean;
+  saving?: boolean;
+  error?: string;
+}
+
+const RISK_LABELS: Record<MarketRisk['riskStatus'], string> = {
+  normal: '正常',
+  watch: '观察',
+  warning: '警惕',
+  critical: '紧急',
+  unavailable: '暂无判断',
+};
 
 export default function WatchlistPage() {
   const router = useRouter();
@@ -34,6 +58,8 @@ export default function WatchlistPage() {
   const [liveData, setLiveData] = useState<StockLiveData[]>([]);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [preferences, setPreferences] = useState<Record<string, AlertPreference>>({});
+  const [preferenceStatus, setPreferenceStatus] = useState<Record<string, PreferenceStatus>>({});
 
   // 批量拉取实时行情
   const fetchLiveData = useCallback(async () => {
@@ -50,7 +76,7 @@ export default function WatchlistPage() {
       setLiveData(watchlist.map(item => {
         const real = quoteMap[item.stockCode];
         if (!real) {
-          return { ...item, price: null, changePercent: null, volume: null, amount: null, loading: false, error: true };
+          return { ...item, price: null, changePercent: null, volume: null, amount: null, risk: null, loading: false, error: true };
         }
         const price = real.price == null ? null : Number(real.price);
         return {
@@ -59,6 +85,7 @@ export default function WatchlistPage() {
           changePercent: real.changePercent ?? null,
           volume: real.volume ?? null,
           amount: real.amount ?? null,
+          risk: real.risk ?? null,
           loading: false,
           error: false,
         };
@@ -80,6 +107,51 @@ export default function WatchlistPage() {
     }
   }, [watchlist, fetchLiveData]);
 
+  useEffect(() => {
+    if (watchlist.length === 0) {
+      setPreferences({});
+      setPreferenceStatus({});
+      return;
+    }
+    const controller = new AbortController();
+    const loadPreferences = async () => {
+      const entries = await Promise.all(watchlist.map(async (item) => {
+        try {
+          const response = await fetch(
+            `${API_BASE}/api/alerts/preferences?symbol=${encodeURIComponent(item.stockCode)}`,
+            { cache: 'no-store', signal: controller.signal },
+          );
+          if (!response.ok) throw new Error(`读取失败 (${response.status})`);
+          const payload = await response.json() as { data: AlertPreference };
+          return [item.stockCode, payload.data, ''] as const;
+        } catch (error) {
+          if (controller.signal.aborted) return null;
+          return [
+            item.stockCode,
+            null,
+            error instanceof Error ? error.message : '读取失败',
+          ] as const;
+        }
+      }));
+      if (controller.signal.aborted) return;
+      const nextPreferences: Record<string, AlertPreference> = {};
+      const nextStatus: Record<string, PreferenceStatus> = {};
+      entries.forEach((entry) => {
+        if (!entry) return;
+        const [symbol, preference, error] = entry;
+        if (preference) nextPreferences[symbol] = preference;
+        nextStatus[symbol] = error ? { error } : {};
+      });
+      setPreferences(nextPreferences);
+      setPreferenceStatus(nextStatus);
+    };
+    setPreferenceStatus(Object.fromEntries(
+      watchlist.map((item) => [item.stockCode, { loading: true }]),
+    ));
+    void loadPreferences();
+    return () => controller.abort();
+  }, [watchlist]);
+
   const handleRowClick = (stockCode: string) => {
     window.location.assign(`/?code=${stockCode}`);
   };
@@ -92,6 +164,41 @@ export default function WatchlistPage() {
   const handleRemove = (e: React.MouseEvent, stockCode: string) => {
     e.stopPropagation();
     removeFromWatchlist(stockCode);
+  };
+
+  const updatePreference = async (
+    stockCode: string,
+    key: 'enabled' | 'emailEnabled' | 'p2Email',
+    value: boolean,
+  ) => {
+    const current = preferences[stockCode];
+    if (!current) return;
+    const next = { ...current, [key]: value };
+    setPreferenceStatus((status) => ({
+      ...status,
+      [stockCode]: { saving: true },
+    }));
+    try {
+      const response = await fetch(`${API_BASE}/api/alerts/preferences`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+        cache: 'no-store',
+      });
+      const payload = await response.json() as { data?: AlertPreference; detail?: string };
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.detail || `保存失败 (${response.status})`);
+      }
+      setPreferences((items) => ({ ...items, [stockCode]: payload.data as AlertPreference }));
+      setPreferenceStatus((status) => ({ ...status, [stockCode]: {} }));
+    } catch (error) {
+      setPreferenceStatus((status) => ({
+        ...status,
+        [stockCode]: {
+          error: error instanceof Error ? `保存失败：${error.message}` : '保存失败',
+        },
+      }));
+    }
   };
 
   const formatPrice = (v: number | null | undefined) => v == null ? '-' : v.toFixed(2);
@@ -117,6 +224,7 @@ export default function WatchlistPage() {
     changePercent: null,
     volume: null,
     amount: null,
+    risk: null,
     loading: true,
     error: false,
   });
@@ -161,6 +269,8 @@ export default function WatchlistPage() {
                 <th style={{ textAlign: 'right' }}>最新价</th>
                 <th style={{ textAlign: 'right' }}>涨跌幅</th>
                 <th style={{ textAlign: 'right' }}>成交额</th>
+                <th style={{ textAlign: 'center' }}>风险状态</th>
+                <th style={{ textAlign: 'center' }}>提醒设置</th>
                 <th style={{ textAlign: 'center' }}>加入时间</th>
                 <th style={{ textAlign: 'center' }}>操作</th>
               </tr>
@@ -208,6 +318,107 @@ export default function WatchlistPage() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {item.loading ? <span className={styles.skeleton} /> : formatAmount(item.amount, item.stockCode)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {item.loading ? (
+                        <span className={styles.skeleton} />
+                      ) : (
+                        <div className={styles.riskCell}>
+                          <span
+                            className={`${styles.riskBadge} ${
+                              item.risk?.riskStatus === 'critical'
+                                ? styles.riskCritical
+                                : item.risk?.riskStatus === 'warning'
+                                  ? styles.riskWarning
+                                  : item.risk?.riskStatus === 'watch'
+                                    ? styles.riskWatch
+                                    : item.risk?.riskStatus === 'normal'
+                                      ? styles.riskNormal
+                                      : styles.riskUnknown
+                            }`}
+                          >
+                            {item.risk ? RISK_LABELS[item.risk.riskStatus] : '样本积累中'}
+                          </span>
+                          <span className={styles.riskReason}>
+                            {item.risk?.reason || '换手率自身基线正在积累'}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td
+                      className={styles.preferenceCell}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {preferenceStatus[item.stockCode]?.loading ? (
+                        <span className={styles.preferenceStatus}>读取中…</span>
+                      ) : preferences[item.stockCode] ? (
+                        <details className={styles.preferenceDetails}>
+                          <summary>
+                            {preferences[item.stockCode].enabled ? '提醒已启用' : '提醒已关闭'}
+                          </summary>
+                          <div className={styles.preferencePanel}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={preferences[item.stockCode].enabled}
+                                disabled={preferenceStatus[item.stockCode]?.saving}
+                                onChange={(event) => void updatePreference(
+                                  item.stockCode,
+                                  'enabled',
+                                  event.target.checked,
+                                )}
+                              />
+                              <span>启用提醒</span>
+                            </label>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={preferences[item.stockCode].emailEnabled}
+                                disabled={
+                                  !preferences[item.stockCode].enabled
+                                  || preferenceStatus[item.stockCode]?.saving
+                                }
+                                onChange={(event) => void updatePreference(
+                                  item.stockCode,
+                                  'emailEnabled',
+                                  event.target.checked,
+                                )}
+                              />
+                              <span>发送邮件</span>
+                            </label>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={preferences[item.stockCode].p2Email}
+                                disabled={
+                                  !preferences[item.stockCode].enabled
+                                  || !preferences[item.stockCode].emailEnabled
+                                  || preferenceStatus[item.stockCode]?.saving
+                                }
+                                onChange={(event) => void updatePreference(
+                                  item.stockCode,
+                                  'p2Email',
+                                  event.target.checked,
+                                )}
+                              />
+                              <span>P2即时邮件</span>
+                            </label>
+                            <p>P1始终站内提醒；邮件能否送达取决于真实 SMTP 配置。</p>
+                          </div>
+                        </details>
+                      ) : (
+                        <span className={styles.preferenceError}>
+                          {preferenceStatus[item.stockCode]?.error || '设置不可用'}
+                        </span>
+                      )}
+                      {preferenceStatus[item.stockCode]?.saving && (
+                        <span className={styles.preferenceStatus}>保存中…</span>
+                      )}
+                      {preferenceStatus[item.stockCode]?.error && preferences[item.stockCode] && (
+                        <span className={styles.preferenceError}>
+                          {preferenceStatus[item.stockCode].error}
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
                       {addedDate}

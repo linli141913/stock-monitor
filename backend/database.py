@@ -139,6 +139,143 @@ def save_analysis_history(symbol: str, trigger_type: str, plain_english_summary:
     conn.commit()
     conn.close()
 
+
+def get_analysis_history_by_trigger(symbol: str, trigger_type: str):
+    """按唯一触发标识读取最近一次终态记录，用于跨进程去重。"""
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute('''
+    SELECT date, time, timestamp, trigger_type, plain_english_summary, full_json
+    FROM ai_analysis_history
+    WHERE symbol=? AND trigger_type=?
+    ORDER BY timestamp DESC
+    LIMIT 1
+    ''', (symbol, trigger_type)).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {
+        "date": row[0],
+        "time": row[1],
+        "timestamp": row[2],
+        "trigger_type": row[3],
+        "plain_english_summary": row[4],
+        "full_json": json.loads(row[5]) if row[5] else {},
+    }
+
+
+def claim_analysis_trigger(symbol: str, trigger_type: str) -> bool:
+    """用现有历史表原子占位，保证多进程只有一个执行者。"""
+    now = datetime.now()
+    running_result = {
+        "stockName": symbol,
+        "stockCode": symbol,
+        "changePercent": None,
+        "score": None,
+        "evidenceChain": {},
+        "futureTrendPrediction": "分析任务执行中",
+        "plainEnglishSummary": "分析任务执行中",
+        "aiJudgment": "分析任务执行中",
+        "credibility": "待生成",
+        "riskNotice": "",
+        "analysisStatus": "running",
+    }
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute('''
+        SELECT 1 FROM ai_analysis_history
+        WHERE symbol=? AND trigger_type=?
+        LIMIT 1
+        ''', (symbol, trigger_type)).fetchone()
+        if existing is not None:
+            conn.commit()
+            return False
+        conn.execute('''
+        INSERT INTO ai_analysis_history (
+            symbol, date, time, timestamp, trigger_type,
+            plain_english_summary, full_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            symbol,
+            now.strftime("%Y-%m-%d"),
+            now.strftime("%H:%M:%S"),
+            now.isoformat(),
+            trigger_type,
+            running_result["plainEnglishSummary"],
+            json.dumps(running_result, ensure_ascii=False),
+        ))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def complete_analysis_trigger(
+    symbol: str,
+    trigger_type: str,
+    plain_english_summary: str,
+    full_json_dict: dict,
+) -> bool:
+    """把原子占位更新为成功或失败终态，不新增重复历史行。"""
+    now = datetime.now()
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute('''
+        SELECT id FROM ai_analysis_history
+        WHERE symbol=? AND trigger_type=?
+        ORDER BY id ASC
+        LIMIT 1
+        ''', (symbol, trigger_type)).fetchone()
+        if row is None:
+            conn.commit()
+            return False
+        conn.execute('''
+        UPDATE ai_analysis_history SET
+            date=?, time=?, timestamp=?, plain_english_summary=?, full_json=?
+        WHERE id=?
+        ''', (
+            now.strftime("%Y-%m-%d"),
+            now.strftime("%H:%M:%S"),
+            now.isoformat(),
+            plain_english_summary,
+            json.dumps(full_json_dict, ensure_ascii=False),
+            row[0],
+        ))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_recent_successful_analysis(
+    symbol: str,
+    max_age_seconds: int,
+    now: datetime = None,
+):
+    """读取时间窗口内最近一次成功结果；失败记录不会覆盖成功缓存。"""
+    current = now or datetime.now()
+    threshold = (current - timedelta(seconds=max_age_seconds)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute('''
+    SELECT full_json
+    FROM ai_analysis_history
+    WHERE symbol=? AND timestamp>=?
+    ORDER BY timestamp DESC
+    ''', (symbol, threshold)).fetchall()
+    conn.close()
+    for row in rows:
+        payload = json.loads(row[0]) if row[0] else {}
+        if payload and payload.get("analysisStatus") not in {"running", "failed"}:
+            return payload
+    return None
+
 def get_market_by_symbol(symbol: str) -> str:
     sym = symbol.lower()
     if sym.startswith("hk") or (sym.isdigit() and len(sym) == 5):
@@ -230,6 +367,25 @@ def get_trading_session_bounds_for_symbol(symbol: str, now=None, day_kind_resolv
     return start_time.isoformat(), end_time.isoformat()
 
 
+def get_trading_session_bounds_for_target_date(
+    symbol: str,
+    target_date: str,
+    day_kind_resolver=None,
+):
+    try:
+        target = datetime.strptime(target_date, "%Y-%m-%d").replace(
+            hour=12,
+            tzinfo=SHANGHAI_TZ,
+        )
+    except (TypeError, ValueError):
+        return None, None
+    return get_trading_session_bounds_for_symbol(
+        symbol,
+        now=target,
+        day_kind_resolver=day_kind_resolver,
+    )
+
+
 def get_target_trading_date_for_timestamp(ts_str: str, market: str, day_kind_resolver=None):
     resolver = day_kind_resolver or _default_day_kind_resolver
     try:
@@ -298,9 +454,20 @@ def get_all_analysis_history(symbol: str) -> list:
     ''', (symbol,))
     
     results = []
+    bounds_by_target_date = {}
     for row in cursor.fetchall():
         ts = row[2]
         target_date = get_target_trading_date_for_timestamp(ts, market)
+        if target_date not in bounds_by_target_date:
+            start_time, end_time = get_trading_session_bounds_for_target_date(
+                symbol,
+                target_date,
+            )
+            bounds_by_target_date[target_date] = (
+                {"start": start_time, "end": end_time}
+                if start_time is not None and end_time is not None
+                else None
+            )
         results.append({
             "date": row[0],
             "time": row[1],
@@ -308,7 +475,8 @@ def get_all_analysis_history(symbol: str) -> list:
             "trigger_type": row[3],
             "plain_english_summary": row[4],
             "full_json": json.loads(row[5]) if row[5] else {},
-            "target_date": target_date
+            "target_date": target_date,
+            "period_bounds": bounds_by_target_date[target_date],
         })
         
     conn.close()
@@ -384,7 +552,7 @@ def save_crawled_news(news_list: list):
     conn.close()
 
 def get_latest_crawled_news(symbol: str, limit: int = 100) -> list:
-    """从聚合新闻池中读取与个股或对应行业关联的最新的 50~100 条去重资讯"""
+    """读取真实资讯；指定股票时只返回精确匹配，不指定时返回全量。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -400,15 +568,21 @@ def get_latest_crawled_news(symbol: str, limit: int = 100) -> list:
         created_at REAL
     )
     ''')
-    # 读取最新 24 小时或最新的 100 条
-    # 支持模糊关联该股票代码或者通用政策/行业
-    cursor.execute('''
-    SELECT symbol, title, url, ctime, source, content, category 
-    FROM crawled_news 
-    WHERE symbol=? OR symbol='' OR symbol IS NULL
-    ORDER BY ctime DESC, created_at DESC 
-    LIMIT ?
-    ''', (symbol, limit))
+    if symbol:
+        cursor.execute('''
+        SELECT symbol, title, url, ctime, source, content, category, created_at
+        FROM crawled_news
+        WHERE symbol=?
+        ORDER BY ctime DESC, created_at DESC
+        LIMIT ?
+        ''', (symbol, limit))
+    else:
+        cursor.execute('''
+        SELECT symbol, title, url, ctime, source, content, category, created_at
+        FROM crawled_news
+        ORDER BY ctime DESC, created_at DESC
+        LIMIT ?
+        ''', (limit,))
     
     results = []
     for row in cursor.fetchall():
@@ -419,7 +593,8 @@ def get_latest_crawled_news(symbol: str, limit: int = 100) -> list:
             "ctime": row[3],
             "source": row[4],
             "content": row[5],
-            "category": row[6]
+            "category": row[6],
+            "created_at": row[7],
         })
     conn.close()
     return results

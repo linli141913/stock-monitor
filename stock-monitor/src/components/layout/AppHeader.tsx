@@ -9,6 +9,7 @@ import styles from './AppHeader.module.css';
 export default function AppHeader() {
   const pathname = usePathname();
   const [showScroll, setShowScroll] = useState(false);
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
 
   useEffect(() => {
     const checkScrollTop = () => {
@@ -22,6 +23,30 @@ export default function AppHeader() {
     return () => window.removeEventListener('scroll', checkScrollTop);
   }, [showScroll]);
 
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      try {
+        const response = await fetch(
+          `/api/backend/api/alerts/unread-count?_t=${Date.now()}`,
+          { cache: 'no-store' },
+        );
+        if (!response.ok) return;
+        const payload = await response.json() as { count?: number };
+        setUnreadAlertCount(payload.count || 0);
+      } catch {
+        // 导航不因提醒服务暂时不可用而失效。
+      }
+    };
+    const handleUnreadChanged = () => void loadUnreadCount();
+    void loadUnreadCount();
+    const timer = window.setInterval(() => void loadUnreadCount(), 60_000);
+    window.addEventListener('alerts:unread-changed', handleUnreadChanged);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('alerts:unread-changed', handleUnreadChanged);
+    };
+  }, []);
+
   const scrollTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -29,7 +54,7 @@ export default function AppHeader() {
   const navItems = [
     { name: '首页', path: '/', icon: <LineChart size={18} /> },
     { name: '监测列表', path: '/watchlist', icon: <LayoutList size={18} /> },
-    { name: '提醒设置', path: '/alerts', icon: <Bell size={18} /> },
+    { name: '提醒中心', path: '/alerts', icon: <Bell size={18} /> },
     { name: '行业洞察', path: '/industry', icon: <TrendingUp size={18} /> },
   ];
 
@@ -50,6 +75,11 @@ export default function AppHeader() {
                 className={`${styles.navItem} ${isActive ? styles.active : ''}`}
               >
                 <span>{item.name}</span>
+                {item.path === '/alerts' && unreadAlertCount > 0 && (
+                  <span className={styles.unreadBadge}>
+                    {unreadAlertCount > 99 ? '99+' : unreadAlertCount}
+                  </span>
+                )}
               </Link>
             );
           })}

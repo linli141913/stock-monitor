@@ -1,7 +1,96 @@
 .container {
   padding: 32px;
-  max-width: 1200px;
+  max-width: 1440px;
   margin: 0 auto;
+}
+
+.preferenceCell {
+  position: relative;
+  min-width: 124px;
+  text-align: center;
+}
+
+.preferenceDetails {
+  position: relative;
+}
+
+.preferenceDetails summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  padding: 6px 9px;
+  border: 1px solid #cbd9e6;
+  border-radius: 7px;
+  background: #f7fafc;
+  color: #31506a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.preferenceDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.preferenceDetails[open] summary {
+  border-color: #7aa9c8;
+  background: #eaf3f9;
+  color: #0b5f9a;
+}
+
+.preferencePanel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 210px;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #cfdbe6;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(30, 58, 81, 0.16);
+  text-align: left;
+}
+
+.preferencePanel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #263b4d;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.preferencePanel input {
+  width: 15px;
+  height: 15px;
+  accent-color: #0b6c9d;
+}
+
+.preferencePanel p {
+  margin: 2px 0 0;
+  color: #7b8794;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.preferenceStatus,
+.preferenceError {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.preferenceStatus {
+  color: #6b7280;
+}
+
+.preferenceError {
+  color: #b42318;
 }
 
 .header {
@@ -103,7 +192,7 @@
   background: white;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
@@ -177,6 +266,65 @@
 
 .fall {
   color: #10b981;
+}
+
+.riskBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.riskCell {
+  display: flex;
+  min-width: 150px;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.riskReason {
+  max-width: 180px;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.riskCritical {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.riskWarning {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fed7aa;
+}
+
+.riskWatch {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
+.riskNormal {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.riskUnknown {
+  color: #4b5563;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
 }
 
 .removeBtn {

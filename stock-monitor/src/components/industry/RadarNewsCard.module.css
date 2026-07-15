@@ -108,6 +108,31 @@
   border: 1px solid rgba(107, 114, 128, 0.2);
 }
 
+.directionpositive {
+  background: rgba(16, 185, 129, 0.1);
+  color: #087443;
+  border: 1px solid rgba(16, 185, 129, 0.24);
+}
+
+.directionnegative {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b42318;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+.directionneutral,
+.directionuncertain {
+  background: rgba(100, 116, 139, 0.1);
+  color: #526173;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.priorityTag {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
 .regionTag {
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -249,5 +274,4 @@
   color: #27ae60;
   border-color: rgba(46, 204, 113, 0.25);
 }
-
 

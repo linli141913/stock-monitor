@@ -154,6 +154,22 @@ class AnalysisHistoryBoundaryTests(unittest.TestCase):
 
         self.assertEqual(bounds, (None, None))
 
+    def test_historical_target_date_exposes_its_real_trading_cycle(self):
+        get_bounds = getattr(
+            database,
+            "get_trading_session_bounds_for_target_date",
+            lambda *_args, **_kwargs: (None, None),
+        )
+
+        bounds = get_bounds(
+            "000725",
+            "2027-03-01",
+            day_kind_resolver=self.full_weekday_resolver,
+        )
+
+        self.assertEqual(bounds[0], "2027-02-26T15:30:00+08:00")
+        self.assertEqual(bounds[1], "2027-03-01T15:30:00+08:00")
+
 
 if __name__ == "__main__":
     unittest.main()

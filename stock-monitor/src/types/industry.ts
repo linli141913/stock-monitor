@@ -3,15 +3,44 @@ export interface DynamicsItem {
   source: string;
   url?: string;
   impact?: '利好' | '利空' | '中性';
+  evidenceLevel?: 'S' | 'A' | 'B' | 'C';
+  verificationStatus?: '来源已核验' | '多源印证' | '单一来源' | '线索级，待核实';
+  direction?: 'positive' | 'negative' | 'neutral' | 'uncertain';
+  priority?: 'P1' | 'P2' | 'P3';
   desc?: string;
   time?: string;
+  timePrecision?: 'date' | 'datetime' | 'unknown';
+  discoveredAt?: string | null;
+  categoryKey?: 'company-announcements' | 'industry-policy' | 'industry-dynamics' | 'overseas-controls';
+}
+
+export interface LinkageRuleState {
+  status: 'triggered' | 'no_signal' | 'unavailable';
+  label: '已触发' | '未触发' | '暂无判断';
+  reason: string;
+}
+
+export interface LinkageRisk {
+  riskStatus: 'normal' | 'watch' | 'warning' | 'unavailable';
+  priority: 'P2' | 'P3' | null;
+  direction: 'positive' | 'negative' | 'neutral';
+  reason: string;
+  dataComplete: boolean;
+  sectorRisk: LinkageRuleState;
+  overseasRisk: LinkageRuleState;
+  signals: Array<{ code: string; label: string }>;
 }
 
 export interface IndustryMonitor {
   industryName: string;
   heatScore: number | null;
+  heatScoreMethod?: 'calculated' | 'unavailable';
   sectorChangePercent: number | null;
   fundFlow: string;
+  fundFlowTimeScope?: string;
+  industryDataStatus?: 'available' | 'unavailable' | 'not_applicable';
+  industryDataError?: string | null;
+  linkageRisk?: LinkageRisk;
   policySummary?: string;
   upstreamStatus?: string;
   downstreamStatus?: string;

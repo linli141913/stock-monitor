@@ -8,13 +8,19 @@ from typing import List, Optional, Dict, Any
 import requests
 import json
 import math
+import threading
 from datetime import datetime
 import asyncio
+import asset_context
+import news_api
 from news_api import router as news_router
-from ai_analysis import router as ai_analysis_router
+from ai_analysis import router as ai_analysis_router, get_ai_attribution
+from alerts_api import router as alerts_router
 from pydantic import BaseModel
 import database
+import alert_repository
 import market_calendar
+import risk_engine
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
@@ -31,7 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "X-Backend-Token", "ngrok-skip-browser-warning"],
 )
 
@@ -39,6 +45,10 @@ app.add_middleware(
 def request_requires_backend_token(request: Request) -> bool:
     path = request.url.path
     if request.method in {"GET", "POST"} and path == "/api/watchlist":
+        return True
+    if path.startswith("/api/alerts") and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True
+    if path == "/api/monitoring/health/watchlist-sync" and request.method == "POST":
         return True
     protected_ai_prefixes = ("/api/stock/ai_attribution/",)
     return request.method == "GET" and path.startswith(protected_ai_prefixes)
@@ -68,39 +78,300 @@ async def protect_sensitive_endpoints(request: Request, call_next):
 
 app.include_router(ai_analysis_router)
 app.include_router(news_router)
+app.include_router(alerts_router)
 
 # ── 后台定时追踪任务 ──────────────────────────────────────────────
+AI_ANALYSIS_SLOTS = ("10:30", "11:30", "15:00", "22:00")
+_AI_ANALYSIS_LOCK = threading.Lock()
+_AI_ANALYSIS_STATE_LOCK = threading.Lock()
+_AI_ANALYSIS_COMPLETED_ROUNDS = set()
+_AI_ANALYSIS_ROUND_ORDER = []
+_EXTENDED_RISK_CACHE: Dict[str, Dict[str, Any]] = {}
+_EXTENDED_RISK_CACHE_LOCK = threading.Lock()
+
+
+def build_ai_analysis_round_id(slot: str, now: Optional[datetime] = None) -> str:
+    current = now or datetime.now(market_calendar.SHANGHAI_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=market_calendar.SHANGHAI_TZ)
+    else:
+        current = current.astimezone(market_calendar.SHANGHAI_TZ)
+    return f"{current:%Y-%m-%d}:{slot}"
+
+
+def build_ai_analysis_task_id(symbol: str, round_id: str) -> str:
+    date_part, separator, slot_part = round_id.partition(":")
+    if not separator or not slot_part:
+        return f"{symbol}-{round_id.replace(':', '').replace('-', '')}"
+    return f"{symbol}-{date_part.replace('-', '')}-{slot_part.replace(':', '')}"
+
+
+def _record_ai_round_failure(symbol: str, trigger: str, error: Exception) -> None:
+    existing = database.get_analysis_history_by_trigger(symbol, trigger)
+    if existing is not None and existing["full_json"].get("analysisStatus") != "running":
+        return
+    failure = {
+        "stockName": symbol,
+        "stockCode": symbol,
+        "changePercent": None,
+        "score": None,
+        "evidenceChain": {},
+        "futureTrendPrediction": "暂无推演内容",
+        "plainEnglishSummary": "AI 分析调用失败，本轮未生成评分或结论。",
+        "aiJudgment": f"大模型接口调用失败: {type(error).__name__}",
+        "credibility": "错误",
+        "riskNotice": "请检查后台日志。",
+        "analysisStatus": "failed",
+    }
+    if not database.complete_analysis_trigger(
+        symbol,
+        trigger,
+        failure["plainEnglishSummary"],
+        failure,
+    ):
+        database.save_analysis_history(
+            symbol,
+            trigger,
+            failure["plainEnglishSummary"],
+            failure,
+        )
+
+
+def _ai_round_is_completed(round_id: str) -> bool:
+    with _AI_ANALYSIS_STATE_LOCK:
+        return round_id in _AI_ANALYSIS_COMPLETED_ROUNDS
+
+
+def _mark_ai_round_completed(round_id: str) -> None:
+    with _AI_ANALYSIS_STATE_LOCK:
+        if round_id in _AI_ANALYSIS_COMPLETED_ROUNDS:
+            return
+        _AI_ANALYSIS_COMPLETED_ROUNDS.add(round_id)
+        _AI_ANALYSIS_ROUND_ORDER.append(round_id)
+        while len(_AI_ANALYSIS_ROUND_ORDER) > 32:
+            expired = _AI_ANALYSIS_ROUND_ORDER.pop(0)
+            _AI_ANALYSIS_COMPLETED_ROUNDS.discard(expired)
+
+
 def run_collection_sync():
+    import monitoring_health
+    monitoring_health.record_task_started("generalNews")
     try:
         import news_collector
-        news_collector.run_collection()
+        item_count = news_collector.run_collection()
+        monitoring_health.record_task_success("generalNews", item_count=item_count)
     except Exception as e:
+        monitoring_health.record_task_failure("generalNews", e)
         print(f"[{datetime.now()}] 定时资讯采集失败: {e}")
 
 async def auto_collect_news():
     print(f"[{datetime.now()}] 触发定时多源资讯采集任务...")
     await asyncio.to_thread(run_collection_sync)
 
-async def auto_analyze_watchlist():
-    print(f"[{datetime.now()}] 触发后台自动分析追踪任务...")
-    items = database.get_watchlist()
-    for item in items:
-        symbol = item.get("stockCode")
-        if not symbol: continue
+
+def run_official_alert_collection_sync():
+    import monitoring_health
+    monitoring_health.record_task_started("officialAnnouncements")
+    try:
+        import news_collector
+        created_count = news_collector.run_official_collection()
+        monitoring_health.record_task_success(
+            "officialAnnouncements",
+            item_count=created_count,
+        )
+    except Exception as e:
+        monitoring_health.record_task_failure("officialAnnouncements", e)
+        print(f"[{datetime.now()}] 官方公告提醒采集失败: {e}")
+
+
+async def auto_collect_official_alerts():
+    print(f"[{datetime.now()}] 触发监测列表官方公告提醒任务...")
+    await asyncio.to_thread(run_official_alert_collection_sync)
+
+
+def run_email_retry_sync():
+    import monitoring_health
+    monitoring_health.record_task_started("emailRetry")
+    try:
+        import notification_service
+        retry_count = notification_service.retry_due_email_deliveries()
+        monitoring_health.record_task_success("emailRetry", item_count=retry_count)
+    except Exception as e:
+        monitoring_health.record_task_failure("emailRetry", e)
+        print(f"[{datetime.now()}] 提醒邮件重试失败: {e}")
+
+
+async def auto_retry_alert_emails():
+    await asyncio.to_thread(run_email_retry_sync)
+
+
+def run_market_risk_collection_sync():
+    import monitoring_health
+    monitoring_health.record_task_started("marketRisk")
+    processed_count = 0
+    first_error = None
+    watchlist = database.get_watchlist()
+    trading_symbols = set()
+    for item in watchlist:
+        symbol = asset_context.normalize_symbol(item.get("stockCode", ""))
+        stock_name = str(item.get("stockName") or "").strip()
+        context = asset_context.build_asset_context(
+            symbol,
+            stock_name,
+        )
+        if not symbol.isdigit() or context["asset_type"] not in {
+            "a_stock",
+            "hk_stock",
+            "domestic_etf",
+        }:
+            monitoring_health.record_mapping_failure(
+                symbol,
+                stock_name,
+                "股票代码无法识别为A股、港股或国内ETF",
+            )
+            continue
+        if not stock_name:
+            monitoring_health.record_mapping_failure(
+                symbol,
+                stock_name,
+                "后端监测列表缺少公司或基金名称",
+            )
+            continue
         try:
-            print(f"[{datetime.now()}] 开始自动分析 {symbol}...")
-            # We call the ai_attribution endpoint internally via requests to trigger full pipeline including history injection
-            # Wait, calling localhost directly in a background task is the easiest way to reuse all logic
-            url = f"http://127.0.0.1:8001/api/stock/ai_attribution/{symbol}?trigger=auto"
-            token = os.getenv("BACKEND_API_TOKEN", "").strip()
-            headers = {"X-Backend-Token": token} if token else {}
-            requests.get(url, headers=headers, timeout=60)
-            print(f"[{datetime.now()}] {symbol} 自动分析完成。")
+            overview = get_stock_overview(symbol)
+            if overview.get("marketStatusCode") == "trading":
+                trading_symbols.add(symbol)
+            if not str(overview.get("name") or "").strip():
+                monitoring_health.record_mapping_failure(
+                    symbol,
+                    stock_name,
+                    "行情源未返回可核验的证券名称",
+                )
+            source_time = str(overview.get("sourceTime") or "")
+            if overview.get("marketStatusCode") == "trading" and source_time:
+                extended = get_extended_risk_inputs(
+                    symbol,
+                    stock_name,
+                    source_time,
+                )
+                details = overview.get("details") or {}
+                risk_engine.process_market_snapshot({
+                    "symbol": symbol,
+                    "stock_name": stock_name,
+                    "market": context["market"],
+                    "source_time": source_time,
+                    "fetched_at": overview.get("fetchedAt"),
+                    "change_percent": overview.get("changePercent"),
+                    "close": overview.get("latestPrice"),
+                    "high": details.get("high"),
+                    "low": details.get("low"),
+                    "previous_close": details.get("previousClose"),
+                    "volume_ratio": details.get("volumeRatio"),
+                    "turnover_rate": details.get("turnoverRate"),
+                    "turnover_amount": details.get("turnoverAmountValue"),
+                    "verified_history": extended.get("verified_history") or [],
+                }, persist_snapshot=True, create_alert=True)
+                linkage_snapshot = {
+                    "symbol": symbol,
+                    "stock_name": stock_name,
+                    "source_time": source_time,
+                    "fetched_at": overview.get("fetchedAt"),
+                    "sector": extended.get("sector") or {"status": "unavailable"},
+                    "overseas": extended.get("overseas") or [],
+                }
+                extended["linkage_snapshot"] = linkage_snapshot
+                with _EXTENDED_RISK_CACHE_LOCK:
+                    cached = _EXTENDED_RISK_CACHE.get(symbol)
+                    if cached:
+                        cached["data"] = extended
+                risk_engine.process_linkage_snapshot(
+                    linkage_snapshot,
+                    create_alert=True,
+                )
+            processed_count += 1
         except Exception as e:
-            print(f"[{datetime.now()}] {symbol} 自动分析失败: {e}")
+            if first_error is None:
+                first_error = e
+            print(f"[{datetime.now()}] {symbol} 量价风险采样失败: {e}")
+    monitoring_health.audit_stale_watchlist(
+        watchlist,
+        trading_symbols=trading_symbols,
+        expected_seconds=180,
+    )
+    if first_error is not None:
+        monitoring_health.record_task_failure("marketRisk", first_error)
+    else:
+        monitoring_health.record_task_success("marketRisk", item_count=processed_count)
+
+
+async def auto_collect_market_risk():
+    print(f"[{datetime.now()}] 触发监测列表量价风险采样任务...")
+    await asyncio.to_thread(run_market_risk_collection_sync)
+
+def run_ai_analysis_round_sync(round_id: str) -> str:
+    if _ai_round_is_completed(round_id):
+        return "skipped_duplicate"
+    if not _AI_ANALYSIS_LOCK.acquire(blocking=False):
+        _mark_ai_round_completed(round_id)
+        print(f"[{datetime.now()}] AI 轮次 {round_id} 跳过：上一轮仍在执行。")
+        return "skipped_busy"
+
+    import monitoring_health
+    monitoring_health.record_task_started("aiAnalysis")
+    had_errors = False
+    processed_count = 0
+    try:
+        if _ai_round_is_completed(round_id):
+            return "skipped_duplicate"
+        for item in database.get_watchlist():
+            symbol = str(item.get("stockCode") or "").strip()
+            if not symbol:
+                continue
+            task_id = build_ai_analysis_task_id(symbol, round_id)
+            trigger = f"auto:{task_id}"
+            try:
+                print(f"[{datetime.now()}] 开始自动分析 {symbol}，轮次 {round_id}...")
+                result = get_ai_attribution(symbol, trigger=trigger)
+                if isinstance(result, dict) and result.get("analysisStatus") == "failed":
+                    had_errors = True
+                    print(f"[{datetime.now()}] {symbol} 自动分析失败，本轮不重试。")
+                else:
+                    print(f"[{datetime.now()}] {symbol} 自动分析完成。")
+                processed_count += 1
+            except Exception as e:
+                had_errors = True
+                try:
+                    _record_ai_round_failure(symbol, trigger, e)
+                except Exception as record_error:
+                    print(f"[{datetime.now()}] {symbol} AI 失败记录写入失败: {record_error}")
+                print(f"[{datetime.now()}] {symbol} 自动分析失败，本轮不重试: {e}")
+        if had_errors:
+            monitoring_health.record_task_failure(
+                "aiAnalysis",
+                RuntimeError("one_or_more_analysis_tasks_failed"),
+            )
+            return "completed_with_errors"
+        monitoring_health.record_task_success(
+            "aiAnalysis",
+            item_count=processed_count,
+        )
+        return "completed"
+    finally:
+        _mark_ai_round_completed(round_id)
+        _AI_ANALYSIS_LOCK.release()
+
+
+async def auto_analyze_watchlist(slot: str):
+    round_id = build_ai_analysis_round_id(slot)
+    print(f"[{datetime.now()}] 触发后台自动分析追踪任务，轮次 {round_id}...")
+    await asyncio.to_thread(run_ai_analysis_round_sync, round_id)
 
 def run_watchlist_industry_update_sync():
+    import monitoring_health
+    monitoring_health.record_task_started("industryDynamics")
     items = database.get_watchlist()
+    processed_count = 0
+    first_error = None
     for item in items:
         symbol = item.get("stockCode")
         if not symbol: continue
@@ -108,14 +379,36 @@ def run_watchlist_industry_update_sync():
             # 获取所属行业名称
             company_data = get_company_info(symbol)
             industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
-            industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else "半导体"
+            context = asset_context.register_asset_context(
+                asset_context.build_asset_context(
+                    symbol,
+                    item.get("stockName", ""),
+                    industry_tags,
+                )
+            )
+            industry_name = context["industry_name"]
             
             print(f"[{datetime.now()}] 开始自动更新 {symbol} ({industry_name}) 行业动态...")
             # 强制刷新缓存
-            fetch_real_industry_dynamics(symbol, industry_name, force_refresh=True)
+            fetch_real_industry_dynamics(
+                symbol,
+                industry_name,
+                force_refresh=True,
+                search_terms=context["search_terms"],
+            )
             print(f"[{datetime.now()}] {symbol} 行业动态更新完成。")
+            processed_count += 1
         except Exception as e:
+            if first_error is None:
+                first_error = e
             print(f"[{datetime.now()}] {symbol} 自动更新行业动态失败: {e}")
+    if first_error is not None:
+        monitoring_health.record_task_failure("industryDynamics", first_error)
+    else:
+        monitoring_health.record_task_success(
+            "industryDynamics",
+            item_count=processed_count,
+        )
 
 
 async def auto_update_watchlist_industry():
@@ -128,15 +421,56 @@ def start_scheduler():
     # 启动时立即异步拉取一次新闻与行业监控大模型数据
     scheduler.add_job(auto_collect_news, 'date', run_date=datetime.now())
     scheduler.add_job(auto_update_watchlist_industry, 'date', run_date=datetime.now())
+    scheduler.add_job(auto_collect_official_alerts, 'date', run_date=datetime.now())
     # 随后每 30 分钟拉取一次新闻
     scheduler.add_job(auto_collect_news, 'interval', minutes=30)
+    # 官方公告独立高频扫描；夜间降低频率，避免普通媒体跟随高频抓取。
+    scheduler.add_job(
+        auto_collect_official_alerts,
+        'cron',
+        hour='7-22',
+        minute='*/5',
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        auto_collect_official_alerts,
+        'cron',
+        hour='0-6,23',
+        minute='0,30',
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        auto_retry_alert_emails,
+        'interval',
+        minutes=1,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        auto_collect_market_risk,
+        'cron',
+        day_of_week='mon-fri',
+        hour='9-15',
+        minute='*',
+        max_instances=1,
+        coalesce=True,
+    )
     # 随后每 1 小时自动拉取更新一次行业动态
     scheduler.add_job(auto_update_watchlist_industry, 'interval', hours=1)
-    # 每天 10:30, 11:30, 15:00, 22:00
-    scheduler.add_job(auto_analyze_watchlist, 'cron', hour=10, minute=30)
-    scheduler.add_job(auto_analyze_watchlist, 'cron', hour=11, minute=30)
-    scheduler.add_job(auto_analyze_watchlist, 'cron', hour=15, minute=0)
-    scheduler.add_job(auto_analyze_watchlist, 'cron', hour=22, minute=0)
+    # 每天 10:30、11:30、15:00、22:00；轮次在后台线程内执行且不排队。
+    for slot in AI_ANALYSIS_SLOTS:
+        hour, minute = (int(part) for part in slot.split(":"))
+        scheduler.add_job(
+            auto_analyze_watchlist,
+            'cron',
+            hour=hour,
+            minute=minute,
+            args=[slot],
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.start()
     print("后台自动化追踪与资讯采集调度器已启动。")
 # ── 公共工具函数 ──────────────────────────────────────────────
@@ -145,30 +479,15 @@ def get_prefix(symbol: str) -> str:
     """
     根据股票代码返回对应的市场前缀 (sh, sz, hk)
     """
-    symbol = symbol.lower()
-    if symbol.startswith("hk"):
-        return "" # 后面拼接时直接用 symbol，因为已经带了 hk
-
-    # 如果纯数字且长度为5，或者是港股常见代码
-    if symbol.isdigit() and len(symbol) == 5:
-        return "hk"
-        
-    # 简单处理A股：6开头算沪市，0或3开头算深市，8或4算北交所(用bj，但腾讯接口通常是sz/sh)
-    if symbol.startswith("6") or symbol.startswith("9"):
-        return "sh"
-    return "sz"
+    return asset_context.quote_prefix(symbol)
 
 def get_em_prefix(symbol: str) -> str:
     """根据代码返回东方财富的 secid 前缀"""
-    symbol = symbol.lower()
-    if symbol.startswith("hk"):
+    prefix = asset_context.quote_prefix(symbol)
+    if prefix == "hk":
         return "116."
-    if symbol.isdigit() and len(symbol) == 5:
-        return "116."
-    if symbol.startswith('6') or symbol.startswith('9'):
+    if prefix == "sh":
         return "1."
-    if symbol.startswith('8') or symbol.startswith('4'):
-        return "0." # 北交所在东财也是 0.
     return "0."
 
 def get_em_data(url: str, timeout: int = 3) -> requests.Response:
@@ -230,6 +549,37 @@ def parse_optional_float(value: Any) -> Optional[float]:
         return parsed if math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
+
+
+def format_financial_money(value: Any) -> str:
+    number = parse_optional_float(value)
+    if number is None:
+        return "-"
+    magnitude = abs(number)
+    if magnitude >= 1e8:
+        return f"{number / 1e8:.2f}亿"
+    if magnitude >= 1e4:
+        return f"{number / 1e4:.2f}万"
+    return f"{number:.2f}"
+
+
+def format_financial_percent(value: Any) -> str:
+    number = parse_optional_float(value)
+    return f"{number:.2f}%" if number is not None else "-"
+
+
+def classify_report_type_by_date(date_text: str) -> tuple[str, str]:
+    value = str(date_text or "")[:10]
+    year = value[:4]
+    if value.endswith("12-31"):
+        return f"{year}年报", "年报"
+    if value.endswith("06-30"):
+        return f"{year}中报", "中报"
+    if value.endswith("03-31"):
+        return f"{year}一季报", "一季报"
+    if value.endswith("09-30"):
+        return f"{year}三季报", "三季报"
+    return f"{year}财报", "财报"
 
 
 def parse_sina_money_flow(payload: dict) -> Optional[float]:
@@ -335,6 +685,217 @@ def get_a_share_industry_peer_codes(symbol: str, industry_name: str) -> list[str
         return []
 
 
+def get_verified_market_history(symbol: str, expected_trade_date: str) -> list[dict]:
+    context = asset_context.build_asset_context(symbol)
+    if context["asset_type"] != "a_stock":
+        return []
+    try:
+        import akshare as ak
+
+        fund_df = ak.stock_individual_fund_flow(
+            stock=symbol,
+            market=asset_context.quote_prefix(symbol),
+        )
+        fund_rows = []
+        for _, row in fund_df.iterrows():
+            trade_date = str(row.get("日期") or "")[:10]
+            fund_rows.append({
+                "trade_date": trade_date,
+                "fund_close": parse_optional_float(row.get("收盘价")),
+                "fund_flow": parse_optional_float(row.get("主力净流入-净额")),
+            })
+        kline_rows = [
+            {
+                "trade_date": str(item.get("time") or "")[:10],
+                "close": item.get("close"),
+                "ma5": item.get("ma5"),
+                "ma10": item.get("ma10"),
+                "ma20": item.get("ma20"),
+            }
+            for item in get_stock_kline(symbol, period="day").get("data", [])
+        ]
+        return risk_engine.merge_verified_market_history(
+            fund_rows,
+            kline_rows,
+            expected_trade_date=expected_trade_date,
+        )
+    except Exception as exc:
+        print(f"Failed to fetch verified market history for {symbol}: {exc}")
+        return []
+
+
+def get_constituent_quote_snapshot(symbols: list[str]) -> list[dict]:
+    codes = list(dict.fromkeys(
+        asset_context.normalize_symbol(symbol)
+        for symbol in symbols
+        if asset_context.normalize_symbol(symbol)
+    ))
+    rows = []
+    for start in range(0, len(codes), 50):
+        batch = codes[start:start + 50]
+        query = ",".join(
+            f"{asset_context.quote_prefix(code)}{code}"
+            for code in batch
+        )
+        try:
+            response = requests.get(f"http://qt.gtimg.cn/q={query}", timeout=5)
+            response.encoding = "gbk"
+            for line in response.text.split(";"):
+                if "=" not in line:
+                    continue
+                fields = line.split("=", 1)[1].strip().strip('"').split("~")
+                if len(fields) <= 45:
+                    continue
+                code = asset_context.normalize_symbol(fields[2])
+                change_percent = parse_optional_float(fields[32])
+                market_cap = parse_optional_float(fields[45])
+                if not code or change_percent is None:
+                    continue
+                rows.append({
+                    "symbol": code,
+                    "name": fields[1],
+                    "change_percent": change_percent,
+                    "market_cap": market_cap,
+                    "source_time": format_market_timestamp(fields[30]),
+                })
+        except Exception as exc:
+            print(f"Failed to fetch constituent quotes: {exc}")
+    return rows
+
+
+def get_verified_sector_risk_snapshot(
+    symbol: str,
+    industry_name: str,
+) -> dict:
+    if asset_context.build_asset_context(symbol)["asset_type"] != "a_stock":
+        return {
+            "status": "unavailable",
+            "name": industry_name,
+            "reason": "当前资产尚无经过验证的板块成分口径",
+        }
+    try:
+        import akshare as ak
+
+        sector_rows = ak.stock_fund_flow_industry(symbol="即时").to_dict("records")
+        constituents = list(dict.fromkeys([
+            symbol,
+            *get_a_share_industry_peer_codes(symbol, industry_name),
+        ]))
+        if not constituents:
+            raise LookupError("未匹配到真实板块成分")
+        quotes = get_constituent_quote_snapshot(constituents)
+        return risk_engine.build_verified_sector_snapshot(
+            industry_name,
+            sector_rows,
+            quotes,
+            expected_constituents=len(constituents),
+        )
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "name": industry_name,
+            "change_percent": None,
+            "advancers": None,
+            "total": None,
+            "leader": None,
+            "fund_flow": {"verified": False},
+            "reason": f"板块真实数据获取失败：{type(exc).__name__}",
+        }
+
+
+def get_exact_overseas_quote_snapshot(mappings: list[dict]) -> list[dict]:
+    if not mappings:
+        return []
+    query = ",".join(item["query_symbol"] for item in mappings)
+    try:
+        response = get_sina_data(f"https://hq.sinajs.cn/list={query}")
+        response.encoding = "gbk"
+        by_query = {item["query_symbol"].lower(): item for item in mappings}
+        results = []
+        for line in response.text.splitlines():
+            if "hq_str_" not in line or '"' not in line:
+                continue
+            query_symbol = line.split("hq_str_", 1)[1].split("=", 1)[0].lower()
+            mapping = by_query.get(query_symbol)
+            fields = line.split('"', 2)[1].split(",")
+            change_percent = parse_optional_float(fields[2] if len(fields) > 2 else None)
+            if mapping is None or change_percent is None:
+                continue
+            results.append({
+                **mapping,
+                "change_percent": change_percent,
+                "source_time": fields[3] if len(fields) > 3 else None,
+                "market_time": fields[26] if len(fields) > 26 else None,
+                "source": "新浪财经海外行情",
+            })
+        return results
+    except Exception as exc:
+        print(f"Failed to fetch exact overseas linkage quotes: {exc}")
+        return []
+
+
+def get_extended_risk_inputs(
+    symbol: str,
+    stock_name: str,
+    source_time: str,
+) -> dict:
+    import time
+
+    source_date = str(source_time or "")[:10]
+    now_monotonic = time.monotonic()
+    with _EXTENDED_RISK_CACHE_LOCK:
+        cached = _EXTENDED_RISK_CACHE.get(symbol)
+        if (
+            cached
+            and cached.get("source_date") == source_date
+            and now_monotonic - float(cached.get("cached_at") or 0) < 180
+        ):
+            return dict(cached["data"])
+
+    company = get_company_info(symbol)
+    company_info = company.get("companyInfo") or {}
+    context = asset_context.register_asset_context(
+        asset_context.build_asset_context(
+            symbol,
+            stock_name,
+            company_info.get("industryTags") or [],
+        )
+    )
+    business_text = "；".join([
+        str(company_info.get("mainBusiness") or ""),
+        *[str(item) for item in company_info.get("coreProducts") or []],
+    ])
+    mappings = risk_engine.build_exact_overseas_mappings(context, business_text)
+    data = {
+        "verified_history": get_verified_market_history(symbol, source_date),
+        "sector": get_verified_sector_risk_snapshot(
+            symbol,
+            context["industry_name"],
+        ),
+        "overseas": get_exact_overseas_quote_snapshot(mappings),
+        "context": context,
+    }
+    with _EXTENDED_RISK_CACHE_LOCK:
+        _EXTENDED_RISK_CACHE[symbol] = {
+            "source_date": source_date,
+            "cached_at": now_monotonic,
+            "data": data,
+        }
+    return dict(data)
+
+
+def get_cached_linkage_risk(symbol: str) -> Optional[dict]:
+    with _EXTENDED_RISK_CACHE_LOCK:
+        cached = _EXTENDED_RISK_CACHE.get(
+            asset_context.normalize_symbol(symbol)
+        )
+        if not cached:
+            return None
+        data = cached.get("data") or {}
+        linkage_snapshot = data.get("linkage_snapshot")
+        return risk_engine.evaluate_linkage_risk(linkage_snapshot) if linkage_snapshot else None
+
+
 # ── 接口实现 ──────────────────────────────────────────────────
 
 class WatchlistRequest(BaseModel):
@@ -380,20 +941,14 @@ def get_batch_overview(symbols: str):
         
     query_list = []
     for symbol in symbol_list:
-        if symbol.lower().startswith("hk"):
-            query_list.append(symbol.lower())
-        elif symbol.isdigit() and len(symbol) == 5:
-            query_list.append(f"hk{symbol}")
-        elif symbol.startswith('6'):
-            query_list.append(f"sh{symbol}")
-        elif symbol.startswith('0') or symbol.startswith('3'):
-            query_list.append(f"sz{symbol}")
-        elif symbol.startswith('8') or symbol.startswith('4'):
-            query_list.append(f"bj{symbol}")
+        code = asset_context.normalize_symbol(symbol)
+        if code.isdigit():
+            query_list.append(f"{asset_context.quote_prefix(symbol)}{code}")
             
     url = f"http://qt.gtimg.cn/q={','.join(query_list)}"
     
     results = []
+    fetched_at = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(timespec="seconds")
     try:
         resp = requests.get(url, timeout=5)
         # response encoding is gbk
@@ -422,6 +977,8 @@ def get_batch_overview(symbols: str):
                     "price": price,
                     "changePct": f"{change_pct}%" if change_pct is not None else None,
                     "changePercent": change_pct,
+                    "sourceTime": format_market_timestamp(v[30] if len(v) > 30 else ""),
+                    "fetchedAt": fetched_at,
                     "amount": raw_amount if is_hk or raw_amount is None else raw_amount * 10000,
                     "volume": raw_volume if is_hk or raw_volume is None else raw_volume * 100,
                 })
@@ -431,7 +988,12 @@ def get_batch_overview(symbols: str):
             for item in results:
                 code = item["symbol"]
                 if len(code) != 6:
+                    item["fundFlowTimeScope"] = "不适用（暂无港股资金流口径）"
                     continue
+                flow_market_status = get_market_status_for_symbol(code)
+                item["fundFlowTimeScope"] = describe_undated_fund_flow_scope(
+                    flow_market_status["marketStatusCode"]
+                )
                 raw_flow = get_sina_stock_fund_flow(code)
                 if raw_flow is not None:
                     flow_yi = raw_flow / 100000000.0
@@ -441,6 +1003,33 @@ def get_batch_overview(symbols: str):
                         item["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
                     else:
                         item["fundFlow"] = "主力资金净流 0.0 亿元"
+
+        for item in results:
+            try:
+                stored_risk = alert_repository.get_latest_signal_state(item["symbol"])
+                live_risk = risk_engine.evaluate_market_risk({
+                    "symbol": item["symbol"],
+                    "market": "hk" if len(item["symbol"]) == 5 else "cn",
+                    "change_percent": item.get("changePercent"),
+                    "high": None,
+                    "low": None,
+                    "previous_close": None,
+                    "volume_ratio": None,
+                    "turnover_rate": None,
+                    "turnover_amount": item.get("amount"),
+                }, [])
+                if live_risk.get("priority") == "P1":
+                    if stored_risk and stored_risk.get("turnoverRisk"):
+                        live_risk["turnoverRisk"] = stored_risk["turnoverRisk"]
+                    item["risk"] = live_risk
+                elif stored_risk is not None:
+                    item["risk"] = stored_risk
+                elif live_risk.get("priority") is not None:
+                    item["risk"] = live_risk
+                else:
+                    item["risk"] = None
+            except Exception:
+                item["risk"] = None
 
         return {"data": results}
     except Exception as e:
@@ -524,6 +1113,7 @@ def get_stock_overview(symbol: str):
         turnover_rate = parse_optional_float(
             fields[turnover_rate_index] if len(fields) > turnover_rate_index else None
         )
+        volume_ratio = parse_optional_float(fields[49] if len(fields) > 49 else None)
         pe_ratio = parse_optional_float(fields[39] if len(fields) > 39 else None)
         market_cap = parse_optional_float(fields[45] if len(fields) > 45 else None)
         update_time = fields[30] if len(fields) > 30 else ""
@@ -540,6 +1130,57 @@ def get_stock_overview(symbol: str):
 
     market_status = get_market_status_for_symbol(symbol)
 
+    try:
+        is_monitored = database.is_in_watchlist(symbol)
+        monitoring_status = "active" if is_monitored else "inactive"
+        monitoring_error = None
+    except Exception:
+        is_monitored = None
+        monitoring_status = "unknown"
+        monitoring_error = "后台监测状态读取失败"
+
+    context = asset_context.build_asset_context(symbol, name)
+    market = context["market"]
+    market_snapshot = {
+        "symbol": symbol,
+        "stock_name": name,
+        "market": market,
+        "source_time": source_time,
+        "fetched_at": fetched_at,
+        "change_percent": change_percent,
+        "high": high_price,
+        "low": low_price,
+        "previous_close": prev_close,
+        "volume_ratio": volume_ratio,
+        "turnover_rate": turnover_rate,
+        "turnover_amount": raw_turnover,
+    }
+    try:
+        if is_monitored is not True:
+            market_risk = risk_engine.evaluate_market_risk(market_snapshot, [])
+        else:
+            market_risk = risk_engine.process_market_snapshot(
+                market_snapshot,
+                persist_snapshot=True,
+                create_alert=market_status.get("marketStatusCode") == "trading",
+            )
+    except Exception:
+        market_risk = {
+            "riskStatus": "unavailable",
+            "priority": None,
+            "direction": "neutral",
+            "signals": [],
+            "turnoverRisk": {
+                "status": "unavailable",
+                "label": "暂无判断",
+                "baseline": None,
+                "multiple": None,
+                "reason": "风险计算暂不可用",
+            },
+            "reason": "风险计算暂不可用",
+            "dataComplete": False,
+        }
+
     res = {
         "name": name,
         "code": symbol,
@@ -550,6 +1191,10 @@ def get_stock_overview(symbol: str):
         "changePercent": change_percent,
         "sourceTime": source_time,
         "fetchedAt": fetched_at,
+        "isMonitored": is_monitored,
+        "monitoringStatus": monitoring_status,
+        "monitoringError": monitoring_error,
+        "risk": market_risk,
         "details": {
             "open": open_price,
             "high": high_price,
@@ -557,7 +1202,10 @@ def get_stock_overview(symbol: str):
             "previousClose": prev_close,
             "volume": (f"{volume:.2f}万股" if is_hk else f"{volume:.2f}万手") if volume is not None else None,
             "turnoverAmount": (f"{turnover:.2f}亿港元" if is_hk else f"{turnover:.2f}亿元") if turnover is not None else None,
+            "turnoverAmountValue": raw_turnover,
             "turnoverRate": turnover_rate,
+            "volumeRatio": volume_ratio,
+            "turnoverRisk": market_risk["turnoverRisk"],
             "peRatio": pe_ratio,
             "marketCap": (f"{market_cap}亿港元" if is_hk else f"{market_cap}亿元") if market_cap is not None else None,
         },
@@ -568,7 +1216,11 @@ def get_stock_overview(symbol: str):
     is_hk = symbol.lower().startswith("hk") or (symbol.isdigit() and len(symbol) == 5)
     if is_hk:
         res["fundFlow"] = "暂无港股资金流数据"
+        res["fundFlowTimeScope"] = "不适用（暂无港股资金流口径）"
     else:
+        res["fundFlowTimeScope"] = describe_undated_fund_flow_scope(
+            market_status["marketStatusCode"]
+        )
         raw_flow = get_sina_stock_fund_flow(symbol)
         if raw_flow is not None:
             flow_yi = raw_flow / 100000000.0
@@ -591,11 +1243,12 @@ def get_stock_kline(symbol: str, period: str = "day"):
     if period not in allowed:
         raise HTTPException(status_code=400, detail=f"period 只能是: {allowed}")
 
-    prefix = get_prefix(symbol)
+    code = asset_context.normalize_symbol(symbol)
+    query_symbol = f"{asset_context.quote_prefix(symbol)}{code}"
     query_period = "month" if period == "year" else period
     url = (
         f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        f"?param={prefix}{symbol},{query_period},,,300,qfq"
+        f"?param={query_symbol},{query_period},,,300,qfq"
     )
 
     try:
@@ -607,7 +1260,7 @@ def get_stock_kline(symbol: str, period: str = "day"):
     if data_json.get("code") != 0:
         raise HTTPException(status_code=503, detail="腾讯财经 K 线接口返回错误")
 
-    stock_data = data_json["data"].get(f"{prefix}{symbol}")
+    stock_data = data_json["data"].get(query_symbol)
     if not stock_data:
         raise HTTPException(status_code=404, detail=f"找不到股票 {symbol} 的 K 线数据")
 
@@ -700,7 +1353,57 @@ def get_company_info(symbol: str):
 
     import akshare as ak
     symbol_pure = symbol.lower().replace("hk", "")
-    is_hk = (symbol.lower().startswith("hk")) or (symbol.isdigit() and len(symbol) == 5)
+    watchlist_item = next((
+        item
+        for item in database.get_watchlist()
+        if asset_context.normalize_symbol(item.get("stockCode", "")) == symbol_pure
+    ), {})
+    stock_name = str(watchlist_item.get("stockName") or "").strip()
+    asset = asset_context.resolve_asset_context(symbol_pure, stock_name)
+    is_hk = asset["asset_type"] == "hk_stock"
+
+    if asset["asset_type"] == "domestic_etf":
+        import news_collector
+
+        announcements = []
+        for item in news_collector.fetch_etf_disclosures(symbol_pure, stock_name):
+            time_metadata = news_api.get_source_time_metadata(item)
+            announcements.append({
+                "id": item.get("id", ""),
+                "title": item.get("title", ""),
+                "publishTime": time_metadata["publish_time"],
+                "source": item.get("source", "天天基金公告"),
+                "summary": item.get("content", ""),
+                "url": item.get("url", ""),
+                "importance": "按公告内容判断",
+            })
+        result = {
+            "companyInfo": {
+                "mainBusiness": f"跟踪{asset['industry_name']}的国内ETF",
+                "coreProducts": [asset["industry_name"]],
+                "industryTags": [asset["industry_name"]],
+                "companyDescription": "国内交易所上市ETF，关注跟踪指数、基金公告、份额与成交变化。",
+                "businessRelation": "ETF按跟踪指数或主题关联资讯，不套用上市公司上下游口径。",
+                "updateTime": "配置口径",
+            },
+            "announcements": announcements,
+            "news": [],
+            "financialData": {
+                "reportPeriod": "不适用",
+                "revenue": "不适用",
+                "revenueYoy": "不适用",
+                "netProfit": "不适用",
+                "netProfitYoy": "不适用",
+                "grossMargin": "不适用",
+                "netMargin": "不适用",
+                "roe": "不适用",
+                "eps": "不适用",
+                "debtRatio": "不适用",
+                "updateTime": "不适用",
+            },
+        }
+        _company_info_cache[symbol] = (now, result)
+        return result
     
     if is_hk:
         try:
@@ -740,7 +1443,7 @@ def get_company_info(symbol: str):
                     "industryTags": [industry_name],
                     "companyDescription": company_desc,
                     "businessRelation": "-",
-                    "updateTime": "最新"
+                    "updateTime": "数据源未提供更新时间"
                 },
                 "announcements": fetch_hk_announcements(symbol_pure),
                 "news": [],
@@ -755,7 +1458,7 @@ def get_company_info(symbol: str):
                     "roe": roe,
                     "eps": str(eps),
                     "debtRatio": "-",
-                    "updateTime": "最新"
+                    "updateTime": report_period if report_period != "-" else "数据源未提供更新时间"
                 }
             }
         except Exception as e:
@@ -767,7 +1470,7 @@ def get_company_info(symbol: str):
                     "industryTags": ["港股"],
                     "companyDescription": "暂时无法获取该港股的全量数据。",
                     "businessRelation": "-",
-                    "updateTime": "实时"
+                    "updateTime": "数据获取失败"
                 },
                 "financialData": {
                     "reportPeriod": "-",
@@ -780,11 +1483,11 @@ def get_company_info(symbol: str):
                     "roe": "-",
                     "eps": "-",
                     "debtRatio": "-",
-                    "updateTime": "实时"
+                    "updateTime": "数据获取失败"
                 }
             }
         
-    prefix = 'SZ' if symbol.startswith('0') or symbol.startswith('3') else 'SH'
+    prefix = asset_context.quote_prefix(symbol).upper()
     
     # 1. 抓取公司信息
     info_url = f"https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/CompanySurveyAjax?code={prefix}{symbol}"
@@ -833,20 +1536,13 @@ def get_company_info(symbol: str):
         if f_json and f_json.get("result") and f_json["result"].get("data"):
             f_data = f_json["result"]["data"][0]
             
-            def format_money(val):
-                if not val: return "-"
-                val = float(val)
-                if val > 1e8: return f"{val/1e8:.2f}亿"
-                if val > 1e4: return f"{val/1e4:.2f}万"
-                return f"{val:.2f}"
-
             financial_data["reportPeriod"] = f_data.get("REPORTDATE", "-").split(" ")[0]
-            financial_data["revenue"] = format_money(f_data.get("TOTAL_OPERATE_INCOME"))
-            financial_data["revenueYoy"] = f"{f_data.get('YSTZ', 0):.2f}%" if f_data.get('YSTZ') else "-"
-            financial_data["netProfit"] = format_money(f_data.get("PARENT_NETPROFIT"))
-            financial_data["netProfitYoy"] = f"{f_data.get('SJLTZ', 0):.2f}%" if f_data.get('SJLTZ') else "-"
-            financial_data["roe"] = f"{f_data.get('WEIGHTAVG_ROE', 0):.2f}%" if f_data.get('WEIGHTAVG_ROE') else "-"
-            financial_data["grossMargin"] = f"{f_data.get('XSMLL', 0):.2f}%" if f_data.get('XSMLL') else "-"
+            financial_data["revenue"] = format_financial_money(f_data.get("TOTAL_OPERATE_INCOME"))
+            financial_data["revenueYoy"] = format_financial_percent(f_data.get("YSTZ"))
+            financial_data["netProfit"] = format_financial_money(f_data.get("PARENT_NETPROFIT"))
+            financial_data["netProfitYoy"] = format_financial_percent(f_data.get("SJLTZ"))
+            financial_data["roe"] = format_financial_percent(f_data.get("WEIGHTAVG_ROE"))
+            financial_data["grossMargin"] = format_financial_percent(f_data.get("XSMLL"))
             financial_data["updateTime"] = f_data.get("UPDATE_DATE", "-").split(" ")[0]
     except Exception as e:
         print("Finance fetch error:", e)
@@ -891,9 +1587,13 @@ def format_industry_fund_flow(status_code, available, flow_value, is_hk):
         if available and flow_value is not None:
             return f"午间休市 {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
         return "暂无资金流数据（午间休市）"
+    if status_code == "pre_open":
+        if available and flow_value is not None:
+            return f"盘前参考（上游未提供数据日期） {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
+        return "暂无资金流数据（盘前）"
     if status_code != "trading":
         if available and flow_value is not None:
-            return f"今日收盘 {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
+            return f"最近一次行业资金流（上游未提供数据日期） {'+' if flow_value >= 0 else ''}{flow_value} 亿元"
         return "暂无资金流数据（非交易时段）"
     if not available or flow_value is None:
         return "暂无行业资金流数据"
@@ -903,6 +1603,18 @@ def format_industry_fund_flow(status_code, available, flow_value, is_hk):
         return f"净流出 {abs(flow_value)} 亿元"
     return "主力资金净流 0.0 亿元"
 
+
+def describe_undated_fund_flow_scope(status_code: str) -> str:
+    if status_code == "trading":
+        return "交易时段参考（上游未提供数据日期）"
+    if status_code == "lunch_break":
+        return "午间参考（上游未提供数据日期）"
+    if status_code == "pre_open":
+        return "上一交易时段参考（上游未提供数据日期）"
+    if status_code in {"closed", "holiday"}:
+        return "最近交易时段（上游未提供数据日期）"
+    return "数据日期暂无法确认"
+
 @app.get("/api/stock/industry/{symbol}")
 def get_industry_monitor(symbol: str):
     """
@@ -911,8 +1623,39 @@ def get_industry_monitor(symbol: str):
     # 1. 先获取这只股票的所属行业
     company_data = get_company_info(symbol)
     industry_tags = company_data.get("companyInfo", {}).get("industryTags", [])
-    industry_name = industry_tags[0] if industry_tags and industry_tags[0] != "未知行业" else "半导体"
-    is_hk = symbol.lower().startswith("hk") or (symbol.isdigit() and len(symbol) == 5)
+    watchlist_item = next((
+        item
+        for item in database.get_watchlist()
+        if asset_context.normalize_symbol(item.get("stockCode", ""))
+        == asset_context.normalize_symbol(symbol)
+    ), {})
+    context = asset_context.register_asset_context(
+        asset_context.build_asset_context(
+            symbol,
+            watchlist_item.get("stockName", ""),
+            industry_tags,
+        )
+    )
+    industry_name = context["industry_name"]
+    is_hk = context["asset_type"] == "hk_stock"
+    linkage_risk = get_cached_linkage_risk(symbol) or {
+        "riskStatus": "unavailable",
+        "priority": None,
+        "direction": "neutral",
+        "signals": [],
+        "sectorRisk": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "板块风险采样尚未完成或真实数据不完整",
+        },
+        "overseasRisk": {
+            "status": "unavailable",
+            "label": "暂无判断",
+            "reason": "没有经过业务精确映射且带真实行情的海外标的",
+        },
+        "reason": "板块与海外联动暂无判断",
+        "dataComplete": False,
+    }
     
     market_status = get_market_status_for_symbol(symbol)
     fetched_at = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(timespec="seconds")
@@ -922,6 +1665,8 @@ def get_industry_monitor(symbol: str):
     fallback_flow = None
     sector_change = None
     fund_flow_available = False
+    industry_data_status = "not_applicable" if is_hk else "unavailable"
+    industry_data_error = None
     try:
         if is_hk:
             raise LookupError("港股不使用 A 股行业资金流口径")
@@ -944,9 +1689,17 @@ def get_industry_monitor(symbol: str):
                 sector_change = round(raw_pct, 2)
             if fallback_flow is not None and sector_change is not None:
                 fallback_heat = max(0, min(100, int(50 + abs(fallback_flow) * 0.3 + sector_change * 3)))
+            if fallback_flow is not None or sector_change is not None:
+                industry_data_status = "available"
+            else:
+                industry_data_error = "上游返回的行业指标为空"
+        else:
+            industry_data_error = "上游行业列表未匹配到当前行业"
     except LookupError:
-        pass
+        industry_data_status = "not_applicable"
     except Exception as e:
+        industry_data_status = "unavailable"
+        industry_data_error = "行业资金流上游抓取失败"
         print("THS industry fund flow failed:", e)
 
     flow_val = fallback_flow
@@ -959,47 +1712,49 @@ def get_industry_monitor(symbol: str):
     
     # 2. 检查是否在自选监测列表中，若不在则不调用大模型筛选，展示说明文字，防额度消耗
     # 实时去重多源资讯池（读取 80 条）
-    import time
     news_pool = database.get_latest_crawled_news(symbol, limit=80)
+    source_counts = news_api.build_independent_source_counts(news_pool)
     all_news_list = []
     for x in news_pool:
-        ctime_val = x.get("ctime", time.time())
-        try:
-            time_str = datetime.fromtimestamp(ctime_val).strftime("%m-%d %H:%M")
-        except:
-            time_str = "今日"
+        if not news_api.is_source_published_today(x):
+            continue
+        classification = news_api.classify_news_item(x, source_counts)
+        evidence_level = classification.get("credibility_level")
+        if evidence_level not in {"S", "A", "B", "C"}:
+            continue
+        time_metadata = news_api.get_source_time_metadata(x)
         all_news_list.append({
             "title": x.get("title"),
             "source": x.get("source"),
-            "url": x.get("url"),
-            "time": time_str
+            "url": x.get("url") or x.get("original_link"),
+            "time": time_metadata["publish_time"],
+            "timePrecision": time_metadata["publish_time_precision"],
+            "discoveredAt": time_metadata["discovered_at"],
+            "categoryKey": classification["category_key"],
+            "evidenceLevel": evidence_level,
+            "verificationStatus": classification["verification_status"],
+            "direction": classification["direction"],
+            "priority": classification["priority"],
         })
 
     if not database.is_in_watchlist(symbol):
         return {
             "industryName": industry_name,
             "heatScore": fallback_heat,
+            "heatScoreMethod": "calculated" if fallback_heat is not None else "unavailable",
             "sectorChangePercent": sector_change,
             "fundFlow": flow_str,
+            "fundFlowTimeScope": describe_undated_fund_flow_scope(
+                market_status["marketStatusCode"]
+            ),
+            "industryDataStatus": industry_data_status,
+            "industryDataError": industry_data_error,
+            "linkageRisk": linkage_risk,
             "policySummary": "💡 本股票未加入监测列表，政策监控已休眠",
             "upstreamStatus": "💡 本股票未加入监测列表",
             "downstreamStatus": "上下游监控已休眠",
-            "policies": [
-                {
-                    "title": "💡 本股票未加入监测列表，政策大模型监控已休眠",
-                    "source": "系统提示",
-                    "url": "",
-                    "time": "实时"
-                }
-            ],
-            "upstreamDownstream": [
-                {
-                    "title": "💡 本股票未加入监测列表，上下游大模型监控已休眠",
-                    "source": "系统提示",
-                    "url": "",
-                    "time": "实时"
-                }
-            ],
+            "policies": [],
+            "upstreamDownstream": [],
             "allNews": all_news_list,
             "fetchedAt": fetched_at,
             "updateTime": "已休眠",
@@ -1007,21 +1762,32 @@ def get_industry_monitor(symbol: str):
         }
     
     # 3. 如果在监测列表中，则获取共享缓存的AI大模型提炼条目
-    dynamics = fetch_real_industry_dynamics(symbol, industry_name)
+    dynamics = fetch_real_industry_dynamics(
+        symbol,
+        industry_name,
+        search_terms=context["search_terms"],
+    )
     
     # 提炼一句话总结，保证老接口的兼容性
     policies_list = dynamics.get("policies", [])
-    p_summary = policies_list[0].get("title", "系统实时监测该板块相关政策") if policies_list else "系统实时监测该板块相关政策"
+    p_summary = policies_list[0].get("title", "当日暂无已验证政策") if policies_list else "当日暂无已验证政策"
     
     upstream_downstream_list = dynamics.get("upstreamDownstream", [])
-    up_status = upstream_downstream_list[0].get("title", "上游动态监控中") if len(upstream_downstream_list) > 0 else "上游动态监控中"
+    up_status = upstream_downstream_list[0].get("title", "当日暂无已验证上下游动态") if len(upstream_downstream_list) > 0 else "当日暂无已验证上下游动态"
     down_status = upstream_downstream_list[1].get("title", "下游动态监控中") if len(upstream_downstream_list) > 1 else "暂无可验证下游动态"
 
     return {
         "industryName": industry_name,
         "heatScore": fallback_heat,
+        "heatScoreMethod": "calculated" if fallback_heat is not None else "unavailable",
         "sectorChangePercent": sector_change,
         "fundFlow": flow_str,
+        "fundFlowTimeScope": describe_undated_fund_flow_scope(
+            market_status["marketStatusCode"]
+        ),
+        "industryDataStatus": industry_data_status,
+        "industryDataError": industry_data_error,
+        "linkageRisk": linkage_risk,
         "policySummary": p_summary,
         "upstreamStatus": up_status,
         "downstreamStatus": down_status,
@@ -1029,7 +1795,7 @@ def get_industry_monitor(symbol: str):
         "upstreamDownstream": dynamics.get("upstreamDownstream", []),
         "allNews": all_news_list,
         "fetchedAt": fetched_at,
-        "updateTime": "实时监控",
+        "updateTime": "上游未提供数据时间" if industry_data_status == "available" else "数据不可用",
         "refreshInterval": "动态"
     }
 
@@ -1194,10 +1960,11 @@ def get_finance_data(symbol: str):
                 per_cash = parse_optional_float(r.get("PER_NETCASH_OPERATE"))
                 ocf = per_cash * total_shares if per_cash is not None and total_shares is not None else None
                 date_str = str(r.get("REPORT_DATE", ""))[:10]
+                report_name, report_type = classify_report_type_by_date(date_str)
                 formatted_all.append({
                     "reportDate": date_str,
-                    "reportName": f"{date_str[:4]}年报", # 港股API通常返回年报或半年报
-                    "reportType": "年报",
+                    "reportName": report_name,
+                    "reportType": report_type,
                     "revenue": parse_optional_float(r.get("OPERATE_INCOME")),
                     "revenueYoy": parse_optional_float(r.get("OPERATE_INCOME_YOY")),
                     "netProfit": parse_optional_float(r.get("HOLDER_PROFIT")),

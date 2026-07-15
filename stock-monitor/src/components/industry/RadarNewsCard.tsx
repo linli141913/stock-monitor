@@ -2,15 +2,19 @@ import React from 'react';
 import styles from './RadarNewsCard.module.css';
 import { ExternalLink, FileSearch } from 'lucide-react';
 
-type ContentType = 'official_announcement' | 'media_report' | 'institution_research' | 'other';
+type ContentType = 'official_announcement' | 'security_announcement' | 'media_report' | 'institution_research' | 'other';
+type Direction = 'positive' | 'negative' | 'neutral' | 'uncertain';
+type Priority = 'P1' | 'P2' | 'P3';
 
 export interface RadarNews {
   id: string;
   title: string;
   source: string;
   publish_time: string;
+  publish_time_precision: 'date' | 'datetime' | 'unknown';
+  discovered_at?: string | null;
   original_link: string;
-  credibility_level: string; // S, A, B, C
+  credibility_level: 'S' | 'A' | 'B' | 'C';
   credibility_method: 'source_rule';
   content_type: ContentType;
   region: string; // 国内, 国外
@@ -20,11 +24,17 @@ export interface RadarNews {
   heuristic_impact: string;
   impact_method: 'heuristic';
   verification_status: string;
+  direction: Direction;
+  priority: Priority;
 }
 
 interface Props {
   news: RadarNews;
 }
+
+const formatSystemTime = (value?: string | null) => (
+  value ? value.replace('T', ' ').slice(0, 19) : ''
+);
 
 export default function RadarNewsCard({ news }: Props) {
   
@@ -40,9 +50,21 @@ export default function RadarNewsCard({ news }: Props) {
 
   const contentTypeLabels: Record<ContentType, string> = {
     official_announcement: '官方公告',
+    security_announcement: '公告汇总',
     media_report: '媒体报道',
     institution_research: '机构研报',
     other: '其他资讯',
+  };
+  const directionLabels: Record<Direction, string> = {
+    positive: '正面',
+    negative: '负面',
+    neutral: '中性',
+    uncertain: '影响待判断',
+  };
+  const priorityLabels: Record<Priority, string> = {
+    P1: 'P1 重大',
+    P2: 'P2 重要',
+    P3: 'P3 一般',
   };
 
   const getSourceClass = (source: string) => {
@@ -71,7 +93,16 @@ export default function RadarNewsCard({ news }: Props) {
             </a>
           </h3>
           <div className={styles.meta}>
-            <span className={styles.time}>{news.publish_time}</span>
+            <span className={styles.time}>
+              {news.publish_time_precision === 'date'
+                ? `公告日期：${news.publish_time}（具体时刻未提供）`
+                : news.publish_time_precision === 'datetime'
+                  ? `发布时间：${news.publish_time}`
+                  : '来源时间暂缺'}
+            </span>
+            {news.discovered_at && (
+              <span className={styles.time}>系统发现：{formatSystemTime(news.discovered_at)}</span>
+            )}
           </div>
         </div>
         {news.original_link && news.original_link !== '#' && (
@@ -84,6 +115,12 @@ export default function RadarNewsCard({ news }: Props) {
       <div className={styles.tagsRow}>
         <span className={`${styles.tag} ${getCredClass(news.credibility_level)}`}>
           来源规则评级：{news.credibility_level}级
+        </span>
+        <span className={`${styles.tag} ${styles[`direction${news.direction}`]}`}>
+          影响方向：{directionLabels[news.direction]}
+        </span>
+        <span className={`${styles.tag} ${styles.priorityTag}`}>
+          重要程度：{priorityLabels[news.priority]}
         </span>
         <span className={`${styles.tag} ${styles.regionTag}`}>
           {contentTypeLabels[news.content_type]}

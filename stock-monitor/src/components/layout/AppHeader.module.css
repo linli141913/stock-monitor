@@ -72,6 +72,21 @@
   border-top-right-radius: 3px;
 }
 
+.unreadBadge {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #c53b3b;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 
 @media (max-width: 768px) {
   .container {
@@ -132,5 +147,4 @@
   background: rgba(37, 99, 235, 0.15);
   border-color: rgba(37, 99, 235, 0.4);
 }
-
 

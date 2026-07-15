@@ -21,10 +21,12 @@ export function useWatchlist() {
   // 初始化时从 localStorage 读取，然后从后端同步
   useEffect(() => {
     let localList: WatchlistItem[] = [];
+    let hasLocalSnapshot = false;
     let localSyncTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
+        hasLocalSnapshot = true;
         localList = JSON.parse(raw);
         localSyncTimer = setTimeout(() => setWatchlist(localList), 0);
       }
@@ -36,6 +38,17 @@ export function useWatchlist() {
       .then((data: WatchlistResponse) => {
         if (data && data.data && Array.isArray(data.data)) {
           let backendList = data.data as WatchlistItem[];
+
+          if (hasLocalSnapshot) {
+            fetch(`${API_BASE}/api/monitoring/health/watchlist-sync`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+              },
+              body: JSON.stringify({ items: localList })
+            }).catch(() => {});
+          }
           
           // 处理迁移情况：后端如果没有数据，且本地有数据，将本地同步到后端
           if (backendList.length === 0 && localList.length > 0) {

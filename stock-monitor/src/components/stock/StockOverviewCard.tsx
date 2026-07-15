@@ -9,6 +9,14 @@ interface Props {
   onWatchlistToggle?: () => void;
 }
 
+const TURNOVER_LABELS = {
+  normal: '正常',
+  active: '活跃',
+  warning: '警惕',
+  insufficient: '样本不足',
+  unavailable: '暂无判断',
+} as const;
+
 export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatchlistToggle }: Props) {
   const isRise = data.changeAmount != null && data.changeAmount > 0;
   const isFall = data.changeAmount != null && data.changeAmount < 0;
@@ -23,6 +31,26 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN', { hour12: false });
   };
+  const monitoringLabel = data.monitoringStatus === 'active'
+    ? '后台监测已生效'
+    : data.monitoringStatus === 'inactive'
+      ? '后台监测未启用'
+      : '监测状态未知';
+  const monitoringClass = data.monitoringStatus === 'active'
+    ? styles.monitoringActive
+    : data.monitoringStatus === 'inactive'
+      ? styles.monitoringInactive
+      : styles.monitoringUnknown;
+  const turnoverRisk = data.turnoverRisk || data.risk?.turnoverRisk;
+  const turnoverStatus = turnoverRisk?.status || 'unavailable';
+  const turnoverLabel = TURNOVER_LABELS[turnoverStatus];
+  const turnoverClass = turnoverStatus === 'normal'
+    ? styles.turnoverNormal
+    : turnoverStatus === 'active'
+      ? styles.turnoverActive
+      : turnoverStatus === 'warning'
+        ? styles.turnoverWarning
+        : styles.turnoverUnavailable;
   
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
   const watched = isInWatchlist(data.stockCode);
@@ -45,7 +73,13 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
         <div className={styles.titleArea}>
           <h1 className={styles.name}>{data.stockName}</h1>
           <span className={styles.code}>{data.stockCode}</span>
-          <span className={styles.tag}>腾讯财经实时</span>
+          <span className={styles.tag}>腾讯财经准实时</span>
+          <span
+            className={`${styles.monitoringBadge} ${monitoringClass}`}
+            title={data.monitoringError || monitoringLabel}
+          >
+            {monitoringLabel}
+          </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
@@ -139,7 +173,18 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>换手率(动)</span>
-          <span className={styles.metricValueBold}>{formatNumber(data.turnoverRate, '%')}</span>
+          <span className={styles.turnoverValueRow}>
+            <span className={styles.metricValueBold}>{formatNumber(data.turnoverRate, '%')}</span>
+            <span
+              className={`${styles.turnoverBadge} ${turnoverClass}`}
+              title={turnoverRisk?.reason || '当前暂无可验证的换手率历史基线'}
+            >
+              {turnoverLabel}
+            </span>
+          </span>
+          {turnoverStatus === 'insufficient' && turnoverRisk?.reason && (
+            <span className={styles.turnoverReason}>{turnoverRisk.reason}</span>
+          )}
         </div>
         <div className={styles.bottomMetricItem}>
           <span className={styles.metricLabel}>总市值</span>
@@ -150,6 +195,9 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
           <span className={`${styles.metricValueBold} ${data.fundFlow?.includes('流入') ? 'text-rise' : data.fundFlow?.includes('流出') ? 'text-fall' : ''}`}>
             {data.fundFlow || '-'}
           </span>
+          {data.fundFlowTimeScope && (
+            <span className={styles.turnoverReason}>{data.fundFlowTimeScope}</span>
+          )}
         </div>
       </div>
     </div>

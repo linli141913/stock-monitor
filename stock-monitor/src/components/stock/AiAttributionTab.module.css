@@ -16,8 +16,11 @@
 
 .headerLeft {
   display: flex;
+  min-width: 0;
+  flex: 1;
   align-items: center;
-  gap: 16px;
+  flex-wrap: nowrap;
+  gap: 12px;
 }
 
 .headerRight {
@@ -42,6 +45,7 @@
   border-radius: 6px;
   font-size: 1rem;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -83,6 +87,47 @@
   font-size: 0.85rem;
   font-weight: 500;
   border: 1px solid #91d5ff;
+}
+
+.historyPeriod {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.historyPeriodLabel {
+  color: #2563eb;
+}
+
+.historyPeriod button {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.historyPeriod button:hover {
+  background: #cbd5e1;
+  color: #0f172a;
 }
 
 .sectionTitle {
@@ -298,6 +343,9 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+  .headerLeft {
+    flex-wrap: wrap;
   }
   .judgmentHeader {
     flex-direction: column;

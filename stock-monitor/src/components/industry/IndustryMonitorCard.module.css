@@ -117,6 +117,19 @@
   font-weight: 600;
 }
 
+.valueWithNote {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+}
+
+.dataNote {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .textValue {
   flex: 1;
   font-size: 13px;
@@ -127,6 +140,85 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.linkagePanel {
+  display: grid;
+  gap: 8px;
+  padding: 13px 14px;
+  border: 1px solid #dce5ed;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.linkageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #21384c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.linkageBadge {
+  display: inline-flex;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.linkageWarning {
+  border-color: #fecaca;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.linkageWatch {
+  border-color: #fed7aa;
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.linkageNormal {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.linkageUnavailable {
+  border-color: #d8e0e7;
+  background: #edf2f6;
+  color: #617080;
+}
+
+.linkageReason,
+.linkageFootnote {
+  margin: 0;
+  color: #526477;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.linkageSources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.linkageSources span {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #e9f0f6;
+  color: #40586d;
+  font-size: 11px;
+}
+
+.linkageFootnote {
+  color: #7a8793;
+  font-size: 11px;
 }
 
 
@@ -182,7 +274,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  max-width: 65%;
+  max-width: 76%;
 }
 
 .summaryText {
@@ -192,6 +284,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 150px;
+}
+
+.summaryEvent {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.summaryTitle {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chevron {
@@ -240,6 +349,105 @@
 .dynamicsItem:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.04);
+}
+
+.dimensionTags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.dimensionTagsCompact {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.dimensionTag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.evidenceTag {
+  letter-spacing: 0.01em;
+}
+
+.evidenceS {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.evidenceA {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.evidenceB {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.evidenceC {
+  background: rgba(107, 114, 128, 0.1);
+  color: #6b7280;
+  border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+.directionPositive {
+  background: rgba(16, 185, 129, 0.1);
+  color: #087443;
+  border: 1px solid rgba(16, 185, 129, 0.24);
+}
+
+.directionNegative {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b42318;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+.directionNeutral {
+  background: rgba(100, 116, 139, 0.1);
+  color: #526173;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.directionUncertain {
+  background: rgba(100, 116, 139, 0.1);
+  color: #526173;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.priorityTag {
+  letter-spacing: 0.01em;
+}
+
+.priorityP1 {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.priorityP2 {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.priorityP3 {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
 .itemHeader {
@@ -319,6 +527,12 @@
   justify-content: space-between;
   align-items: center;
   margin-top: 4px;
+}
+
+.itemTimes {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .itemTime {
@@ -443,4 +657,3 @@
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-

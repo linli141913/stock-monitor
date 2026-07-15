@@ -8,26 +8,22 @@ import styles from './page.module.css';
 import RadarNewsCard, { RadarNews } from '@/components/industry/RadarNewsCard';
 
 const TABS = [
-  { id: 'latest', label: '全市场' },
-  { id: 'semi', label: '只看半导体' },
-  { id: 'domestic', label: '国内' },
-  { id: 'global', label: '国外' },
-  { id: 'policies', label: '政策' },
-  { id: 'company-events', label: '龙头公司' },
-  { id: 'export-control', label: '出口管制' },
+  { id: 'all', label: '全部' },
+  { id: 'company-announcements', label: '公司公告' },
+  { id: 'industry-policy', label: '行业政策' },
+  { id: 'industry-dynamics', label: '产业动态' },
+  { id: 'overseas-controls', label: '海外与管制' },
 ];
 
 export default function IndustryInsightPage() {
-  const [activeTab, setActiveTab] = useState('latest');
+  const [activeTab, setActiveTab] = useState('all');
   const [newsList, setNewsList] = useState<RadarNews[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
-      let endpoint = `/${tabId}`;
-      if (tabId === 'latest') endpoint = '/latest?category=all';
-      if (tabId === 'semi') endpoint = '/latest?category=semi';
+      const endpoint = `/latest?category=${encodeURIComponent(tabId)}`;
       const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('获取资讯失败');
       const data = await res.json();
@@ -69,7 +65,7 @@ export default function IndustryInsightPage() {
         <h1 className={styles.title}>行业洞察</h1>
         <div className={styles.radarBadge}>
           <Activity size={18} />
-          实时资讯雷达
+          当日公开资讯（抽样）
         </div>
       </div>
 

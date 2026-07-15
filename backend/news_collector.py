@@ -5,7 +5,10 @@ import requests
 import io
 from datetime import datetime
 import pypdf
+import asset_context
 import database
+import market_calendar
+import notification_service
 import akshare as ak
 
 # 强制禁用代理参数，以防影响内网连接，如果透明代理会自动接管
@@ -21,53 +24,67 @@ def clean_html(text: str) -> str:
     import re
     return re.sub(r'<[^>]+>', '', text).strip()
 
+
+def post_cninfo(url: str, **kwargs):
+    """巨潮接口必须直连，避免继承本机失效代理。"""
+    session = requests.Session()
+    session.trust_env = False
+    return session.post(url, **kwargs)
+
 def fetch_sina_roll_news() -> list:
     """从新浪财经滚动接口抓取最新行业和政策资讯"""
-    url = "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&num=80&page=1"
+    url = "https://feed.mix.sina.com.cn/api/roll/get"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     results = []
+    seen_links = set()
     try:
-        time.sleep(1.5)  # 强制限速
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            print(f"Error fetching Sina roll news: HTTP {resp.status_code}")
-            return []
-            
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        for item in items:
-            title = item.get("title", "")
-            link = item.get("url", "")
-            intro = item.get("intro", "") or item.get("summary", "") or ""
-            ctime_raw = item.get("ctime")
-            media_name = item.get("media_name", "新浪财经")
-            
-            if "财联社" in media_name or "财联社" in title:
-                media_name = "财联社电报"
-                
-            if not title or not link:
+        for page in (1, 2):
+            time.sleep(1.5)  # 强制限速
+            resp = requests.get(
+                url,
+                params={"pageid": 153, "lid": 2509, "num": 50, "page": page},
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                print(f"Error fetching Sina roll news page {page}: HTTP {resp.status_code}")
                 continue
-                
-            # 区分政策与行业动态的简易规则
-            category = "industry"
-            policy_keywords = ["政策", "会议", "国务院", "发改委", "财政部", "税收", "央行", "监管", "证监会", "指导意见", "规划", "新规"]
-            if any(k in title for k in policy_keywords):
-                category = "policy"
-                
-            ctime = int(ctime_raw) if ctime_raw else int(time.time())
-            
-            results.append({
-                "id": md5_hash(link),
-                "symbol": "",
-                "title": title,
-                "url": link,
-                "ctime": ctime,
-                "source": media_name,
-                "content": clean_html(intro)[:200],
-                "category": category
-            })
+
+            data = resp.json()
+            items = data.get("result", {}).get("data", [])
+            for item in items:
+                title = item.get("title", "")
+                link = item.get("url", "")
+                intro = item.get("intro", "") or item.get("summary", "") or ""
+                ctime_raw = item.get("ctime")
+                media_name = item.get("media_name", "新浪财经")
+
+                if "财联社" in media_name or "财联社" in title:
+                    media_name = "财联社电报"
+
+                if not title or not link or link in seen_links:
+                    continue
+                seen_links.add(link)
+
+                category = "industry"
+                policy_keywords = ["政策", "会议", "国务院", "发改委", "财政部", "税收", "央行", "监管", "证监会", "指导意见", "规划", "新规"]
+                if any(k in title for k in policy_keywords):
+                    category = "policy"
+
+                ctime = int(ctime_raw) if ctime_raw else int(time.time())
+
+                results.append({
+                    "id": md5_hash(link),
+                    "symbol": "",
+                    "title": title,
+                    "url": link,
+                    "ctime": ctime,
+                    "source": media_name,
+                    "content": clean_html(intro)[:200],
+                    "category": category
+                })
             
     except Exception as e:
         print(f"Error parsing Sina roll news: {e}")
@@ -206,7 +223,7 @@ def fetch_cninfo_announcements(search_key: str, symbol_rel: str = "") -> list:
     results = []
     try:
         time.sleep(1.5)  # 强制限速
-        resp = requests.post(url, data=payload, headers=headers, timeout=10)
+        resp = post_cninfo(url, data=payload, headers=headers, timeout=10)
         if resp.status_code != 200:
             print(f"Error fetching Cninfo announcements: HTTP {resp.status_code}")
             return []
@@ -215,11 +232,18 @@ def fetch_cninfo_announcements(search_key: str, symbol_rel: str = "") -> list:
         if not announcements:
             return []
             
+        target_code = symbol_rel.lower()
+        if target_code.startswith(("sh", "sz", "bj")):
+            target_code = target_code[2:]
+
         for a in announcements:
             title = a.get('announcementTitle', '')
             adjunct_url = a.get('adjunctUrl', '')
             ann_time_ms = a.get('announcementTime')
-            sec_code = a.get('secCode', '')
+            sec_code = str(a.get('secCode', '') or '').strip()
+
+            if target_code and sec_code != target_code:
+                continue
             
             if not title or not adjunct_url:
                 continue
@@ -249,13 +273,13 @@ def fetch_cninfo_announcements(search_key: str, symbol_rel: str = "") -> list:
             
             results.append({
                 "id": unique_id,
-                "symbol": symbol_rel or sec_code,
+                "symbol": sec_code,
                 "title": title,
                 "url": pdf_link,
                 "ctime": ctime,
                 "source": ann_source,
                 "content": content_summary,
-                "category": "policy" if "公告" in title or "决定" in title else "industry"
+                "category": "company"
             })
             
     except Exception as e:
@@ -277,7 +301,7 @@ def exists_in_database(news_id: str) -> bool:
         return False
 
 def fetch_sina_hk_news() -> list:
-    """从新浪财经滚动接口抓取最新港股快讯和交易所公告"""
+    """从新浪财经滚动接口抓取最新港股媒体快讯。"""
     url = "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&num=50&page=1"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -303,11 +327,8 @@ def fetch_sina_hk_news() -> list:
             if not title or not link:
                 continue
                 
-            # 如果标题或媒体名包含特定公告或增减持、派息关键字，打标为“港交所公告”
             source = media_name
-            if any(k in title for k in ["公告", "业绩预告", "分红", "派息", "除权", "增持", "减持", "招股", "董事会", "股份购买"]):
-                source = "港交所公告"
-            elif source == "新浪财经" or source == "港股快讯" or source == "新浪港股":
+            if source in {"新浪财经", "港股快讯", "新浪港股"}:
                 source = "港股快讯"
                 
             ctime = int(ctime_raw) if ctime_raw else int(time.time())
@@ -328,6 +349,244 @@ def fetch_sina_hk_news() -> list:
         
     return results
 
+
+def _parse_source_time(value) -> int:
+    if value is None or value == "":
+        return 0
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip().split(".")[0]
+        text = text.rsplit(":", 1)[0] if text.count(":") == 3 else text
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=market_calendar.SHANGHAI_TZ)
+    return int(parsed.timestamp())
+
+
+def _scoped_asset_url(url: str, symbol: str) -> str:
+    return f"{str(url).split('#', 1)[0]}#asset={asset_context.normalize_symbol(symbol)}"
+
+
+def fetch_market_disclosures() -> list:
+    """抓取全市场最新 A 股和港股公告汇总，不受自选列表限制。"""
+    url = "https://np-anotice-stock.eastmoney.com/api/security/ann"
+    results = []
+    for market, ann_type in (("cn", "A"), ("hk", "H")):
+        params = {
+            "sr": "-1",
+            "page_size": 100,
+            "page_index": 1,
+            "ann_type": ann_type,
+            "client_source": "web",
+        }
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            rows = response.json().get("data", {}).get("list", [])
+        except Exception as exc:
+            print(f"Error fetching {market} market disclosures: {exc}")
+            continue
+
+        for row in rows:
+            art_code = str(row.get("art_code") or "").strip()
+            title = str(row.get("title") or "").strip()
+            code_items = row.get("codes") or []
+            raw_code = str(code_items[0].get("stock_code") or "").strip() if code_items else ""
+            code = raw_code.zfill(5 if market == "hk" else 6)
+            if not art_code or not title or not raw_code:
+                continue
+            detail_url = f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+            results.append({
+                "id": f"{market}-{art_code}",
+                "symbol": code,
+                "stock_name": str(code_items[0].get("short_name") or "").strip(),
+                "title": title,
+                "url": detail_url,
+                "ctime": _parse_source_time(row.get("display_time")),
+                "source": "东方财富公告汇总",
+                "content": title,
+                "category": "company",
+                "market": market,
+                "asset_type": "hk_stock" if market == "hk" else "a_stock",
+            })
+    return results
+
+
+def fetch_watchlist_asset_news(item: dict) -> list:
+    """按证券代码精确查询资讯，适用于 A 股、港股和国内 ETF。"""
+    code = asset_context.normalize_symbol(item.get("stockCode", ""))
+    name = str(item.get("stockName") or "").strip()
+    if not code:
+        return []
+    context = asset_context.resolve_asset_context(code, name)
+    try:
+        data = ak.stock_news_em(symbol=code)
+    except Exception as exc:
+        print(f"Error fetching asset news for {code}: {exc}")
+        return []
+
+    results = []
+    for _, row in data.head(20).iterrows():
+        title = str(row.get("新闻标题") or "").strip()
+        url = str(row.get("新闻链接") or "").strip()
+        if not title or not url.startswith(("http://", "https://")):
+            continue
+        scoped_url = _scoped_asset_url(url, code)
+        results.append({
+            "id": md5_hash(scoped_url),
+            "symbol": code,
+            "stock_name": name,
+            "title": title,
+            "url": scoped_url,
+            "ctime": _parse_source_time(row.get("发布时间")),
+            "source": str(row.get("文章来源") or "东方财富").strip(),
+            "content": clean_html(str(row.get("新闻内容") or ""))[:500],
+            "category": "industry",
+            "asset_type": context["asset_type"],
+        })
+    return results
+
+
+def fetch_hk_disclosures(symbol: str, stock_name: str = "") -> list:
+    """读取按港股代码精确匹配的公告汇总；不冒充港交所原始链接。"""
+    code = asset_context.normalize_symbol(symbol)
+    url = "https://np-anotice-stock.eastmoney.com/api/security/ann"
+    params = {
+        "sr": "-1",
+        "page_size": 10,
+        "page_index": 1,
+        "ann_type": "H",
+        "client_source": "web",
+        "stock_list": code,
+    }
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        rows = response.json().get("data", {}).get("list", [])
+    except Exception as exc:
+        print(f"Error fetching HK disclosures for {code}: {exc}")
+        return []
+
+    results = []
+    for row in rows:
+        codes = {
+            str(code_item.get("stock_code") or "").zfill(5)
+            for code_item in row.get("codes") or []
+        }
+        art_code = str(row.get("art_code") or "").strip()
+        title = str(row.get("title") or "").strip()
+        if code not in codes or not art_code or not title:
+            continue
+        detail_url = f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+        results.append({
+            "id": art_code,
+            "symbol": code,
+            "stock_name": stock_name,
+            "title": title,
+            "url": detail_url,
+            "ctime": _parse_source_time(row.get("display_time")),
+            "source": "东方财富公告汇总",
+            "content": title,
+            "category": "company",
+            "asset_type": "hk_stock",
+        })
+    return results
+
+
+def fetch_etf_disclosures(symbol: str, stock_name: str = "") -> list:
+    """读取国内 ETF 的基金公告汇总，保留日期精度和可追溯详情页。"""
+    code = asset_context.normalize_symbol(symbol)
+    url = "https://api.fund.eastmoney.com/f10/JJGG"
+    try:
+        response = requests.get(
+            url,
+            params={
+                "fundcode": code,
+                "pageIndex": 1,
+                "pageSize": 10,
+                "type": "0",
+                "_": int(time.time() * 1000),
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": f"https://fundf10.eastmoney.com/jjgg_{code}.html",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        rows = response.json().get("Data") or []
+    except Exception as exc:
+        print(f"Error fetching ETF disclosures for {code}: {exc}")
+        return []
+
+    results = []
+    for row in rows:
+        fund_code = str(row.get("FUNDCODE") or "").strip()
+        art_code = str(row.get("ID") or "").strip()
+        title = str(row.get("TITLE") or "").strip()
+        if fund_code != code or not art_code or not title:
+            continue
+        detail_url = f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+        results.append({
+            "id": art_code,
+            "symbol": code,
+            "stock_name": stock_name or str(row.get("ShortTitle") or "").strip(),
+            "title": title,
+            "url": detail_url,
+            "ctime": _parse_source_time(row.get("PUBLISHDATE")),
+            "source": "天天基金公告",
+            "content": title,
+            "category": "company",
+            "asset_type": "domestic_etf",
+        })
+    return results
+
+
+def collect_watchlist_official_news() -> list:
+    results = []
+    for item in database.get_watchlist():
+        code = asset_context.normalize_symbol(item.get("stockCode", ""))
+        name = str(item.get("stockName") or "").strip()
+        context = asset_context.build_asset_context(code, name)
+        if context["asset_type"] == "hk_stock":
+            results.extend(fetch_hk_disclosures(code, name))
+        elif context["asset_type"] == "domestic_etf":
+            results.extend(fetch_etf_disclosures(code, name))
+        elif len(code) == 6 and code.isdigit():
+            results.extend(fetch_cninfo_announcements(code, code))
+    return results
+
+
+def save_and_process_news(news_items: list) -> int:
+    if not news_items:
+        return 0
+    database.save_crawled_news(news_items)
+    return notification_service.process_official_news(news_items)
+
+
+def run_official_collection() -> int:
+    print(f"[{datetime.now().isoformat()}] Starting watchlist official alert collection...")
+    official_items = collect_watchlist_official_news()
+    created_count = save_and_process_news(official_items)
+    print(
+        f"Official alert collection completed: {len(official_items)} items, "
+        f"{created_count} new alerts."
+    )
+    return created_count
+
 def run_collection():
     """多源资讯采集总调度口"""
     print(f"[{datetime.now().isoformat()}] Starting news collection pipeline...")
@@ -341,46 +600,29 @@ def run_collection():
     # 2. 抓取东方财富研报
     print("Fetching EastMoney Research Reports...")
     aggregated.extend(fetch_eastmoney_reports())
+    aggregated.extend(fetch_market_disclosures())
     
-    # 3. 抓取巨潮个股及行业公告
-    print("Fetching Cninfo: 行业公告关键词 (半导体)...")
-    aggregated.extend(fetch_cninfo_announcements("半导体"))
-    
+    # 3. 按监测列表资产代码精确抓取公司/ETF定向资讯和公告
     watchlist = database.get_watchlist()
     for item in watchlist:
-        code = item.get("stockCode")
-        name = item.get("stockName")
-        if code:
-            # A股公告抓取 (代码以 0, 3, 6, 8 等开头且长度为6)
-            if len(code) == 6:
-                print(f"Fetching Cninfo: 个股公告 ({name} / {code})...")
-                aggregated.extend(fetch_cninfo_announcements(code, code))
+        aggregated.extend(fetch_watchlist_asset_news(item))
+    aggregated.extend(collect_watchlist_official_news())
             
     # 4. 抓取港股及港交所资讯
     print("Fetching Sina HK Stock News...")
     hk_news = fetch_sina_hk_news()
     
-    # 关联港股自选股 (自选股代码长度为 5，如 00700)
-    for item in hk_news:
-        for w_item in watchlist:
-            code = w_item.get("stockCode", "")
-            name = w_item.get("stockName", "")
-            if code and len(code) == 5 and name:
-                # 模糊名字匹配 (例如 "腾讯" 匹配 "腾讯控股股价...")
-                short_name = name.replace("A", "").replace("B", "").replace("H", "").replace(" ", "")
-                if len(short_name) >= 2 and short_name[:2] in item["title"]:
-                    item["symbol"] = code
-                    print(f"Mapped HK news to watchlist item: {name} ({code}) -> {item['title']}")
-                    break
     aggregated.extend(hk_news)
             
     # 5. 入库保存
     if aggregated:
         print(f"Saving {len(aggregated)} aggregated news items to SQLite database...")
-        database.save_crawled_news(aggregated)
+        created_alerts = save_and_process_news(aggregated)
+        print(f"Created {created_alerts} new official alerts.")
         print("News collection pipeline completed successfully.")
     else:
         print("No new news items discovered.")
+    return len(aggregated)
 
 if __name__ == "__main__":
     run_collection()

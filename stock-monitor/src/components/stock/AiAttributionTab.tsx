@@ -4,7 +4,6 @@ const API_BASE = '/api/backend';
 
 import { useState, useEffect, useCallback } from 'react';
 import { BrainCircuit } from 'lucide-react';
-import ReactECharts from 'echarts-for-react';
 import styles from './AiAttributionTab.module.css';
 
 interface EvidenceChain {
@@ -18,13 +17,16 @@ interface AttributionData {
   stockName: string;
   stockCode: string;
   changePercent: number | null;
-  score: number | null;
   evidenceChain: EvidenceChain;
-  futureTrendPrediction: string;
   plainEnglishSummary?: string;
   aiJudgment: string;
   credibility: string;
   riskNotice: string;
+  sourceTime?: string | null;
+  sourceDate?: string | null;
+  analysisAt?: string | null;
+  resultReused?: boolean;
+  analysisStatus?: string | null;
 }
 
 interface HistoryItem {
@@ -35,6 +37,7 @@ interface HistoryItem {
   trigger_type: string;
   plain_english_summary: string;
   full_json: AttributionData;
+  period_bounds?: { start: string; end: string } | null;
 }
 
 export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
@@ -42,12 +45,13 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('正在初始化 AI 推理引擎...');
   const [error, setError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [analysisAt, setAnalysisAt] = useState<string | null>(null);
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [allHistoryList, setAllHistoryList] = useState<HistoryItem[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [fetchingAllHistory, setFetchingAllHistory] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryItem | null>(null);
   const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
   const [calendarStatus, setCalendarStatus] = useState<'available' | 'unknown'>('available');
   
@@ -116,25 +120,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     }
   };
 
-  const getScoreInfo = (s: number) => {
-    let color = '#f59e0b';
-    let text = '中性';
-    let bg = '#fffbeb';
-    let border = '#fef3c7';
-    if (s >= 80) {
-      color = '#ef4444';
-      text = '看好';
-      bg = '#fee2e2';
-      border = '#fecaca';
-    } else if (s <= 40) {
-      color = '#10b981';
-      text = '警戒';
-      bg = '#d1fae5';
-      border = '#a7f3d0';
-    }
-    return { color, text, bg, border };
-  };
-
   const fetchHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
@@ -169,7 +154,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       setAllHistoryList(historyItems);
       if (!data && historyItems.length > 0) {
         setData(historyItems[0].full_json);
-        setLastUpdated(null);
+        setAnalysisAt(historyItems[0].full_json.analysisAt || null);
+        setSelectedHistoryItem(historyItems[0]);
       }
 
       const targetDate = historyItems.find((item) => item.target_date)?.target_date;
@@ -207,10 +193,10 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     let interval: NodeJS.Timeout;
     if (loading) {
       const messages = [
-        '正在通过 AKShare 获取实时盘口数据...',
-        '正在分析近 5 日资金流向与大单情况...',
-        '正在拉取最新的半导体宏观资讯与海外映射(SOX/NVDA)...',
-        '情报拼装完毕，大模型 (LLM) 深度推理中，请耐心等待 (约需10-15秒)...'
+        '正在获取腾讯财经最新可追溯行情快照...',
+        '正在筛选来源日期为当天的可追溯资讯...',
+        '正在核对公司、行业、ETF或港股对应信息...',
+        '证据已拼装，AI正在进行影响与风险分析...'
       ];
       let i = 0;
       interval = setInterval(() => {
@@ -232,7 +218,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       if (!res.ok) throw new Error('无法获取归因分析数据');
       const json = await res.json() as AttributionData;
       setData(json);
-      setLastUpdated(new Date());
+      setAnalysisAt(json.analysisAt || null);
+      setSelectedHistoryItem(null);
       fetchHistory(); // 刷新时间轴
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '网络异常');
@@ -241,9 +228,18 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     }
   };
 
-  const handleTimelineClick = (item: HistoryItem) => {
+  const handleTimelineClick = (item: HistoryItem, isHistorical = false) => {
     setData(item.full_json);
-    setLastUpdated(null); // 不显示当前时间，因为是历史记录
+    setAnalysisAt(item.full_json.analysisAt || null);
+    setSelectedHistoryItem(isHistorical ? item : null);
+  };
+
+  const returnToToday = () => {
+    const latestCurrentItem = historyList[historyList.length - 1];
+    const latestData = latestCurrentItem?.full_json || null;
+    setData(latestData);
+    setAnalysisAt(latestData?.analysisAt || null);
+    setSelectedHistoryItem(null);
   };
 
   // 移除了初始挂载时的自动请求，改为完全手动触发
@@ -261,7 +257,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       <div className={styles.emptyIcon}>
         <BrainCircuit size={64} color="#1890ff" strokeWidth={1.5} />
       </div>
-      <div className={styles.emptyText}>今日暂无自动追踪记录。点击下方按钮，立即让大模型结合实时盘口生成归因分析。</div>
+      <div className={styles.emptyText}>当前交易周期暂无自动追踪记录。点击下方按钮，可基于最新可追溯行情快照生成分析。</div>
       <div className={styles.emptyActions}>
         <button className={styles.refreshBtn} onClick={fetchAttribution}>
           AI分析原因
@@ -296,63 +292,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const isUp = data?.changePercent != null && data.changePercent > 0;
   const isDown = data?.changePercent != null && data.changePercent < 0;
 
-  const getGaugeOption = () => {
-    const score = data?.score ?? 0;
-    
-    return {
-      series: [
-        {
-          type: 'gauge',
-          startAngle: 180,
-          endAngle: 0,
-          center: ['50%', '70%'],
-          radius: '120%',
-          min: 0,
-          max: 100,
-          splitNumber: 10,
-          axisLine: {
-            lineStyle: {
-              width: 12,
-              color: [
-                [0.4, '#10b981'], // <=40 green
-                [0.8, '#f59e0b'], // 40-80 yellow
-                [1, '#ef4444']    // >80 red
-              ]
-            }
-          },
-          pointer: {
-            icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z',
-            length: '55%',
-            width: 8,
-            offsetCenter: [0, '-15%'],
-            itemStyle: { color: '#4b5563' }
-          },
-          axisTick: { length: 6, lineStyle: { color: 'auto', width: 1 } },
-          splitLine: { length: 12, lineStyle: { color: 'auto', width: 2 } },
-          axisLabel: { color: '#6b7280', fontSize: 10, distance: -30, formatter: (val: number) => (val % 20 === 0 ? val : '') },
-          title: { show: false },
-          detail: { show: false }, // Hide text inside the gauge to prevent overlap
-          data: [{ value: score }]
-        }
-      ]
-    };
-  };
-
-  const score = data?.score ?? null;
-  let statusColor = '#f59e0b'; // default yellow
-  let statusText = score == null ? '未生成评分' : '中性观望';
-  let statusBg = '#fef3c7';
-  
-  if (score != null && score >= 80) {
-    statusColor = '#ef4444'; // Red
-    statusBg = '#fee2e2';
-    statusText = '强烈看好';
-  } else if (score != null && score <= 40) {
-    statusColor = '#10b981'; // Green
-    statusBg = '#d1fae5';
-    statusText = '高危警戒';
-  }
-
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -360,24 +299,44 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           <span className={styles.stockName}>{data ? data.stockName : stockCode}</span>
           {data && (
             <span className={`${styles.stockChange} ${isUp ? styles.textRise : isDown ? styles.textFall : ''}`}>
-              今日涨跌幅：{data.changePercent == null ? '暂无数据' : `${isUp ? '+' : ''}${data.changePercent}%`}
+              {data.sourceDate ? `${data.sourceDate}涨跌幅` : '来源日期未知的涨跌幅'}：{data.changePercent == null ? '暂无数据' : `${isUp ? '+' : ''}${data.changePercent}%`}
             </span>
           )}
-          <div className={styles.badge}>每日涨跌归因分析</div>
+          <div className={styles.badge}>事件与风险解释</div>
+          {selectedHistoryItem && (
+            <div
+              className={styles.historyPeriod}
+              title={selectedHistoryItem.period_bounds
+                ? `历史复盘：${formatBoundsDate(selectedHistoryItem.period_bounds.start)} 至 ${formatBoundsDate(selectedHistoryItem.period_bounds.end)}`
+                : '历史复盘周期暂不可用'}
+            >
+              <span className={styles.historyPeriodLabel}>历史</span>
+              <span>
+                {selectedHistoryItem.period_bounds
+                  ? `${formatBoundsDate(selectedHistoryItem.period_bounds.start).replace(/ \([^)]+\)/, '').replace('-', '/')}–${formatBoundsDate(selectedHistoryItem.period_bounds.end).replace(/ \([^)]+\)/, '').replace('-', '/')}`
+                  : `${selectedHistoryItem.target_date || selectedHistoryItem.date || '日期暂缺'} ${selectedHistoryItem.time}`}
+              </span>
+              <button type="button" onClick={returnToToday} aria-label="返回今日视图" title="返回今日视图">
+                ×
+              </button>
+            </div>
+          )}
         </div>
         <div className={styles.headerRight}>
-          {lastUpdated && <span className={styles.lastUpdated}>更新于 {lastUpdated.toLocaleTimeString()}</span>}
+          {data?.sourceTime && <span className={styles.lastUpdated}>行情源 {data.sourceTime}</span>}
+          {analysisAt && <span className={styles.lastUpdated}>分析于 {analysisAt.replace('T', ' ').slice(0, 19)}</span>}
+          {data?.resultReused && <span className={styles.lastUpdated}>20分钟内复用</span>}
           <button className={styles.refreshBtn} onClick={fetchAttribution} disabled={loading}>
-            手动分析最新
+            手动分析当前快照
           </button>
         </div>
       </div>
 
-      {historyList.length > 0 && (
+      {historyList.length > 0 && !selectedHistoryItem && (
         <div className={styles.timelineContainer} style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 'bold', color: '#1e293b' }}>今日盘中追踪时间轴</span>
+              <span style={{ fontWeight: 'bold', color: '#1e293b' }}>当前交易周期追踪时间轴</span>
               {bounds && (
                 <span style={{ fontSize: '0.8rem', color: '#475569', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', fontWeight: 500 }}>
                   分析跨度: {formatBoundsDate(bounds.start)} ~ {formatBoundsDate(bounds.end)}
@@ -411,28 +370,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
               >
                 <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '4px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span>{item.time} ({item.trigger_type === 'auto' ? '自动' : '手动'})</span>
-                  {(() => {
-                    const itemScore = item.full_json?.score;
-                    if (itemScore == null) {
-                      return <span style={{ marginLeft: '6px', fontSize: '0.7rem', color: '#64748b' }}>未评分</span>;
-                    }
-                    const { color, text, bg, border } = getScoreInfo(itemScore);
-                    return (
-                      <span style={{ 
-                        marginLeft: '6px', 
-                        fontSize: '0.7rem', 
-                        padding: '0px 4px', 
-                        borderRadius: '3px', 
-                        backgroundColor: bg, 
-                        color: color, 
-                        border: `1px solid ${border}`,
-                        fontWeight: 'bold',
-                        lineHeight: 1.2
-                      }}>
-                        {itemScore}分 {text}
-                      </span>
-                    );
-                  })()}
                 </div>
                 <div style={{ color: '#0f172a', fontWeight: 500, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {item.plain_english_summary}
@@ -460,38 +397,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
 
       {data && (
         <>
-      <div className={styles.gaugeCard}>
-        <div className={styles.gaugeChart}>
-          {score == null
-            ? <div className={styles.emptyText}>本次 AI 分析未生成评分</div>
-            : <ReactECharts option={getGaugeOption()} style={{ height: '180px', width: '100%' }} />}
-        </div>
-        <div className={styles.gaugeInfo}>
-          <h3 className={styles.gaugeInfoTitle}>
-            机构综合逻辑健康度
-          </h3>
-          <div className={styles.gaugeScoreArea}>
-            <span className={styles.gaugeScoreNum} style={{ color: statusColor }}>
-              {score ?? '—'}
-            </span>
-            <span className={styles.gaugeScoreUnit}>
-              {score == null ? '' : '分'}
-            </span>
-            <span className={styles.gaugeScoreTag} style={{ 
-              backgroundColor: statusBg, 
-              color: statusColor, 
-              border: `1px solid ${statusColor}40`
-            }}>
-              {statusText}
-            </span>
-          </div>
-          <p className={styles.gaugeInfoDesc}>
-            该评分由 AI 引擎基于<strong>主力资金流向</strong>、<strong>最新基本面</strong>、<strong>行业板块热度</strong>以及<strong>核心资讯</strong>多维综合计算得出。分数越高代表多头共振越强。
-          </p>
-        </div>
-      </div>
-
-      <div className={styles.sectionTitle}>机构级归因拆解</div>
+      <div className={styles.sectionTitle}>事件与风险解释</div>
       
       <div className={styles.evidenceList}>
         <div className={styles.evidenceItem}>
@@ -512,16 +418,11 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         </div>
       </div>
 
-      <div className={styles.predictionCard} style={{ marginTop: '16px', padding: '16px', borderRadius: '8px', border: '1px solid #ffccc7', background: '#fff2f0' }}>
-        <div className={styles.riskTitle} style={{ color: '#cf1322', marginBottom: '8px' }}>🚀 未来走势推演</div>
-        <div className={styles.riskText} dangerouslySetInnerHTML={{ __html: renderRichText(data.futureTrendPrediction) }} />
-      </div>
-
       {data.plainEnglishSummary && (
         <div className={styles.plainEnglishCard} style={{ marginTop: '16px', padding: '16px', borderRadius: '8px', border: '2px solid #1890ff', background: '#e6f4ff', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ fontSize: '24px' }}>💡</div>
           <div>
-            <div style={{ fontWeight: 'bold', color: '#0958d9', marginBottom: '4px', fontSize: '0.9rem' }}>大白话总结</div>
+            <div style={{ fontWeight: 'bold', color: '#0958d9', marginBottom: '4px', fontSize: '0.9rem' }}>通俗总结</div>
             <div style={{ color: '#1677ff', fontSize: '1.2rem', fontWeight: 600 }}>
               {data.plainEnglishSummary ? data.plainEnglishSummary.replace(/^【[^】]+】\s*/, '') : ''}
             </div>
@@ -722,7 +623,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                         .map((item, idx) => (
                           <div 
                             key={idx}
-                            onClick={() => { handleTimelineClick(item); setShowHistoryModal(false); }}
+                            onClick={() => { handleTimelineClick(item, true); setShowHistoryModal(false); }}
                             style={{ 
                               padding: '16px', 
                               border: '1px solid rgba(255, 255, 255, 0.4)', 
@@ -749,26 +650,6 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                               <span style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span>{item.time} ({item.trigger_type === 'auto' ? '自动分析' : '手动分析最新'})</span>
-                                {(() => {
-                                  const itemScore = item.full_json?.score;
-                                  if (itemScore == null) return <span style={{ color: '#64748b' }}>未评分</span>;
-                                  const { color, text, bg, border } = getScoreInfo(itemScore);
-                                  return (
-                                    <span style={{ 
-                                      marginLeft: '8px', 
-                                      fontSize: '0.75rem', 
-                                      padding: '1px 6px', 
-                                      borderRadius: '4px', 
-                                      backgroundColor: bg, 
-                                      color: color, 
-                                      border: `1px solid ${border}`,
-                                      fontWeight: 'bold',
-                                      lineHeight: 1.2
-                                    }}>
-                                      {itemScore}分 {text}
-                                    </span>
-                                  );
-                                })()}
                               </span>
                               <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: item.trigger_type === 'manual' ? '#fffbeb' : '#eff6ff', color: item.trigger_type === 'manual' ? '#b45309' : '#1d4ed8', fontWeight: 500 }}>
                                 {item.trigger_type === 'manual' ? '手动' : '定时自动'}

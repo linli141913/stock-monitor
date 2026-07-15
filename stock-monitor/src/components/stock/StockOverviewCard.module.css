@@ -38,6 +38,36 @@
   margin-left: var(--space-xs);
 }
 
+.monitoringBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.monitoringActive {
+  color: #087443;
+  background: #ecfdf3;
+  border-color: #a7e8c6;
+}
+
+.monitoringInactive {
+  color: #9a6700;
+  background: #fff8e6;
+  border-color: #f1d38a;
+}
+
+.monitoringUnknown {
+  color: #64748b;
+  background: #f1f5f9;
+  border-color: #d7dee8;
+}
+
 .mainInfo {
   display: flex;
   align-items: stretch;
@@ -116,6 +146,58 @@
 .metricValueBold {
   font-size: 18px;
   font-weight: 600;
+}
+
+.turnoverValueRow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.turnoverBadge {
+  display: inline-flex;
+  min-height: 21px;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.turnoverNormal {
+  color: #506477;
+  background: #edf2f7;
+  border-color: #d6e0e9;
+}
+
+.turnoverActive {
+  color: #9a5b00;
+  background: #fff4db;
+  border-color: #f2cf84;
+}
+
+.turnoverWarning {
+  color: #a12727;
+  background: #fff0f0;
+  border-color: #efb0b0;
+}
+
+.turnoverUnavailable {
+  color: #7b8794;
+  background: #f5f7f9;
+  border-color: #dde3e9;
+}
+
+.turnoverReason {
+  max-width: 210px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
 }
 
 
