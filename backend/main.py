@@ -863,11 +863,16 @@ def get_verified_sector_risk_snapshot(
     symbol: str,
     industry_name: str,
 ) -> dict:
+    fetched_at = datetime.now(
+        market_calendar.SHANGHAI_TZ
+    ).isoformat(timespec="seconds")
     if asset_context.build_asset_context(symbol)["asset_type"] != "a_stock":
         return {
             "status": "unavailable",
             "name": industry_name,
             "reason": "当前资产尚无经过验证的板块成分口径",
+            "source": None,
+            "fetched_at": fetched_at,
         }
     try:
         import akshare as ak
@@ -884,12 +889,17 @@ def get_verified_sector_risk_snapshot(
             if len(constituents) > 1
             else []
         )
-        return risk_engine.build_verified_sector_snapshot(
+        result = risk_engine.build_verified_sector_snapshot(
             industry_name,
             sector_rows,
             quotes,
             expected_constituents=len(constituents),
         )
+        return {
+            **result,
+            "source": "同花顺行业资金流",
+            "fetched_at": fetched_at,
+        }
     except Exception as exc:
         return {
             "status": "unavailable",
@@ -901,6 +911,8 @@ def get_verified_sector_risk_snapshot(
             "leaders": None,
             "fund_flow": {"verified": False},
             "reason": f"板块真实数据获取失败：{type(exc).__name__}",
+            "source": "同花顺行业资金流",
+            "fetched_at": fetched_at,
         }
 
 
@@ -1343,19 +1355,32 @@ def get_stock_overview(symbol: str):
     if is_hk:
         res["fundFlow"] = "暂无港股资金流数据"
         res["fundFlowTimeScope"] = "不适用（暂无港股资金流口径）"
+        res["fundFlowSource"] = None
+        res["fundFlowFetchedAt"] = None
+        res["fundFlowComparisonNote"] = None
     else:
         res["fundFlowTimeScope"] = describe_undated_fund_flow_scope(
             market_status["marketStatusCode"]
         )
+        res["fundFlowSource"] = "新浪个股主力资金"
+        res["fundFlowFetchedAt"] = None
+        res["fundFlowComparisonNote"] = (
+            "统计口径不同，不可与同花顺行业净额直接相减"
+        )
         raw_flow = get_sina_stock_fund_flow(symbol)
         if raw_flow is not None:
             flow_yi = raw_flow / 100000000.0
+            res["fundFlowFetchedAt"] = datetime.now(
+                market_calendar.SHANGHAI_TZ
+            ).isoformat(timespec="seconds")
             if flow_yi > 0:
                 res["fundFlow"] = f"净流入 {round(flow_yi, 2)} 亿元"
             elif flow_yi < 0:
                 res["fundFlow"] = f"净流出 {abs(round(flow_yi, 2))} 亿元"
             else:
                 res["fundFlow"] = "主力资金净流 0.0 亿元"
+        else:
+            res["fundFlow"] = "暂无个股资金流数据"
 
     return res
 
@@ -1769,7 +1794,7 @@ def get_industry_monitor(symbol: str):
     )
     industry_name = context["industry_name"]
     is_hk = context["asset_type"] == "hk_stock"
-    linkage_risk = get_cached_linkage_risk(symbol) or {
+    unavailable_linkage_risk = {
         "riskStatus": "unavailable",
         "priority": None,
         "direction": "neutral",
@@ -1787,51 +1812,83 @@ def get_industry_monitor(symbol: str):
         "reason": "板块与海外联动暂无判断",
         "dataComplete": False,
     }
+    linkage_risk = unavailable_linkage_risk
     
     market_status = get_market_status_for_symbol(symbol)
     fetched_at = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(timespec="seconds")
 
-    # 同花顺公开行业资金流，按真实行业名称匹配。
+    # 行业卡片和联动风险共用同一份板块快照，避免同页方向和金额冲突。
     fallback_heat = None
     fallback_flow = None
     sector_change = None
     fund_flow_available = False
     industry_data_status = "not_applicable" if is_hk else "unavailable"
     industry_data_error = None
-    try:
-        if is_hk:
-            raise LookupError("港股不使用 A 股行业资金流口径")
-        import akshare as ak
-        df_sector = ak.stock_fund_flow_industry(symbol="即时")
-        matched = df_sector[df_sector["行业"].astype(str) == industry_name]
-        if matched.empty:
-            for kw in industry_name.split("·"):
-                matched = df_sector[df_sector["行业"].astype(str).str.contains(kw.strip(), na=False)]
-                if not matched.empty:
-                    break
-        if not matched.empty:
-            row = matched.iloc[0]
-            raw_flow = parse_optional_float(row.get("净额"))
-            raw_pct = parse_optional_float(row.get("行业-涨跌幅"))
+    industry_data_fetched_at = None
+    fund_flow_source = None if is_hk else "同花顺行业资金流"
+    if is_hk:
+        linkage_risk = get_cached_linkage_risk(symbol) or unavailable_linkage_risk
+    else:
+        try:
+            extended = get_extended_risk_inputs(
+                asset_context.normalize_symbol(symbol),
+                watchlist_item.get("stockName", "") or context.get("stock_name", ""),
+                fetched_at,
+            )
+            sector_snapshot = extended.get("sector") or {
+                "status": "unavailable",
+                "name": industry_name,
+                "reason": "本轮行业数据未返回",
+            }
+            linkage_risk = risk_engine.evaluate_linkage_risk({
+                "sector": sector_snapshot,
+                "overseas": extended.get("overseas") or [],
+            })
+        except Exception as exc:
+            print("Shared industry snapshot failed:", exc)
+            sector_snapshot = {
+                "status": "unavailable",
+                "name": industry_name,
+                "fund_flow": {"verified": False},
+                "reason": "本轮行业数据获取失败",
+                "source": "同花顺行业资金流",
+                "fetched_at": fetched_at,
+            }
+            linkage_risk = risk_engine.evaluate_linkage_risk({
+                "sector": sector_snapshot,
+                "overseas": [],
+            })
+
+        industry_data_fetched_at = sector_snapshot.get("fetched_at")
+        fund_flow_source = sector_snapshot.get("source") or fund_flow_source
+        if sector_snapshot.get("status") == "available":
+            raw_pct = parse_optional_float(sector_snapshot.get("change_percent"))
+            fund_flow = sector_snapshot.get("fund_flow") or {}
+            raw_flow = (
+                parse_optional_float(fund_flow.get("value"))
+                if fund_flow.get("verified") is True
+                else None
+            )
             if raw_flow is not None:
                 fallback_flow = round(raw_flow, 2)
                 fund_flow_available = True
             if raw_pct is not None:
                 sector_change = round(raw_pct, 2)
             if fallback_flow is not None and sector_change is not None:
-                fallback_heat = max(0, min(100, int(50 + abs(fallback_flow) * 0.3 + sector_change * 3)))
+                fallback_heat = max(
+                    0,
+                    min(
+                        100,
+                        int(50 + abs(fallback_flow) * 0.3 + sector_change * 3),
+                    ),
+                )
             if fallback_flow is not None or sector_change is not None:
                 industry_data_status = "available"
-            else:
-                industry_data_error = "上游返回的行业指标为空"
-        else:
-            industry_data_error = "上游行业列表未匹配到当前行业"
-    except LookupError:
-        industry_data_status = "not_applicable"
-    except Exception as e:
-        industry_data_status = "unavailable"
-        industry_data_error = "行业资金流上游抓取失败"
-        print("THS industry fund flow failed:", e)
+        if industry_data_status != "available":
+            industry_data_error = (
+                "本轮行业数据获取失败；监测仍在运行，"
+                "旧数据不参与提醒"
+            )
 
     flow_val = fallback_flow
     flow_str = format_industry_fund_flow(
@@ -1878,6 +1935,8 @@ def get_industry_monitor(symbol: str):
             "fundFlowTimeScope": describe_undated_fund_flow_scope(
                 market_status["marketStatusCode"]
             ),
+            "fundFlowSource": fund_flow_source,
+            "industryDataFetchedAt": industry_data_fetched_at,
             "industryDataStatus": industry_data_status,
             "industryDataError": industry_data_error,
             "linkageRisk": linkage_risk,
@@ -1916,6 +1975,8 @@ def get_industry_monitor(symbol: str):
         "fundFlowTimeScope": describe_undated_fund_flow_scope(
             market_status["marketStatusCode"]
         ),
+        "fundFlowSource": fund_flow_source,
+        "industryDataFetchedAt": industry_data_fetched_at,
         "industryDataStatus": industry_data_status,
         "industryDataError": industry_data_error,
         "linkageRisk": linkage_risk,

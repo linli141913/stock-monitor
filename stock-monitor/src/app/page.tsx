@@ -66,6 +66,9 @@ interface OverviewApiResponse {
   fetchedAt: string;
   fundFlow?: string;
   fundFlowTimeScope?: string;
+  fundFlowSource?: string | null;
+  fundFlowFetchedAt?: string | null;
+  fundFlowComparisonNote?: string | null;
   risk?: StockOverview['risk'];
   details: {
     open: number | null;
@@ -171,6 +174,9 @@ function HomeContent() {
         fetchedAt:    data.fetchedAt,
         fundFlow:     data.fundFlow,
         fundFlowTimeScope: data.fundFlowTimeScope,
+        fundFlowSource: data.fundFlowSource,
+        fundFlowFetchedAt: data.fundFlowFetchedAt,
+        fundFlowComparisonNote: data.fundFlowComparisonNote,
       };
       
       setOverviewError('');

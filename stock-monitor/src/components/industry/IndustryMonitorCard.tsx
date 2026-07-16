@@ -260,9 +260,9 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
             ) : statusMessage ? (
               <span className={styles.statusWarning}>{statusMessage}</span>
             ) : data?.industryDataStatus === 'unavailable' ? (
-              <span className={styles.statusWarning}>{data.industryDataError || '行业指标上游暂不可用'}</span>
-            ) : data?.fetchedAt ? (
-              <span>后端抓取：{data.fetchedAt.replace('T', ' ').slice(0, 19)}</span>
+              <span className={styles.statusWarning}>{data.industryDataError || '本轮行业数据获取失败；监测仍在运行'}</span>
+            ) : (data?.industryDataFetchedAt || data?.fetchedAt) ? (
+              <span>行业数据抓取：{(data.industryDataFetchedAt || data.fetchedAt || '').replace('T', ' ').slice(0, 19)}</span>
             ) : null}
           </div>
         </div>
@@ -290,11 +290,14 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
         </div>
 
         <div className={styles.row}>
-          <div className={styles.label}>资金流向</div>
+          <div className={styles.label}>所属行业净额</div>
           <div className={styles.valueWithNote}>
             <div className={`${styles.value} ${(data?.fundFlow || '').includes('流入') ? 'text-rise' : ((data?.fundFlow || '').includes('流出') ? 'text-fall' : '')}`}>
-              {data?.fundFlow || '-'}
+              {data?.fundFlow || '暂无数据'}
             </div>
+            {data?.fundFlowSource && (
+              <div className={styles.dataNote}>{data.fundFlowSource}</div>
+            )}
             {data?.fundFlowTimeScope && (
               <div className={styles.dataNote}>{data.fundFlowTimeScope}</div>
             )}

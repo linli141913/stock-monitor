@@ -69,6 +69,8 @@ export interface IndustryMonitor {
   sectorChangePercent: number | null;
   fundFlow: string;
   fundFlowTimeScope?: string;
+  fundFlowSource?: string | null;
+  industryDataFetchedAt?: string | null;
   industryDataStatus?: 'available' | 'unavailable' | 'not_applicable';
   industryDataError?: string | null;
   linkageRisk?: LinkageRisk;

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from typing import Literal, Optional
 
@@ -33,7 +33,10 @@ def _legacy_market_risk_codes(item):
         "negative",
         "neutral",
     }:
-        return ",".join(parts[3:]).split(",")
+        raw_codes = ",".join(parts[3:]).split(",")
+        if "episode" in raw_codes:
+            return []
+        return [code for code in raw_codes if code in _MARKET_RISK_RULE_LABELS]
     return []
 
 
@@ -70,6 +73,59 @@ def _market_risk_dedupe_key(item):
     return str(item.get("symbol") or "").strip().lower(), source_event_id
 
 
+def _risk_episode_dedupe_key(item):
+    if item.get("eventType") not in {"market_risk", "linkage_risk"}:
+        return None
+    source_event_id = str(item.get("sourceEventId") or "").strip()
+    parts = source_event_id.split(":")
+    if (
+        len(parts) not in {5, 6}
+        or parts[0] not in {"risk", "linkage"}
+        or parts[3] != "episode"
+        or not parts[4].isdigit()
+        or len(parts[4]) != 6
+    ):
+        return None
+    try:
+        source_time = datetime.strptime(
+            f"{parts[1]} {parts[4]}",
+            "%Y-%m-%d %H%M%S",
+        )
+    except ValueError:
+        return None
+    rounded = source_time + timedelta(minutes=2, seconds=30)
+    bucket_minute = (rounded.minute // 5) * 5
+    bucket = rounded.replace(minute=bucket_minute, second=0, microsecond=0)
+    return (
+        str(item.get("symbol") or "").strip().lower(),
+        str(item.get("eventType") or ""),
+        str(item.get("direction") or "neutral"),
+        bucket.strftime("%Y-%m-%d %H:%M"),
+    )
+
+
+def _legacy_episode_rule_dedupe_key(item):
+    if item.get("eventType") not in {"market_risk", "linkage_risk"}:
+        return None
+    source_event_id = str(item.get("sourceEventId") or "").strip()
+    parts = source_event_id.split(":")
+    if (
+        len(parts) != 5
+        or parts[0] not in {"risk", "linkage"}
+        or parts[3] != "episode"
+    ):
+        return None
+    title = str(item.get("title") or "").strip()
+    rule_text = title.rsplit("：", 1)[-1].strip()
+    return (
+        str(item.get("symbol") or "").strip().lower(),
+        str(item.get("eventType") or ""),
+        str(item.get("direction") or "neutral"),
+        parts[1],
+        rule_text,
+    )
+
+
 def _watchlist_alerts(
     *,
     unread_only: bool = False,
@@ -84,6 +140,8 @@ def _watchlist_alerts(
     }
     source_rows_by_symbol = {}
     seen_market_risks = set()
+    seen_risk_episodes = set()
+    seen_legacy_episode_rules = set()
     results = []
     for item in alert_repository.list_alerts(
             limit=limit,
@@ -100,6 +158,18 @@ def _watchlist_alerts(
             }):
             continue
 
+        episode_key = _risk_episode_dedupe_key(item)
+        if episode_key is not None:
+            if episode_key in seen_risk_episodes:
+                continue
+            seen_risk_episodes.add(episode_key)
+
+        legacy_episode_key = _legacy_episode_rule_dedupe_key(item)
+        if legacy_episode_key is not None:
+            if legacy_episode_key in seen_legacy_episode_rules:
+                continue
+            seen_legacy_episode_rules.add(legacy_episode_key)
+
         market_risk_key = _market_risk_dedupe_key(item)
         if market_risk_key is not None:
             if market_risk_key in seen_market_risks:
@@ -109,12 +179,16 @@ def _watchlist_alerts(
             continue
 
         enriched = dict(item)
+        stored_stock_name = str(enriched.get("stockName") or "").strip()
         stock_name = monitored.get(symbol) or enriched.get("stockName") or symbol
         enriched["stockName"] = stock_name
         enriched = _enrich_legacy_market_risk(enriched)
         title = str(enriched.get("title") or "").strip()
         if title and stock_name not in title:
-            enriched["title"] = f"{stock_name}：{title}"
+            if stored_stock_name and title.startswith(stored_stock_name):
+                enriched["title"] = f"{stock_name}{title[len(stored_stock_name):]}"
+            else:
+                enriched["title"] = f"{stock_name}：{title}"
 
         if symbol not in source_rows_by_symbol:
             source_rows_by_symbol[symbol] = {

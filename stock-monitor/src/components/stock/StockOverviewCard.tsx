@@ -191,12 +191,21 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
           <span className={styles.metricValueBold}>{data.marketCap || '暂无数据'}</span>
         </div>
         <div className={styles.bottomMetricItem}>
-          <span className={styles.metricLabel}>主力流向</span>
+          <span className={styles.metricLabel}>个股主力净额</span>
           <span className={`${styles.metricValueBold} ${data.fundFlow?.includes('流入') ? 'text-rise' : data.fundFlow?.includes('流出') ? 'text-fall' : ''}`}>
-            {data.fundFlow || '-'}
+            {data.fundFlow || '暂无数据'}
           </span>
+          {data.fundFlowSource && (
+            <span className={styles.turnoverReason}>
+              {data.fundFlowSource}
+              {data.fundFlowFetchedAt ? ` · ${formatTimestamp(data.fundFlowFetchedAt)}抓取` : ''}
+            </span>
+          )}
           {data.fundFlowTimeScope && (
             <span className={styles.turnoverReason}>{data.fundFlowTimeScope}</span>
+          )}
+          {data.fundFlowComparisonNote && (
+            <span className={styles.turnoverReason}>{data.fundFlowComparisonNote}</span>
           )}
         </div>
       </div>

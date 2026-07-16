@@ -1834,6 +1834,117 @@ class MarketIntegrityTests(unittest.TestCase):
     def test_sina_money_flow_preserves_missing_value(self):
         self.assertIsNone(main.parse_sina_money_flow({"name": "京东方Ａ"}))
 
+    def test_a_share_overview_labels_cross_source_fund_flow_as_not_comparable(self):
+        market_status = {
+            "marketStatus": "交易中",
+            "marketStatusCode": "trading",
+            "market": "cn",
+            "calendarSource": "https://www.sse.com.cn/",
+            "calendarCheckedAt": "2026-07-16T09:45:00+08:00",
+            "calendarError": None,
+        }
+        with patch.object(
+            main.requests,
+            "get",
+            return_value=self._quote_response(),
+        ), patch.object(
+            main.database,
+            "is_in_watchlist",
+            return_value=False,
+        ), patch.object(
+            main,
+            "get_market_status_for_symbol",
+            return_value=market_status,
+        ), patch.object(
+            main,
+            "get_ths_stock_fund_flow",
+            create=True,
+            return_value=None,
+        ) as mock_ths, patch.object(
+            main,
+            "get_sina_stock_fund_flow",
+            return_value=883_000_000,
+        ) as mock_sina:
+            result = main.get_stock_overview("600001")
+
+        self.assertEqual(result["fundFlow"], "净流入 8.83 亿元")
+        self.assertEqual(result["fundFlowSource"], "新浪个股主力资金")
+        self.assertIn("不可与同花顺行业净额直接相减", result["fundFlowComparisonNote"])
+        self.assertTrue(result["fundFlowFetchedAt"].endswith("+08:00"))
+        mock_ths.assert_not_called()
+        mock_sina.assert_called_once_with("600001")
+
+    def test_industry_card_and_linkage_risk_share_one_sector_snapshot(self):
+        sector_snapshot = {
+            "status": "available",
+            "name": "专用设备",
+            "change_percent": -0.42,
+            "advancers": None,
+            "total": None,
+            "leader": None,
+            "leaders": None,
+            "fund_flow": {
+                "value": -0.57,
+                "direction": "outflow",
+                "rank": 20,
+                "total": 34,
+                "verified": True,
+            },
+            "reason": "行业公司家数200与成分集合101不一致",
+            "source": "同花顺行业资金流",
+            "fetched_at": "2026-07-16T09:50:00+08:00",
+        }
+        stale_sector = pd.DataFrame([{
+            "行业": "专用设备",
+            "行业-涨跌幅": 0.31,
+            "净额": 0.52,
+        }])
+        with patch.object(
+            main,
+            "get_company_info",
+            return_value={"companyInfo": {"industryTags": ["专用设备"]}},
+        ), patch.object(
+            main.database,
+            "get_watchlist",
+            return_value=[{"stockCode": "000519", "stockName": "中兵红箭"}],
+        ), patch.object(
+            main.database,
+            "is_in_watchlist",
+            return_value=False,
+        ), patch.object(
+            main.database,
+            "get_latest_crawled_news",
+            return_value=[],
+        ), patch.object(
+            main,
+            "get_extended_risk_inputs",
+            return_value={
+                "sector": sector_snapshot,
+                "overseas": [],
+                "context": {"industry_name": "专用设备"},
+            },
+        ) as mock_extended, patch.object(
+            main,
+            "get_cached_linkage_risk",
+            return_value=risk_engine.evaluate_linkage_risk({
+                "sector": sector_snapshot,
+                "overseas": [],
+            }),
+        ), patch(
+            "akshare.stock_fund_flow_industry",
+            return_value=stale_sector,
+        ) as mock_direct_industry:
+            result = main.get_industry_monitor("000519")
+
+        fund_details = result["linkageRisk"]["sectorRisk"]["dimensions"]["fundFlow"]["details"]
+        self.assertEqual(result["fundFlow"], "净流出 0.57 亿元")
+        self.assertEqual(fund_details["direction"], "outflow")
+        self.assertEqual(fund_details["value"], -0.57)
+        self.assertEqual(result["fundFlowSource"], "同花顺行业资金流")
+        self.assertEqual(result["industryDataFetchedAt"], "2026-07-16T09:50:00+08:00")
+        mock_extended.assert_called_once()
+        mock_direct_industry.assert_not_called()
+
     def test_sina_industry_nodes_match_real_industry_name(self):
         nodes = [
             "申万二级",
@@ -2087,10 +2198,12 @@ class MarketIntegrityTests(unittest.TestCase):
         return_value=pd.DataFrame(columns=["代码", "今日-主力净流入-净额"]),
     )
     @patch.object(main, "get_em_data")
+    @patch.object(main, "get_sina_stock_fund_flow", return_value=None)
     @patch.object(main.requests, "get")
     def test_overview_preserves_missing_numbers_as_null(
         self,
         mock_get,
+        _mock_sina_fund_flow,
         mock_get_em_data,
         _mock_fund_flow_rank,
     ):

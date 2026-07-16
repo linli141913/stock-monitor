@@ -880,24 +880,28 @@ def _prepare_episode_alert(
         limit=2,
     )
     direction = str(event.get("direction") or "neutral")
-    two_cleared = len(recent_states) >= 2 and all(
-        not state.get("priority") for state in recent_states[:2]
-    )
-    same_episode_active = [
-        state for state in recent_states
-        if state.get("priority")
-        and state.get("direction") in {None, "", direction}
-    ]
-    trade_date = source_time[:10]
-    if same_episode_active and not two_cleared:
-        existing = alert_repository.get_latest_risk_episode_alert(
-            snapshot["symbol"],
-            str(event["event_type"]),
-            direction,
-            trade_date,
+    source_event_parts = str(event.get("source_event_id") or "").split(":", 2)
+    signal_codes = {
+        code
+        for code in (
+            source_event_parts[2].split(",")
+            if len(source_event_parts) == 3
+            else []
         )
-        if existing is None:
-            return event
+        if code
+    }
+    two_cleared = len(recent_states) >= 2 and all(
+        _state_confirms_episode_clear(state, signal_codes, risk_kind)
+        for state in recent_states[:2]
+    )
+    trade_date = source_time[:10]
+    existing = alert_repository.get_latest_risk_episode_alert(
+        snapshot["symbol"],
+        str(event["event_type"]),
+        direction,
+        trade_date,
+    )
+    if existing is not None and not two_cleared:
         incoming_rank = {"P1": 1, "P2": 2, "P3": 3}.get(
             str(event.get("priority")),
             99,
@@ -918,9 +922,68 @@ def _prepare_episode_alert(
     return {
         **event,
         "source_event_id": (
-            f"{prefix}:{trade_date}:{direction}:episode:{episode_time}"
+            f"{prefix}:{trade_date}:{direction}:episode:{episode_time}:"
+            f"{','.join(sorted(signal_codes))}"
         ),
     }
+
+
+def _state_confirms_episode_clear(
+    state: Dict[str, Any],
+    signal_codes: set[str],
+    risk_kind: str,
+) -> bool:
+    if state.get("priority") or not signal_codes:
+        return False
+
+    if risk_kind == "market":
+        fund_codes = {
+            "consecutive_fund_inflow",
+            "consecutive_fund_outflow",
+            "price_fund_divergence",
+        }
+        for code in signal_codes:
+            if code in fund_codes:
+                confirmed = state.get("fundFlowStatus") == "no_signal"
+            elif code == "ma_breakdown":
+                confirmed = state.get("movingAverageStatus") == "no_signal"
+            elif code == "turnover_warning":
+                confirmed = state.get("turnoverStatus") in {"normal", "active"}
+            elif code in {"limit_move", "extreme_price_move"}:
+                confirmed = state.get("changeAvailable") is True
+            elif code == "high_amplitude":
+                confirmed = state.get("amplitudeAvailable") is True
+            elif code == "high_volume_ratio":
+                confirmed = state.get("volumeRatioAvailable") is True
+            else:
+                confirmed = False
+            if not confirmed:
+                return False
+        return True
+
+    if risk_kind == "linkage":
+        dimension_by_code = {
+            "sector_decline": "decline",
+            "sector_breadth_weak": "breadth",
+            "sector_leader_decline": "leader",
+            "sector_fund_inflow_top": "fundFlow",
+            "sector_fund_outflow_top": "fundFlow",
+        }
+        dimensions = state.get("sectorDimensions") or {}
+        for code in signal_codes:
+            dimension = dimension_by_code.get(code)
+            if dimension is not None:
+                item = dimensions.get(dimension) or {}
+                confirmed = item.get("status") == "no_signal"
+            elif code.startswith("overseas_"):
+                confirmed = state.get("overseasStatus") == "no_signal"
+            else:
+                confirmed = False
+            if not confirmed:
+                return False
+        return True
+
+    return False
 
 
 def process_linkage_snapshot(

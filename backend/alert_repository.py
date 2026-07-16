@@ -649,20 +649,50 @@ def get_recent_risk_states(
             state = details.get("linkageRisk")
             if not isinstance(state, dict):
                 continue
+            sector_risk = state.get("sectorRisk")
+            overseas_risk = state.get("overseasRisk")
             states.append({
                 "sourceTime": row["source_time"],
                 "riskStatus": state.get("riskStatus") or "normal",
                 "priority": state.get("priority"),
                 "direction": state.get("direction"),
+                "signals": state.get("signals") or [],
+                "sectorDimensions": (
+                    sector_risk.get("dimensions") or {}
+                    if isinstance(sector_risk, dict)
+                    else {}
+                ),
+                "overseasStatus": (
+                    overseas_risk.get("status")
+                    if isinstance(overseas_risk, dict)
+                    else "unavailable"
+                ),
             })
             continue
         if risk_kind != "market":
             raise ValueError("risk_kind 只能是 market 或 linkage")
+        fund_flow_risk = details.get("fundFlowRisk")
+        moving_average_risk = details.get("movingAverageRisk")
         states.append({
             "sourceTime": row["source_time"],
             "riskStatus": row["risk_status"] or "normal",
             "priority": row["priority"],
             "direction": details.get("direction"),
+            "signals": details.get("signals") or [],
+            "fundFlowStatus": (
+                fund_flow_risk.get("status")
+                if isinstance(fund_flow_risk, dict)
+                else "unavailable"
+            ),
+            "movingAverageStatus": (
+                moving_average_risk.get("status")
+                if isinstance(moving_average_risk, dict)
+                else "unavailable"
+            ),
+            "turnoverStatus": row["turnover_status"] or "unavailable",
+            "changeAvailable": row["change_percent"] is not None,
+            "amplitudeAvailable": row["amplitude"] is not None,
+            "volumeRatioAvailable": row["volume_ratio"] is not None,
         })
     return states
 

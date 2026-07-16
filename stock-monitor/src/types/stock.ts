@@ -50,6 +50,9 @@ export interface StockOverview {
   concepts?: string[];
   fundFlow?: string;
   fundFlowTimeScope?: string;
+  fundFlowSource?: string | null;
+  fundFlowFetchedAt?: string | null;
+  fundFlowComparisonNote?: string | null;
 }
 
 export interface KlineItem {

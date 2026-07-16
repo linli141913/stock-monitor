@@ -789,6 +789,217 @@ class AlertsApiTests(unittest.TestCase):
         )
         self.assertIn("旧提醒未保存触发瞬间的具体数值", result[0]["summary"])
 
+    @patch.object(alerts_api.database, "get_watchlist")
+    @patch.object(alerts_api.alert_repository, "list_alerts")
+    def test_episode_id_never_overwrites_human_readable_alert_copy(
+        self,
+        mock_list_alerts,
+        mock_watchlist,
+    ):
+        now = datetime.now(alerts_api.market_calendar.SHANGHAI_TZ)
+        stored_title = "京东方Ａ触发P3观察提醒：量比≥2"
+        expected_title = "京东方A触发P3观察提醒：量比≥2"
+        original_summary = (
+            f"{now:%Y-%m-%d} 09:31:54 腾讯财经行情显示：量比 2.20。"
+            "固定规则触发：量比≥2。"
+        )
+        mock_watchlist.return_value = [{
+            "stockCode": "000725",
+            "stockName": "京东方A",
+        }]
+        mock_list_alerts.return_value = [{
+            "id": "episode-risk",
+            "symbol": "000725",
+            "stockName": "京东方Ａ",
+            "eventType": "market_risk",
+            "direction": "negative",
+            "priority": "P3",
+            "title": stored_title,
+            "summary": original_summary,
+            "source": "腾讯财经行情规则",
+            "sourceUrl": None,
+            "sourceEventId": f"risk:{now:%Y-%m-%d}:negative:episode:093154",
+            "publishedAt": now.isoformat(timespec="seconds"),
+            "triggeredAt": now.isoformat(timespec="seconds"),
+            "isRead": False,
+        }]
+
+        result = alerts_api._watchlist_alerts()
+
+        self.assertEqual(result[0]["title"], expected_title)
+        self.assertEqual(result[0]["summary"], original_summary)
+        self.assertNotIn("episode", result[0]["title"] + result[0]["summary"])
+        self.assertNotIn("093154", result[0]["title"] + result[0]["summary"])
+
+    @patch.object(alerts_api.database, "get_watchlist")
+    @patch.object(alerts_api.alert_repository, "list_alerts")
+    def test_episode_alerts_in_same_snapshot_bucket_are_collapsed(
+        self,
+        mock_list_alerts,
+        mock_watchlist,
+    ):
+        now = datetime.now(alerts_api.market_calendar.SHANGHAI_TZ)
+        day = f"{now:%Y-%m-%d}"
+        common = {
+            "symbol": "000725",
+            "stockName": "京东方A",
+            "direction": "negative",
+            "priority": "P3",
+            "title": "京东方A触发P3观察提醒：量比≥2",
+            "summary": "腾讯财经行情显示：量比 2.20。",
+            "source": "腾讯财经行情规则",
+            "sourceUrl": None,
+            "isRead": False,
+        }
+        mock_watchlist.return_value = [{
+            "stockCode": "000725",
+            "stockName": "京东方A",
+        }]
+        mock_list_alerts.return_value = [
+            {
+                **common,
+                "id": "latest",
+                "eventType": "market_risk",
+                "sourceEventId": f"risk:{day}:negative:episode:093154",
+                "publishedAt": f"{day} 09:31:54",
+                "triggeredAt": now.isoformat(timespec="seconds"),
+            },
+            {
+                **common,
+                "id": "earlier",
+                "eventType": "market_risk",
+                "sourceEventId": f"risk:{day}:negative:episode:093054",
+                "publishedAt": f"{day} 09:30:54",
+                "triggeredAt": now.isoformat(timespec="seconds"),
+            },
+            {
+                **common,
+                "id": "latest-linkage",
+                "eventType": "linkage_risk",
+                "direction": "positive",
+                "title": "京东方A触发P3观察提醒：板块资金净流入前5",
+                "sourceEventId": f"linkage:{day}:positive:episode:093154",
+                "publishedAt": f"{day} 09:31:54",
+                "triggeredAt": now.isoformat(timespec="seconds"),
+            },
+            {
+                **common,
+                "id": "earlier-linkage",
+                "eventType": "linkage_risk",
+                "direction": "positive",
+                "title": "京东方A触发P3观察提醒：板块资金净流入前5",
+                "sourceEventId": f"linkage:{day}:positive:episode:093054",
+                "publishedAt": f"{day} 09:30:54",
+                "triggeredAt": now.isoformat(timespec="seconds"),
+            },
+        ]
+
+        result = alerts_api._watchlist_alerts()
+
+        self.assertEqual(
+            [item["id"] for item in result],
+            ["latest", "latest-linkage"],
+        )
+
+    @patch.object(alerts_api.database, "get_watchlist")
+    @patch.object(alerts_api.alert_repository, "list_alerts")
+    def test_legacy_same_rule_episode_alerts_are_collapsed_across_the_day(
+        self,
+        mock_list_alerts,
+        mock_watchlist,
+    ):
+        now = datetime.now(alerts_api.market_calendar.SHANGHAI_TZ)
+        day = f"{now:%Y-%m-%d}"
+        common = {
+            "symbol": "000021",
+            "stockName": "深科技",
+            "eventType": "market_risk",
+            "direction": "negative",
+            "priority": "P3",
+            "title": "深科技触发P3观察提醒：连续资金净流出",
+            "summary": "连续3个交易日主力资金净流出。",
+            "source": "腾讯财经行情规则",
+            "sourceUrl": None,
+            "triggeredAt": now.isoformat(timespec="seconds"),
+            "isRead": False,
+        }
+        mock_watchlist.return_value = [{
+            "stockCode": "000021",
+            "stockName": "深科技",
+        }]
+        mock_list_alerts.return_value = [
+            {
+                **common,
+                "id": "latest",
+                "sourceEventId": f"risk:{day}:negative:episode:105157",
+                "publishedAt": f"{day} 10:51:57",
+            },
+            {
+                **common,
+                "id": "earlier",
+                "sourceEventId": f"risk:{day}:negative:episode:101400",
+                "publishedAt": f"{day} 10:14:00",
+            },
+        ]
+
+        result = alerts_api._watchlist_alerts()
+
+        self.assertEqual([item["id"] for item in result], ["latest"])
+
+    @patch.object(alerts_api.database, "get_watchlist")
+    @patch.object(alerts_api.alert_repository, "list_alerts")
+    def test_new_episode_ids_keep_confirmed_same_day_reentry_visible(
+        self,
+        mock_list_alerts,
+        mock_watchlist,
+    ):
+        now = datetime.now(alerts_api.market_calendar.SHANGHAI_TZ)
+        day = f"{now:%Y-%m-%d}"
+        common = {
+            "symbol": "000021",
+            "stockName": "深科技",
+            "eventType": "market_risk",
+            "direction": "negative",
+            "priority": "P3",
+            "title": "深科技触发P3观察提醒：连续资金净流出",
+            "summary": "连续3个交易日主力资金净流出。",
+            "source": "腾讯财经行情规则",
+            "sourceUrl": None,
+            "triggeredAt": now.isoformat(timespec="seconds"),
+            "isRead": False,
+        }
+        mock_watchlist.return_value = [{
+            "stockCode": "000021",
+            "stockName": "深科技",
+        }]
+        mock_list_alerts.return_value = [
+            {
+                **common,
+                "id": "reentered",
+                "sourceEventId": (
+                    f"risk:{day}:negative:episode:105157:"
+                    "consecutive_fund_outflow"
+                ),
+                "publishedAt": f"{day} 10:51:57",
+            },
+            {
+                **common,
+                "id": "first",
+                "sourceEventId": (
+                    f"risk:{day}:negative:episode:101400:"
+                    "consecutive_fund_outflow"
+                ),
+                "publishedAt": f"{day} 10:14:00",
+            },
+        ]
+
+        result = alerts_api._watchlist_alerts()
+
+        self.assertEqual(
+            [item["id"] for item in result],
+            ["reentered", "first"],
+        )
+
     @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     @patch.object(alerts_api.database, "get_watchlist")
     @patch.object(alerts_api.alert_repository, "list_alerts")

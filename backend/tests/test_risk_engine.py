@@ -843,6 +843,10 @@ class LinkageRiskTests(unittest.TestCase):
             alert_repository,
             "save_alert_event",
             return_value=(saved_alert, True),
+        ), patch.object(
+            alert_repository,
+            "get_latest_risk_episode_alert",
+            return_value=None,
         ), patch("notification_service.process_new_alert", create=True) as mock_process:
             result = risk_engine.process_linkage_snapshot(
                 linkage,
@@ -1064,6 +1068,43 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(len(alert_repository.list_alerts()), 2)
         self.assertEqual(mock_process.call_count, 2)
 
+    def test_linkage_missing_sector_data_does_not_clear_an_active_episode(self):
+        active = self._linkage_snapshot(
+            "2026-07-15 10:00:00",
+            decline=0.2,
+            advancers=10,
+            fund_rank=2,
+        )
+
+        def unavailable(source_time):
+            return {
+                "symbol": "000725",
+                "stock_name": "京东方A",
+                "source_time": source_time,
+                "fetched_at": source_time.replace(" ", "T") + "+08:00",
+                "sector": {"status": "unavailable"},
+                "overseas": [],
+            }
+
+        reentered = self._linkage_snapshot(
+            "2026-07-15 10:15:00",
+            decline=0.2,
+            advancers=10,
+            fund_rank=2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            for item in (
+                active,
+                unavailable("2026-07-15 10:05:00"),
+                unavailable("2026-07-15 10:10:00"),
+                reentered,
+            ):
+                risk_engine.process_linkage_snapshot(item, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 1)
+        mock_process.assert_called_once()
+
     def test_market_signal_changes_do_not_repeat_inside_same_risk_episode(self):
         first = snapshot(
             symbol="000519",
@@ -1094,6 +1135,104 @@ class SignalSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(len(alert_repository.list_alerts()), 1)
         mock_process.assert_called_once()
+
+    def test_market_same_bucket_refresh_does_not_create_a_second_episode(self):
+        first = snapshot(
+            symbol="000725",
+            stock_name="京东方A",
+            source_time="2026-07-15 09:30:03",
+            fetched_at="2026-07-15T09:30:05+08:00",
+            volume_ratio=2.2,
+        )
+        refreshed = snapshot(
+            symbol="000725",
+            stock_name="京东方A",
+            source_time="2026-07-15 09:30:54",
+            fetched_at="2026-07-15T09:30:56+08:00",
+            volume_ratio=2.2,
+        )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            risk_engine.process_market_snapshot(first, create_alert=True)
+            risk_engine.process_market_snapshot(refreshed, create_alert=False)
+            risk_engine.process_market_snapshot(refreshed, create_alert=True)
+
+        alerts = alert_repository.list_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(mock_process.call_count, 1)
+
+    def test_market_missing_fund_history_does_not_clear_an_active_episode(self):
+        active_history = [
+            {
+                "trade_date": f"2026-07-{day}",
+                "fund_flow": -1.0,
+                "fund_close": 10.0,
+                "close": 10.0,
+            }
+            for day in (13, 14, 15)
+        ]
+
+        def market_snapshot(source_time, verified_history):
+            return snapshot(
+                symbol="000021",
+                stock_name="深科技",
+                source_time=source_time,
+                fetched_at=source_time.replace(" ", "T") + "+08:00",
+                verified_history=verified_history,
+            )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            for item in (
+                market_snapshot("2026-07-15 10:00:00", active_history),
+                market_snapshot("2026-07-15 10:05:00", []),
+                market_snapshot("2026-07-15 10:10:00", []),
+                market_snapshot("2026-07-15 10:15:00", active_history),
+            ):
+                risk_engine.process_market_snapshot(item, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 1)
+        mock_process.assert_called_once()
+
+    def test_market_reentry_requires_two_confirmed_fund_clear_snapshots(self):
+        active_history = [
+            {
+                "trade_date": f"2026-07-{day}",
+                "fund_flow": -1.0,
+                "fund_close": 10.0,
+                "close": 10.0,
+            }
+            for day in (13, 14, 15)
+        ]
+        clear_history = [
+            {
+                "trade_date": f"2026-07-{day}",
+                "fund_flow": flow,
+                "fund_close": 10.0,
+                "close": 10.0,
+            }
+            for day, flow in zip((13, 14, 15), (-1.0, 1.0, -1.0))
+        ]
+
+        def market_snapshot(source_time, verified_history):
+            return snapshot(
+                symbol="000021",
+                stock_name="深科技",
+                source_time=source_time,
+                fetched_at=source_time.replace(" ", "T") + "+08:00",
+                verified_history=verified_history,
+            )
+
+        with patch("notification_service.process_new_alert") as mock_process:
+            for item in (
+                market_snapshot("2026-07-15 10:00:00", active_history),
+                market_snapshot("2026-07-15 10:05:00", clear_history),
+                market_snapshot("2026-07-15 10:10:00", clear_history),
+                market_snapshot("2026-07-15 10:15:00", active_history),
+            ):
+                risk_engine.process_market_snapshot(item, create_alert=True)
+
+        self.assertEqual(len(alert_repository.list_alerts()), 2)
+        self.assertEqual(mock_process.call_count, 2)
 
     def test_snapshot_history_uses_same_time_bucket_and_excludes_current_day(self):
         self.assertTrue(hasattr(alert_repository, "save_signal_snapshot"))
