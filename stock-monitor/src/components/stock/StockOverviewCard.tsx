@@ -5,6 +5,7 @@ import styles from './StockOverviewCard.module.css';
 interface Props {
   data: StockOverview;
   lastRefresh?: Date | null;
+  statusMessage?: string;
   onRefresh?: () => void;
   onWatchlistToggle?: () => void;
 }
@@ -17,7 +18,7 @@ const TURNOVER_LABELS = {
   unavailable: '暂无判断',
 } as const;
 
-export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatchlistToggle }: Props) {
+export default function StockOverviewCard({ data, lastRefresh, statusMessage, onRefresh, onWatchlistToggle }: Props) {
   const isRise = data.changeAmount != null && data.changeAmount > 0;
   const isFall = data.changeAmount != null && data.changeAmount < 0;
   const priceColorClass = isRise ? 'text-rise' : isFall ? 'text-fall' : '';
@@ -103,6 +104,14 @@ export default function StockOverviewCard({ data, lastRefresh, onRefresh, onWatc
           {lastRefresh && (
             <span style={{ fontSize: '12px', color: '#999', marginLeft: '4px' }}>
               页面刷新 {lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+          {statusMessage && (
+            <span
+              title="当前显示上次成功数据"
+              style={{ fontSize: '12px', color: '#b45309', fontWeight: 600 }}
+            >
+              {statusMessage}
             </span>
           )}
           {onRefresh && (

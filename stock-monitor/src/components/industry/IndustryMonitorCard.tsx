@@ -78,6 +78,7 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
         <div className={styles.dimensionMetrics}>
           <span>实际涨跌 <strong>{details.changePercent?.toFixed(2)}%</strong></span>
           <span>触发阈值 <strong>不高于 {details.triggerThreshold?.toFixed(1)}%</strong></span>
+          {details.source && <span>数据口径 <strong>{details.source}</strong></span>}
         </div>
       );
     }
@@ -86,6 +87,7 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
         <div className={styles.dimensionMetrics}>
           <span>上涨 <strong>{details.advancers ?? '-'} 只</strong> / 共 <strong>{details.total ?? '-'} 只</strong></span>
           <span>占比 <strong>{details.ratioPercent?.toFixed(1) ?? '-'}%</strong>，触发阈值低于 {details.triggerThresholdPercent ?? 20}%</span>
+          {details.source && <span>数据口径 <strong>{details.source}</strong></span>}
         </div>
       );
     }
@@ -123,6 +125,7 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
           <span>资金方向 <strong>{details.direction === 'inflow' ? '净流入' : details.direction === 'outflow' ? '净流出' : '暂无判断'}</strong></span>
           <span>同方向板块中排名 <strong>第 {details.rank ?? '-'} / {details.total ?? '-'} 名</strong></span>
           <span>触发阈值 <strong>进入前 {details.triggerRank ?? 5}</strong></span>
+          {details.source && <span>数据口径 <strong>{details.source}</strong></span>}
         </div>
       );
     }
@@ -271,14 +274,19 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
       <div className={styles.content}>
         <div className={styles.row}>
           <div className={styles.label} title="由同一行业行的资金净额和涨跌幅计算，不是上游原始评分">计算热度</div>
-          <div className={styles.valueArea}>
-            <div className={styles.progressTrack}>
-              <div 
-                className={styles.progressFill} 
-                style={{ width: `${data?.heatScore ?? 0}%` }}
-              ></div>
+          <div className={styles.valueWithNote}>
+            <div className={styles.valueArea}>
+              <div className={styles.progressTrack}>
+                <div
+                  className={styles.progressFill}
+                  style={{ width: `${data?.heatScore ?? 0}%` }}
+                ></div>
+              </div>
+              <span className={styles.score}>{data?.heatScore == null ? '暂无数据' : `${data.heatScore}/100`}</span>
             </div>
-            <span className={styles.score}>{data?.heatScore == null ? '暂无数据' : `${data.heatScore}/100`}</span>
+            {data?.heatScoreExplanation && (
+              <div className={styles.dataNote}>{data.heatScoreExplanation}</div>
+            )}
           </div>
         </div>
 
@@ -349,6 +357,11 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
               </div>
             ))}
           </div>
+          {data?.linkageRisk?.sectorRisk?.scopeNote && (
+            <p className={styles.linkageFootnote}>
+              {data.linkageRisk.sectorRisk.scopeNote}
+            </p>
+          )}
           <div className={`${styles.overseasDetail} ${
             data?.linkageRisk?.overseasRisk?.status === 'triggered'
               ? styles.sectorDimensionTriggered

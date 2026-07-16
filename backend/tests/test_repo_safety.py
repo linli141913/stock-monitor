@@ -16,6 +16,52 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("formatOperatingCashFlow", component)
         self.assertIn("暂无数据", component)
 
+    def test_financial_charts_do_not_turn_missing_metrics_into_zero(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/FinancialSummaryTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        for unsafe_expression in (
+            "latest.roe || 0",
+            "latest.grossMargin || 0",
+            "latest.netMargin || 0",
+            "latest.assetLiabilityRatio || 0",
+            "latest.revenueYoy || 0",
+            "map(item => (item.revenue / 100000000)",
+            "map(item => (item.netProfit / 100000000)",
+        ):
+            self.assertNotIn(unsafe_expression, component)
+        self.assertIn("hasCompleteRadarData", component)
+        self.assertIn("缺失指标不按0计算", component)
+        self.assertIn("超出范围会截断", component)
+        self.assertIn("不生成综合评分", component)
+        self.assertIn("item.revenue == null ? null", component)
+        self.assertIn("item.netProfit == null ? null", component)
+
+    def test_silent_quote_refresh_failure_is_visible_to_the_user(self):
+        home_page = (ROOT / "stock-monitor/src/app/page.tsx").read_text(
+            encoding="utf-8"
+        )
+        overview_card = (
+            ROOT / "stock-monitor/src/components/stock/StockOverviewCard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("overviewStatusMessage", home_page)
+        self.assertIn("行情更新失败，当前显示上次成功数据", home_page)
+        self.assertIn("statusMessage={overviewStatusMessage}", home_page)
+        self.assertIn("statusMessage?: string", overview_card)
+        self.assertIn("当前显示上次成功数据", overview_card)
+
+    def test_company_profile_failure_is_not_silently_rendered_as_empty_data(self):
+        home_page = (ROOT / "stock-monitor/src/app/page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("companyError", home_page)
+        self.assertIn("公司资料加载失败", home_page)
+        self.assertIn("公司资料请求失败", home_page)
+        self.assertIn("setCompanyData(null)", home_page)
+
     def test_industry_card_exposes_four_sector_rule_states(self):
         component = (
             ROOT / "stock-monitor/src/components/industry/IndustryMonitorCard.tsx"

@@ -1917,6 +1917,10 @@ class MarketIntegrityTests(unittest.TestCase):
             return_value=[],
         ), patch.object(
             main,
+            "get_market_status_for_symbol",
+            return_value={"marketStatusCode": "trading"},
+        ), patch.object(
+            main,
             "get_extended_risk_inputs",
             return_value={
                 "sector": sector_snapshot,
@@ -1942,6 +1946,8 @@ class MarketIntegrityTests(unittest.TestCase):
         self.assertEqual(fund_details["value"], -0.57)
         self.assertEqual(result["fundFlowSource"], "同花顺行业资金流")
         self.assertEqual(result["industryDataFetchedAt"], "2026-07-16T09:50:00+08:00")
+        self.assertIn("资金净额绝对值", result["heatScoreExplanation"])
+        self.assertIn("不代表看多或看空", result["heatScoreExplanation"])
         mock_extended.assert_called_once()
         mock_direct_industry.assert_not_called()
 
@@ -1954,6 +1960,19 @@ class MarketIntegrityTests(unittest.TestCase):
         self.assertEqual(
             main.find_sina_industry_node(nodes, "光学光电子"),
             "sw2_270300",
+        )
+
+    def test_sina_industry_nodes_reject_ambiguous_fuzzy_match(self):
+        nodes = [
+            "行业分类",
+            [
+                ["电子", "", "sw1_270000", ""],
+                ["消费电子", "", "sw2_270200", ""],
+            ],
+        ]
+
+        self.assertIsNone(
+            main.find_sina_industry_node(nodes, "消费电子元件"),
         )
 
     def test_sina_constituents_exclude_current_stock(self):

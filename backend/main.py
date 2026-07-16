@@ -651,13 +651,20 @@ def find_sina_industry_node(nodes: Any, industry_name: str) -> Optional[str]:
             walk(child)
 
     walk(nodes)
-    for name, node in candidates:
-        if name == industry_name:
-            return node
-    for name, node in candidates:
-        if industry_name in name or name in industry_name:
-            return node
-    return None
+    exact_nodes = list(dict.fromkeys(
+        node for name, node in candidates
+        if name == industry_name
+    ))
+    if len(exact_nodes) == 1:
+        return exact_nodes[0]
+    if len(exact_nodes) > 1:
+        return None
+    fuzzy_nodes = list(dict.fromkeys(
+        node for name, node in candidates
+        if industry_name and name
+        and (industry_name in name or name in industry_name)
+    ))
+    return fuzzy_nodes[0] if len(fuzzy_nodes) == 1 else None
 
 
 def parse_sina_peer_codes(rows: list[dict], symbol: str) -> list[str]:
@@ -1819,6 +1826,7 @@ def get_industry_monitor(symbol: str):
 
     # 行业卡片和联动风险共用同一份板块快照，避免同页方向和金额冲突。
     fallback_heat = None
+    heat_score_explanation = None
     fallback_flow = None
     sector_change = None
     fund_flow_available = False
@@ -1882,6 +1890,11 @@ def get_industry_monitor(symbol: str):
                         int(50 + abs(fallback_flow) * 0.3 + sector_change * 3),
                     ),
                 )
+                heat_score_explanation = (
+                    "计算公式：50 + 行业资金净额绝对值（亿元）×0.3 "
+                    "+ 板块涨跌幅（%）×3，并限制在0到100；"
+                    "仅表示当日资金与价格活跃度，不代表看多或看空"
+                )
             if fallback_flow is not None or sector_change is not None:
                 industry_data_status = "available"
         if industry_data_status != "available":
@@ -1930,6 +1943,7 @@ def get_industry_monitor(symbol: str):
             "industryName": industry_name,
             "heatScore": fallback_heat,
             "heatScoreMethod": "calculated" if fallback_heat is not None else "unavailable",
+            "heatScoreExplanation": heat_score_explanation,
             "sectorChangePercent": sector_change,
             "fundFlow": flow_str,
             "fundFlowTimeScope": describe_undated_fund_flow_scope(
@@ -1970,6 +1984,7 @@ def get_industry_monitor(symbol: str):
         "industryName": industry_name,
         "heatScore": fallback_heat,
         "heatScoreMethod": "calculated" if fallback_heat is not None else "unavailable",
+        "heatScoreExplanation": heat_score_explanation,
         "sectorChangePercent": sector_change,
         "fundFlow": flow_str,
         "fundFlowTimeScope": describe_undated_fund_flow_scope(

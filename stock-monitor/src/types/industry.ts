@@ -38,11 +38,13 @@ export interface LinkageDimensionState {
     value?: number | null;
     rank?: number;
     triggerRank?: number;
+    source?: string;
   };
 }
 
 export interface LinkageRuleState extends LinkageDimensionState {
   dataComplete?: boolean;
+  scopeNote?: string | null;
   dimensions?: {
     decline: LinkageDimensionState;
     breadth: LinkageDimensionState;
@@ -66,6 +68,7 @@ export interface IndustryMonitor {
   industryName: string;
   heatScore: number | null;
   heatScoreMethod?: 'calculated' | 'unavailable';
+  heatScoreExplanation?: string | null;
   sectorChangePercent: number | null;
   fundFlow: string;
   fundFlowTimeScope?: string;

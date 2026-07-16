@@ -553,7 +553,7 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertIsNone(result["leader"])
         self.assertIn("只有1只", result["reason"])
 
-    def test_mixed_industry_company_count_degrades_breadth_and_leader(self):
+    def test_distinct_verified_industry_scopes_are_computed_separately(self):
         result = risk_engine.build_verified_sector_snapshot(
             "光学光电子",
             [{
@@ -570,10 +570,35 @@ class LinkageRiskTests(unittest.TestCase):
             expected_constituents=3,
         )
 
-        self.assertIsNone(result["advancers"])
-        self.assertIsNone(result["leader"])
-        self.assertIn("行业公司家数4", result["reason"])
-        self.assertIn("成分集合3", result["reason"])
+        self.assertEqual(result["advancers"], 2)
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["leader"]["symbol"], "000100")
+        self.assertEqual(result["aggregate_scope"], {
+            "source": "同花顺行业资金流",
+            "company_count": 4,
+        })
+        self.assertEqual(result["constituent_scope"], {
+            "source": "新浪行业成分 + 腾讯实时行情",
+            "expected_count": 3,
+            "valid_quote_count": 3,
+        })
+        self.assertIn("分别计算，不混算", result["scope_note"])
+
+        evaluated = risk_engine.evaluate_linkage_risk({
+            "sector": result,
+            "overseas": [],
+        })
+        dimensions = evaluated["sectorRisk"]["dimensions"]
+        self.assertEqual(dimensions["breadth"]["status"], "no_signal")
+        self.assertEqual(dimensions["leader"]["status"], "no_signal")
+        self.assertEqual(
+            dimensions["breadth"]["details"]["source"],
+            "新浪行业成分 + 腾讯实时行情",
+        )
+        self.assertEqual(
+            dimensions["fundFlow"]["details"]["source"],
+            "同花顺行业资金流",
+        )
 
     def test_sector_snapshot_uses_complete_constituents_and_real_flow_ranking(self):
         sector_rows = [
@@ -626,6 +651,31 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(dimensions["leader"]["status"], "unavailable")
         self.assertEqual(dimensions["fundFlow"]["status"], "triggered")
         self.assertIs(incomplete_result["sectorRisk"]["dataComplete"], False)
+
+    def test_duplicate_constituent_quotes_never_count_as_complete_coverage(self):
+        result = risk_engine.build_verified_sector_snapshot(
+            "光学光电子",
+            [{
+                "行业": "光学光电子",
+                "行业-涨跌幅": -1.0,
+                "净额": "-2.0亿",
+                "公司家数": 3,
+            }],
+            [
+                {"symbol": "000725", "change_percent": -1.0, "market_cap": 1000},
+                {"symbol": "000725", "change_percent": -1.1, "market_cap": 1000},
+                {"symbol": "000100", "change_percent": 1.0, "market_cap": 1200},
+            ],
+            expected_constituents=3,
+        )
+
+        self.assertIsNone(result["advancers"])
+        self.assertIsNone(result["leader"])
+        self.assertEqual(
+            result["constituent_scope"]["valid_quote_count"],
+            2,
+        )
+        self.assertIn("去重后仅返回2/3只", result["reason"])
 
     def test_real_fund_flow_remains_independent_when_constituents_are_incomplete(self):
         sector = risk_engine.build_verified_sector_snapshot(

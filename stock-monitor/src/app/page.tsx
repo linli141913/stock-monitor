@@ -108,9 +108,11 @@ function HomeContent() {
   const [overviewData, setOverviewData] = useState<StockOverview | null>(null);
   const [klineData, setKlineData] = useState<KlineItem[]>([]);
   const [companyData, setCompanyData] = useState<CompanyDataResponse | null>(null);
+  const [companyError, setCompanyError] = useState('');
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [klineLoading, setKlineLoading] = useState(true);
   const [overviewError, setOverviewError] = useState('');
+  const [overviewStatusMessage, setOverviewStatusMessage] = useState('');
   const [klineError, setKlineError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [industryLoading, setIndustryLoading] = useState(true);
@@ -180,6 +182,7 @@ function HomeContent() {
       };
       
       setOverviewError('');
+      setOverviewStatusMessage('');
       setOverviewData(overviewResult);
       setLastRefresh(new Date());
 
@@ -211,7 +214,12 @@ function HomeContent() {
       });
 
     } catch (err: unknown) {
-      if (!isSilent) setOverviewError(err instanceof Error ? err.message : '行情获取失败');
+      if (isSilent) {
+        setOverviewStatusMessage('行情更新失败，当前显示上次成功数据');
+      } else {
+        setOverviewError(err instanceof Error ? err.message : '行情获取失败');
+        setOverviewStatusMessage('');
+      }
     } finally {
       overviewRequestInFlight.current = false;
       if (!isSilent) setOverviewLoading(false);
@@ -250,12 +258,16 @@ function HomeContent() {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         cache: 'no-store'
       });
-      if (res.ok) {
-        const data = await res.json() as CompanyDataResponse;
-        setCompanyData(data);
+      if (!res.ok) {
+        const errorPayload = await res.json().catch(() => ({})) as ErrorResponse;
+        throw new Error(errorPayload.detail || `公司资料请求失败 (${res.status})`);
       }
-    } catch (err) {
-      console.error('Failed to fetch company info', err);
+      const data = await res.json() as CompanyDataResponse;
+      setCompanyData(data);
+      setCompanyError('');
+    } catch (err: unknown) {
+      setCompanyData(null);
+      setCompanyError(err instanceof Error ? err.message : '公司资料加载失败');
     }
   }, [stockCode]);
 
@@ -311,6 +323,7 @@ function HomeContent() {
 
   const handleOverviewRefresh = () => {
     setOverviewError('');
+    setOverviewStatusMessage('');
     void fetchOverview(false);
   };
 
@@ -397,6 +410,7 @@ function HomeContent() {
             <StockOverviewCard
               data={overviewData}
               lastRefresh={lastRefresh}
+              statusMessage={overviewStatusMessage}
               onRefresh={handleOverviewRefresh}
               onWatchlistToggle={handleIndustryRefresh}
             />
@@ -418,6 +432,12 @@ function HomeContent() {
             <div className={styles.loadingContainer}>K 线加载中...</div>
           )}
 
+          {companyError && (
+            <div className={styles.errorContainer}>
+              ⚠️ 公司资料加载失败：{companyError}
+              <button onClick={() => void fetchCompanyInfo()} style={{ marginLeft: 12, cursor: 'pointer' }}>重试</button>
+            </div>
+          )}
           <StockInfoTabs
             stockCode={stockCode}
             companyInfo={companyData?.companyInfo || EMPTY_COMPANY_INFO}

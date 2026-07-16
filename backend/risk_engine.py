@@ -281,10 +281,17 @@ def build_verified_sector_snapshot(
             }
         matched = fuzzy_matches[0]
 
-    valid_quotes = [
+    raw_valid_quotes = [
         row for row in quote_rows
-        if _number(row.get("change_percent")) is not None
+        if str(row.get("symbol") or "").strip()
+        and _number(row.get("change_percent")) is not None
     ]
+    valid_quotes_by_symbol = {
+        str(row.get("symbol") or "").strip().lower(): row
+        for row in raw_valid_quotes
+    }
+    valid_quotes = list(valid_quotes_by_symbol.values())
+    has_duplicate_quotes = len(raw_valid_quotes) != len(valid_quotes)
     reported_company_count_value = _number(matched.get("公司家数"))
     reported_company_count = (
         int(reported_company_count_value)
@@ -292,21 +299,29 @@ def build_verified_sector_snapshot(
         and reported_company_count_value > 0
         else None
     )
+    aggregate_scope = {
+        "source": "同花顺行业资金流",
+        "company_count": reported_company_count,
+    }
+    constituent_scope = {
+        "source": "新浪行业成分 + 腾讯实时行情",
+        "expected_count": expected_constituents,
+        "valid_quote_count": len(valid_quotes),
+    }
     quotes_complete = (
         expected_constituents > 1
-        and reported_company_count == expected_constituents
+        and not has_duplicate_quotes
         and len(valid_quotes) == expected_constituents
     )
     if expected_constituents <= 0:
         constituent_reason = "板块成分抓取为空，上涨家数和龙头暂无判断"
     elif expected_constituents == 1:
         constituent_reason = "板块成分只有1只，上涨家数和龙头暂无判断"
-    elif reported_company_count is None:
-        constituent_reason = "行业公司家数缺失，无法确认成分口径一致"
-    elif reported_company_count != expected_constituents:
+    elif has_duplicate_quotes:
         constituent_reason = (
-            f"行业公司家数{reported_company_count}与成分集合"
-            f"{expected_constituents}不一致，不跨口径计算上涨家数和龙头"
+            f"成分行情存在重复代码，去重后仅返回"
+            f"{len(valid_quotes)}/{expected_constituents}只，"
+            "上涨家数和代表股暂无判断"
         )
     elif len(valid_quotes) != expected_constituents:
         constituent_reason = (
@@ -315,6 +330,18 @@ def build_verified_sector_snapshot(
         )
     else:
         constituent_reason = None
+    scope_note = None
+    if quotes_complete:
+        aggregate_count_text = (
+            f"{reported_company_count}家公司"
+            if reported_company_count is not None
+            else "上游公司家数未提供"
+        )
+        scope_note = (
+            f"板块涨跌和资金采用同花顺行业资金流（{aggregate_count_text}）；"
+            f"上涨家数和代表股采用新浪行业成分 + 腾讯实时行情"
+            f"（{expected_constituents}只完整样本），分别计算，不混算"
+        )
     advancers = None
     total = None
     leader = None
@@ -387,6 +414,9 @@ def build_verified_sector_snapshot(
         "leaders": leaders,
         "fund_flow": fund_flow,
         "reason": constituent_reason,
+        "aggregate_scope": aggregate_scope,
+        "constituent_scope": constituent_scope,
+        "scope_note": scope_note,
     }
 
 
@@ -612,6 +642,13 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     signals = []
     sector = snapshot.get("sector") or {}
     constituent_reason = str(sector.get("reason") or "").strip()
+    aggregate_scope = sector.get("aggregate_scope") or {}
+    constituent_scope = sector.get("constituent_scope") or {}
+    aggregate_source = str(aggregate_scope.get("source") or "").strip()
+    constituent_source = str(
+        constituent_scope.get("source") or ""
+    ).strip()
+    constituent_label = constituent_source or "板块"
     sector_dimensions = {
         "decline": {
             "status": "unavailable",
@@ -650,6 +687,7 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "details": {
                     "changePercent": change_percent,
                     "triggerThreshold": -3.0,
+                    **({"source": aggregate_source} if aggregate_source else {}),
                 },
             }
             if decline_triggered:
@@ -664,10 +702,15 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         if advancers is not None and total is not None and total > 0:
             ratio = advancers / total
             breadth_triggered = ratio < 0.2
+            breadth_prefix = (
+                f"{constituent_label}{int(total)}只完整样本中，"
+            )
             breadth_reason = (
-                f"板块上涨家数占比 {ratio * 100:.1f}%"
+                f"{breadth_prefix}上涨{int(advancers)}只，"
+                f"占比 {ratio * 100:.1f}%"
                 if breadth_triggered
-                else f"板块上涨家数占比 {ratio * 100:.1f}%，未低于20%"
+                else f"{breadth_prefix}上涨{int(advancers)}只，"
+                f"占比 {ratio * 100:.1f}%，未低于20%"
             )
             sector_dimensions["breadth"] = {
                 "status": "triggered" if breadth_triggered else "no_signal",
@@ -678,6 +721,7 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                     "total": int(total),
                     "ratioPercent": round(ratio * 100, 1),
                     "triggerThresholdPercent": 20.0,
+                    **({"source": constituent_source} if constituent_source else {}),
                 },
             }
             if breadth_triggered:
@@ -695,14 +739,16 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             )
             if leader_triggered:
                 leader_reason = (
-                    f"板块龙头{leader.get('name') or leader.get('symbol') or ''}"
+                    f"{constituent_label}代表股"
+                    f"{leader.get('name') or leader.get('symbol') or ''}"
                     f"下跌 {abs(leader_change):.2f}%"
                     if leader_change is not None
-                    else "板块龙头触及跌停"
+                    else f"{constituent_label}代表股触及跌停"
                 )
             else:
                 leader_reason = (
-                    f"板块龙头{leader.get('name') or leader.get('symbol') or ''}"
+                    f"{constituent_label}代表股"
+                    f"{leader.get('name') or leader.get('symbol') or ''}"
                     f"涨跌幅 {leader_change:+.2f}%，未达到下跌8%或跌停阈值"
                 )
             sector_dimensions["leader"] = {
@@ -710,9 +756,12 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "label": "已触发" if leader_triggered else "未触发",
                 "reason": leader_reason,
                 "details": {
-                    "selectionMethod": "按本轮完整成分行情中的市值从高到低排序",
+                    "selectionMethod": (
+                        f"{constituent_label}，按本轮完整样本总市值从高到低排序"
+                    ),
                     "triggerThresholdPercent": -8.0,
                     "leaders": sector.get("leaders") or [leader],
+                    **({"source": constituent_source} if constituent_source else {}),
                 },
             }
             if leader_triggered:
@@ -745,6 +794,7 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                     "rank": int(rank),
                     "total": int(rank_total),
                     "triggerRank": 5,
+                    **({"source": aggregate_source} if aggregate_source else {}),
                 },
             }
             if flow_triggered:
@@ -774,6 +824,7 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "dataComplete": sector_complete,
         "dimensions": sector_dimensions,
+        "scopeNote": sector.get("scope_note"),
     }
 
     overseas_evaluated = False

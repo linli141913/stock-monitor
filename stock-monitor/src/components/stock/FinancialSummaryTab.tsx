@@ -6,18 +6,18 @@ import styles from './FinancialSummaryTab.module.css';
 interface ReportData {
   reportDate: string;
   reportName: string;
-  revenue: number;
-  revenueYoy: number;
-  netProfit: number;
-  netProfitYoy: number;
+  revenue: number | null;
+  revenueYoy: number | null;
+  netProfit: number | null;
+  netProfitYoy: number | null;
   deductNetProfit: number | null;
   deductNetProfitYoy: number | null;
-  grossMargin: number;
-  netMargin: number;
-  roe: number;
-  assetLiabilityRatio: number;
+  grossMargin: number | null;
+  netMargin: number | null;
+  roe: number | null;
+  assetLiabilityRatio: number | null;
   operateCashFlow: number | null;
-  eps: number;
+  eps: number | null;
 }
 
 interface FinanceResponse {
@@ -97,13 +97,14 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
   };
 
   // 格式化百分比
-  const formatPct = (val?: number) => {
+  const formatPct = (val?: number | null) => {
     if (val === undefined || val === null) return '-';
     return val.toFixed(2) + '%';
   };
 
   const renderYoy = (val?: number | null) => {
     if (val === undefined || val === null) return <span>-</span>;
+    if (val === 0) return <span>0.00%</span>;
     const isUp = val > 0;
     return (
       <span className={isUp ? styles.textRise : styles.textFall}>
@@ -111,6 +112,26 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
       </span>
     );
   };
+
+  const radarMetrics = [
+    latest.roe,
+    latest.grossMargin,
+    latest.netMargin,
+    latest.assetLiabilityRatio,
+    latest.revenueYoy,
+  ];
+  const hasCompleteRadarData = radarMetrics.every(
+    (value): value is number => value !== null && value !== undefined,
+  );
+  const radarValues = hasCompleteRadarData
+    ? [
+        Math.max(0, Math.min(latest.roe as number, 30)),
+        Math.max(0, Math.min(latest.grossMargin as number, 60)),
+        Math.max(0, Math.min(latest.netMargin as number, 40)),
+        Math.max(0, 100 - (latest.assetLiabilityRatio as number)),
+        Math.max(0, Math.min(latest.revenueYoy as number, 50)),
+      ]
+    : [];
 
   return (
     <div className={styles.container}>
@@ -168,13 +189,14 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
               { type: 'value', name: '利润', splitLine: { show: false } }
             ],
             series: [
-              { name: '营业收入(亿)', type: 'bar', data: [...yearly].reverse().map(item => (item.revenue / 100000000).toFixed(2)), itemStyle: { color: '#3b82f6' } },
-              { name: '归母净利润(亿)', type: 'line', yAxisIndex: 1, data: [...yearly].reverse().map(item => (item.netProfit / 100000000).toFixed(2)), itemStyle: { color: '#10b981' }, smooth: true }
+              { name: '营业收入(亿)', type: 'bar', data: [...yearly].reverse().map(item => item.revenue == null ? null : Number((item.revenue / 100000000).toFixed(2))), itemStyle: { color: '#3b82f6' } },
+              { name: '归母净利润(亿)', type: 'line', yAxisIndex: 1, data: [...yearly].reverse().map(item => item.netProfit == null ? null : Number((item.netProfit / 100000000).toFixed(2))), itemStyle: { color: '#10b981' }, smooth: true }
             ]
           }} style={{ height: '300px' }} />
         </div>
         <div className={styles.chartCard}>
-          <ReactECharts option={{
+          {hasCompleteRadarData ? <>
+            <ReactECharts option={{
             title: { text: '杜邦分析核心能力矩阵', textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
             tooltip: {},
             radar: {
@@ -193,13 +215,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
               type: 'radar',
               data: [
                 {
-                  value: [
-                    Math.max(0, Math.min(latest.roe || 0, 30)),
-                    Math.max(0, Math.min(latest.grossMargin || 0, 60)),
-                    Math.max(0, Math.min(latest.netMargin || 0, 40)),
-                    Math.max(0, 100 - (latest.assetLiabilityRatio || 0)),
-                    Math.max(0, Math.min(latest.revenueYoy || 0, 50))
-                  ],
+                  value: radarValues,
                   name: '最新一期',
                   areaStyle: { color: 'rgba(59, 130, 246, 0.2)' },
                   lineStyle: { color: '#3b82f6' },
@@ -207,7 +223,15 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
                 }
               ]
             }]
-          }} style={{ height: '300px' }} />
+            }} style={{ height: '300px' }} />
+            <div className={styles.meta}>
+              雷达图按固定范围展示，超出范围会截断；实际数值以表格为准，不生成综合评分。
+            </div>
+          </> : (
+            <div className={styles.infoContainer} style={{ minHeight: '300px' }}>
+              杜邦分析数据不完整，缺失指标不按0计算；请以已披露财务表格为准。
+            </div>
+          )}
         </div>
       </div>
 
