@@ -586,6 +586,46 @@ def classify_report_type_by_date(date_text: str) -> tuple[str, str]:
     return f"{year}财报", "财报"
 
 
+def select_latest_financial_record(records: list[dict]) -> dict:
+    """按报告期选择最新财务记录，不依赖上游默认排序。"""
+    valid_records = [
+        record for record in records
+        if isinstance(record, dict) and record.get("REPORTDATE")
+    ]
+    if not valid_records:
+        return {}
+    return max(valid_records, key=lambda record: str(record["REPORTDATE"])[:10])
+
+
+def format_a_share_finance_reports(
+    reports_list: list[dict],
+    operating_cash_flow_by_date: dict[str, Optional[float]],
+) -> list[dict]:
+    """合并东方财富财务摘要与现金流量表中的直接披露总额。"""
+    formatted = []
+    for report in reports_list:
+        report_date = str(report.get("REPORT_DATE", "")).split(" ")[0]
+        formatted.append({
+            "reportDate": report_date,
+            "reportName": report.get("REPORT_DATE_NAME", ""),
+            "reportType": report.get("REPORT_TYPE", ""),
+            "revenue": report.get("TOTALOPERATEREVE"),
+            "revenueYoy": report.get("TOTALOPERATEREVETZ"),
+            "netProfit": report.get("PARENTNETPROFIT"),
+            "netProfitYoy": report.get("PARENTNETPROFITTZ"),
+            "deductNetProfit": report.get("KCFJCXSYJLR"),
+            "deductNetProfitYoy": report.get("KCFJCXSYJLRTZ"),
+            "grossMargin": report.get("XSMLL"),
+            "netMargin": report.get("XSJLL"),
+            "roe": report.get("ROEJQ"),
+            "assetLiabilityRatio": report.get("ZCFZL"),
+            "operateCashFlow": operating_cash_flow_by_date.get(report_date),
+            "eps": report.get("EPSJB"),
+        })
+    formatted.sort(key=lambda item: item["reportDate"], reverse=True)
+    return formatted
+
+
 def parse_sina_money_flow(payload: dict) -> Optional[float]:
     """解析新浪资金流接口报告的主力净额；缺失时保持 None。"""
     return parse_optional_float(payload.get("netamount"))
@@ -833,13 +873,17 @@ def get_verified_sector_risk_snapshot(
         import akshare as ak
 
         sector_rows = ak.stock_fund_flow_industry(symbol="即时").to_dict("records")
-        constituents = list(dict.fromkeys([
-            symbol,
-            *get_a_share_industry_peer_codes(symbol, industry_name),
-        ]))
-        if not constituents:
-            raise LookupError("未匹配到真实板块成分")
-        quotes = get_constituent_quote_snapshot(constituents)
+        peer_codes = get_a_share_industry_peer_codes(symbol, industry_name)
+        constituents = (
+            list(dict.fromkeys([symbol, *peer_codes]))
+            if peer_codes
+            else []
+        )
+        quotes = (
+            get_constituent_quote_snapshot(constituents)
+            if len(constituents) > 1
+            else []
+        )
         return risk_engine.build_verified_sector_snapshot(
             industry_name,
             sector_rows,
@@ -854,6 +898,7 @@ def get_verified_sector_risk_snapshot(
             "advancers": None,
             "total": None,
             "leader": None,
+            "leaders": None,
             "fund_flow": {"verified": False},
             "reason": f"板块真实数据获取失败：{type(exc).__name__}",
         }
@@ -950,10 +995,27 @@ def get_cached_linkage_risk(symbol: str) -> Optional[dict]:
             if linkage_snapshot:
                 return risk_engine.evaluate_linkage_risk(linkage_snapshot)
     trade_date = datetime.now(market_calendar.SHANGHAI_TZ).strftime("%Y-%m-%d")
-    return alert_repository.get_latest_linkage_state(
+    record = alert_repository.get_latest_linkage_record(
         normalized_symbol,
         trade_date,
     )
+    if record is None:
+        return None
+    linkage_risk = record.get("risk")
+    linkage_snapshot = record.get("snapshot")
+    dimensions = ((linkage_risk or {}).get("sectorRisk") or {}).get("dimensions") or {}
+    needs_detail_enrichment = any(
+        isinstance(item, dict)
+        and item.get("status") != "unavailable"
+        and not isinstance(item.get("details"), dict)
+        for item in dimensions.values()
+    )
+    if needs_detail_enrichment and isinstance(linkage_snapshot, dict):
+        return risk_engine.evaluate_linkage_risk({
+            "sector": linkage_snapshot.get("sector") or {"status": "unavailable"},
+            "overseas": linkage_snapshot.get("overseas") or [],
+        })
+    return linkage_risk
 
 
 # ── 接口实现 ──────────────────────────────────────────────────
@@ -1588,7 +1650,12 @@ def get_company_info(symbol: str):
         pass
 
     # 2. 抓取财务摘要
-    finance_url = f"https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_LICO_FN_CPD&columns=ALL&filter=(SECURITY_CODE%3D%22{symbol}%22)"
+    finance_url = (
+        "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+        "?reportName=RPT_LICO_FN_CPD&columns=ALL"
+        f"&filter=(SECURITY_CODE%3D%22{symbol}%22)"
+        "&sortColumns=REPORTDATE&sortTypes=-1&pageNumber=1&pageSize=8"
+    )
     financial_data = {
         "reportPeriod": "-",
         "revenue": "-", "revenueYoy": "-", "netProfit": "-", "netProfitYoy": "-",
@@ -1598,7 +1665,7 @@ def get_company_info(symbol: str):
         f_resp = requests.get(finance_url, headers=headers, timeout=5)
         f_json = f_resp.json()
         if f_json and f_json.get("result") and f_json["result"].get("data"):
-            f_data = f_json["result"]["data"][0]
+            f_data = select_latest_financial_record(f_json["result"]["data"])
             
             financial_data["reportPeriod"] = f_data.get("REPORTDATE", "-").split(" ")[0]
             financial_data["revenue"] = format_financial_money(f_data.get("TOTAL_OPERATE_INCOME"))
@@ -2068,6 +2135,13 @@ def get_finance_data(symbol: str):
         # type=1: 按年度 (专门获取最近的年报)
         url_all = f"https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={secucode}"
         url_year = f"https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=1&code={secucode}"
+        cash_flow_url = (
+            "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+            "?reportName=RPT_DMSK_FN_CASHFLOW"
+            "&columns=SECUCODE,REPORT_DATE,NETCASH_OPERATE"
+            f"&filter=(SECUCODE%3D%22{secucode}%22)"
+            "&pageNumber=1&pageSize=20&sortTypes=-1&sortColumns=REPORT_DATE"
+        )
         
         try:
             resp_all = requests.get(url_all, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
@@ -2075,62 +2149,37 @@ def get_finance_data(symbol: str):
             
             resp_year = requests.get(url_year, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
             reports_year = resp_year.json().get("data", [])
+
+            operating_cash_flow_by_date = {}
+            try:
+                resp_cash_flow = requests.get(
+                    cash_flow_url,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=5,
+                )
+                cash_flow_rows = (
+                    (resp_cash_flow.json().get("result") or {}).get("data") or []
+                )
+                operating_cash_flow_by_date = {
+                    str(row.get("REPORT_DATE", "")).split(" ")[0]:
+                        parse_optional_float(row.get("NETCASH_OPERATE"))
+                    for row in cash_flow_rows
+                    if row.get("REPORT_DATE")
+                }
+            except Exception as exc:
+                print("A-share operating cash flow fetch error:", exc)
             
             if not reports_all:
                 raise HTTPException(status_code=404, detail="暂无财报数据")
                 
-            def format_reports(reports_list):
-                formatted = []
-                for r in reports_list:
-                    # 核心数据
-                    revenue = r.get("TOTALOPERATEREVE")
-                    revenue_yoy = r.get("TOTALOPERATEREVETZ")
-                    
-                    net_profit = r.get("PARENTNETPROFIT")
-                    net_profit_yoy = r.get("PARENTNETPROFITTZ")
-                    
-                    deduct_net_profit = r.get("KCFJCXSYJLR")
-                    deduct_net_profit_yoy = r.get("KCFJCXSYJLRTZ")
-                    
-                    gross_margin = r.get("XSMLL")
-                    net_margin = r.get("XSJLL")
-                    roe = r.get("ROEJQ")
-                    asset_liability_ratio = r.get("ZCFZL")
-                    
-                    eps = r.get("EPSJB")
-                    mgjyxjje = r.get("MGJYXJJE")
-                    operate_cash_flow = None
-                    if eps and mgjyxjje and net_profit:
-                        shares = net_profit / eps
-                        operate_cash_flow = shares * mgjyxjje
-                    
-                    report_date = r.get("REPORT_DATE", "").split(" ")[0]
-                    report_type = r.get("REPORT_TYPE", "")
-                    report_date_name = r.get("REPORT_DATE_NAME", "")
-                    
-                    formatted.append({
-                        "reportDate": report_date,
-                        "reportName": report_date_name, 
-                        "reportType": report_type,
-                        "revenue": revenue,
-                        "revenueYoy": revenue_yoy,
-                        "netProfit": net_profit,
-                        "netProfitYoy": net_profit_yoy,
-                        "deductNetProfit": deduct_net_profit,
-                        "deductNetProfitYoy": deduct_net_profit_yoy,
-                        "grossMargin": gross_margin,
-                        "netMargin": net_margin,
-                        "roe": roe,
-                        "assetLiabilityRatio": asset_liability_ratio,
-                        "operateCashFlow": operate_cash_flow,
-                        "eps": eps
-                    })
-                # 确保日期倒序
-                formatted.sort(key=lambda x: x["reportDate"], reverse=True)
-                return formatted
-
-            formatted_all = format_reports(reports_all)
-            formatted_year = format_reports(reports_year)
+            formatted_all = format_a_share_finance_reports(
+                reports_all,
+                operating_cash_flow_by_date,
+            )
+            formatted_year = format_a_share_finance_reports(
+                reports_year,
+                operating_cash_flow_by_date,
+            )
             
             latest_report = formatted_all[0] if formatted_all else None
             

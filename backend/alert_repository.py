@@ -594,6 +594,14 @@ def get_latest_linkage_state(
     symbol: str,
     trade_date: str,
 ) -> Optional[Dict[str, Any]]:
+    record = get_latest_linkage_record(symbol, trade_date)
+    return record.get("risk") if record else None
+
+
+def get_latest_linkage_record(
+    symbol: str,
+    trade_date: str,
+) -> Optional[Dict[str, Any]]:
     init_alert_tables()
     conn = _connect()
     rows = conn.execute('''
@@ -606,7 +614,15 @@ def get_latest_linkage_state(
         details = _decode_snapshot_details(row["signals_json"])
         linkage_risk = details.get("linkageRisk")
         if isinstance(linkage_risk, dict):
-            return linkage_risk
+            linkage_snapshot = details.get("linkageSnapshot")
+            return {
+                "risk": linkage_risk,
+                "snapshot": (
+                    linkage_snapshot
+                    if isinstance(linkage_snapshot, dict)
+                    else None
+                ),
+            }
     return None
 
 

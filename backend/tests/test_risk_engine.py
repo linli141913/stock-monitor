@@ -324,6 +324,65 @@ class RiskEngineTests(unittest.TestCase):
 
 
 class LinkageRiskTests(unittest.TestCase):
+    def test_cached_legacy_linkage_is_enriched_from_its_verified_raw_snapshot(self):
+        legacy_risk = {
+            "riskStatus": "warning",
+            "priority": "P2",
+            "direction": "negative",
+            "sectorRisk": {
+                "status": "triggered",
+                "label": "已触发",
+                "dimensions": {
+                    "breadth": {
+                        "status": "triggered",
+                        "label": "已触发",
+                        "reason": "板块上涨家数占比 15.0%",
+                    },
+                },
+            },
+            "overseasRisk": {"status": "unavailable", "label": "暂无判断"},
+        }
+        raw_snapshot = {
+            "sector": {
+                "status": "available",
+                "name": "光学光电子",
+                "change_percent": -3.2,
+                "advancers": 3,
+                "total": 20,
+                "leader": {
+                    "symbol": "000100",
+                    "name": "TCL科技",
+                    "change_percent": -8.3,
+                    "is_limit_down": False,
+                },
+                "fund_flow": {
+                    "verified": True,
+                    "direction": "outflow",
+                    "value": -12.0,
+                    "rank": 2,
+                    "total": 40,
+                },
+            },
+            "overseas": [],
+        }
+        main._EXTENDED_RISK_CACHE = {}
+        with patch.object(
+            main.alert_repository,
+            "get_latest_linkage_record",
+            return_value={"risk": legacy_risk, "snapshot": raw_snapshot},
+            create=True,
+        ):
+            result = main.get_cached_linkage_risk("000725")
+
+        self.assertEqual(
+            result["sectorRisk"]["dimensions"]["breadth"]["details"]["advancers"],
+            3,
+        )
+        self.assertEqual(
+            result["sectorRisk"]["dimensions"]["leader"]["details"]["leaders"][0]["name"],
+            "TCL科技",
+        )
+
     def test_overseas_mapping_uses_exact_industry_and_business_not_tech_similarity(self):
         panel_mapping = risk_engine.build_exact_overseas_mappings(
             {
@@ -446,10 +505,80 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(rows[-1]["close"], 9.7)
         self.assertIsNone(rows[-1]["fund_flow"])
 
+    def test_empty_peer_fetch_does_not_treat_current_stock_as_complete_sector(self):
+        sector_table = MagicMock()
+        sector_table.to_dict.return_value = [{
+            "行业": "军工装备",
+            "行业-涨跌幅": -0.2,
+            "净额": "-23.81亿",
+            "公司家数": 82,
+        }]
+        with patch(
+            "akshare.stock_fund_flow_industry",
+            return_value=sector_table,
+        ), patch.object(
+            main,
+            "get_a_share_industry_peer_codes",
+            return_value=[],
+        ), patch.object(
+            main,
+            "get_constituent_quote_snapshot",
+        ) as mock_quotes:
+            result = main.get_verified_sector_risk_snapshot("000519", "军工装备")
+
+        mock_quotes.assert_not_called()
+        self.assertIsNone(result["advancers"])
+        self.assertIsNone(result["leader"])
+        self.assertTrue(result["fund_flow"]["verified"])
+
+    def test_single_current_stock_is_never_a_complete_sector(self):
+        result = risk_engine.build_verified_sector_snapshot(
+            "消费电子",
+            [{
+                "行业": "消费电子",
+                "行业-涨跌幅": -1.0,
+                "净额": "-2.0亿",
+                "公司家数": 1,
+            }],
+            [{
+                "symbol": "000021",
+                "name": "深科技",
+                "change_percent": -2.0,
+                "market_cap": 500.0,
+            }],
+            expected_constituents=1,
+        )
+
+        self.assertIsNone(result["advancers"])
+        self.assertIsNone(result["leader"])
+        self.assertIn("只有1只", result["reason"])
+
+    def test_mixed_industry_company_count_degrades_breadth_and_leader(self):
+        result = risk_engine.build_verified_sector_snapshot(
+            "光学光电子",
+            [{
+                "行业": "光学光电子",
+                "行业-涨跌幅": -2.0,
+                "净额": "-12.0亿",
+                "公司家数": 4,
+            }],
+            [
+                {"symbol": "000725", "change_percent": -2.0, "market_cap": 1000},
+                {"symbol": "000100", "change_percent": 1.0, "market_cap": 1200},
+                {"symbol": "600707", "change_percent": 2.0, "market_cap": 300},
+            ],
+            expected_constituents=3,
+        )
+
+        self.assertIsNone(result["advancers"])
+        self.assertIsNone(result["leader"])
+        self.assertIn("行业公司家数4", result["reason"])
+        self.assertIn("成分集合3", result["reason"])
+
     def test_sector_snapshot_uses_complete_constituents_and_real_flow_ranking(self):
         sector_rows = [
             {"行业": "汽车整车", "行业-涨跌幅": 1.0, "净额": "5.0亿"},
-            {"行业": "光学光电子", "行业-涨跌幅": -3.2, "净额": "-12.0亿"},
+            {"行业": "光学光电子", "行业-涨跌幅": -3.2, "净额": "-12.0亿", "公司家数": 3},
             {"行业": "消费电子", "行业-涨跌幅": -1.0, "净额": "-6.0亿"},
         ]
         quotes = [
@@ -475,10 +604,16 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(complete["advancers"], 0)
         self.assertEqual(complete["total"], 3)
         self.assertEqual(complete["leader"]["symbol"], "000100")
+        self.assertEqual(
+            [item["symbol"] for item in complete["leaders"]],
+            ["000100", "000725", "600707"],
+        )
+        self.assertEqual(complete["leaders"][0]["market_cap"], 1200.0)
         self.assertEqual(complete["fund_flow"]["direction"], "outflow")
         self.assertEqual(complete["fund_flow"]["rank"], 1)
         self.assertIsNone(incomplete["advancers"])
         self.assertIsNone(incomplete["leader"])
+        self.assertIsNone(incomplete["leaders"])
 
         incomplete_result = risk_engine.evaluate_linkage_risk({
             "sector": incomplete,
@@ -491,6 +626,41 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(dimensions["leader"]["status"], "unavailable")
         self.assertEqual(dimensions["fundFlow"]["status"], "triggered")
         self.assertIs(incomplete_result["sectorRisk"]["dataComplete"], False)
+
+    def test_real_fund_flow_remains_independent_when_constituents_are_incomplete(self):
+        sector = risk_engine.build_verified_sector_snapshot(
+            "消费电子",
+            [
+                {"行业": "消费电子", "行业-涨跌幅": -1.0, "净额": "-12.0亿", "公司家数": 96},
+                {"行业": "光学光电子", "行业-涨跌幅": -0.5, "净额": "-6.0亿", "公司家数": 107},
+            ],
+            [{
+                "symbol": "000021",
+                "name": "深科技",
+                "change_percent": -2.0,
+                "market_cap": 500.0,
+            }],
+            expected_constituents=1,
+        )
+
+        result = risk_engine.evaluate_linkage_risk({
+            "sector": sector,
+            "overseas": [],
+        })
+
+        self.assertEqual(
+            [signal["code"] for signal in result["signals"]],
+            ["sector_fund_outflow_top"],
+        )
+        self.assertEqual(result["priority"], "P3")
+        self.assertEqual(
+            result["sectorRisk"]["dimensions"]["breadth"]["status"],
+            "unavailable",
+        )
+        self.assertEqual(
+            result["sectorRisk"]["dimensions"]["leader"]["status"],
+            "unavailable",
+        )
 
     def test_sector_rules_use_verified_decline_breadth_leader_and_flow_rank(self):
         linkage = {
@@ -510,6 +680,24 @@ class LinkageRiskTests(unittest.TestCase):
                     "change_percent": -8.3,
                     "is_limit_down": False,
                 },
+                "leaders": [
+                    {
+                        "rank": 1,
+                        "symbol": "000100",
+                        "name": "TCL科技",
+                        "market_cap": 1200.0,
+                        "change_percent": -8.3,
+                        "is_limit_down": False,
+                    },
+                    {
+                        "rank": 2,
+                        "symbol": "000725",
+                        "name": "京东方A",
+                        "market_cap": 1000.0,
+                        "change_percent": -3.2,
+                        "is_limit_down": False,
+                    },
+                ],
                 "fund_flow": {
                     "value": -12.4,
                     "direction": "outflow",
@@ -549,6 +737,34 @@ class LinkageRiskTests(unittest.TestCase):
             },
         )
         self.assertIs(result["sectorRisk"]["dataComplete"], True)
+        dimensions = result["sectorRisk"]["dimensions"]
+        self.assertEqual(
+            dimensions["decline"]["details"],
+            {"changePercent": -3.2, "triggerThreshold": -3.0},
+        )
+        self.assertEqual(
+            dimensions["breadth"]["details"],
+            {
+                "advancers": 3,
+                "total": 20,
+                "ratioPercent": 15.0,
+                "triggerThresholdPercent": 20.0,
+            },
+        )
+        self.assertEqual(
+            dimensions["leader"]["details"]["leaders"][0]["symbol"],
+            "000100",
+        )
+        self.assertEqual(
+            dimensions["fundFlow"]["details"],
+            {
+                "direction": "outflow",
+                "value": -12.4,
+                "rank": 2,
+                "total": 86,
+                "triggerRank": 5,
+            },
+        )
 
     def test_unverified_or_merely_tech_overseas_relation_is_never_used(self):
         result = risk_engine.evaluate_linkage_risk({

@@ -7,6 +7,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class RepositorySafetyTests(unittest.TestCase):
 
+    def test_financial_tab_shows_missing_operating_cash_flow_truthfully(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/FinancialSummaryTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("operateCashFlow: number | null", component)
+        self.assertIn("formatOperatingCashFlow", component)
+        self.assertIn("暂无数据", component)
+
     def test_industry_card_exposes_four_sector_rule_states(self):
         component = (
             ROOT / "stock-monitor/src/components/industry/IndustryMonitorCard.tsx"
@@ -15,6 +24,21 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("sectorRisk?.dimensions", component)
         for label in ("板块跌幅", "上涨家数", "板块龙头", "资金排名"):
             self.assertIn(label, component)
+
+    def test_industry_card_visibly_explains_sector_counts_leaders_and_ranking(self):
+        component = (
+            ROOT / "stock-monitor/src/components/industry/IndustryMonitorCard.tsx"
+        ).read_text(encoding="utf-8")
+
+        for phrase in (
+            "上涨股票占比",
+            "代表股明细",
+            "按已验证总市值排序",
+            "同方向板块中排名",
+            "触发阈值",
+            "state?.reason",
+        ):
+            self.assertIn(phrase, component)
 
     def test_industry_news_page_distinguishes_empty_and_unavailable_states(self):
         page = (ROOT / "stock-monitor/src/app/industry/page.tsx").read_text(
@@ -291,6 +315,20 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("setData(historyItems[0].full_json)", component)
         self.assertIn("加载历史...", component)
 
+    def test_ai_tab_automatically_displays_latest_current_analysis(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "const latestCurrentItem = currentItems[currentItems.length - 1]",
+            component,
+        )
+        self.assertIn("setData(latestCurrentItem.full_json)", component)
+        self.assertIn("setAnalysisAt(latestCurrentItem.full_json.analysisAt", component)
+        self.assertIn("const fetchHistory = useCallback(async (selectLatest = true)", component)
+        self.assertIn("void fetchHistory(false)", component)
+
     def test_ai_explanation_ui_uses_safe_text_and_truthful_evidence_labels(self):
         component = (
             ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"
@@ -308,6 +346,23 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("triggerLabel", component)
         self.assertIn("startsWith('event:')", component)
         self.assertIn("startsWith('auto:')", component)
+
+    def test_ai_panel_exposes_chinese_market_structure_and_change_conditions(self):
+        component = (
+            ROOT / "stock-monitor/src/components/stock/AiAttributionTab.tsx"
+        ).read_text(encoding="utf-8")
+
+        for phrase in (
+            "evidence-v3",
+            "当前市场结构",
+            "七项监测证据",
+            "风险缓和需要看到",
+            "当前结构延续",
+            "风险进一步确认",
+            "重新核对最新数据并分析",
+            "localizeAnalysisText",
+        ):
+            self.assertIn(phrase, component)
 
     def test_alert_center_links_p1_p2_events_to_stock_explanation(self):
         page = (ROOT / "stock-monitor/src/app/alerts/page.tsx").read_text(

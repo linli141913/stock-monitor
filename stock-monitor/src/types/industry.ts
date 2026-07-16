@@ -18,6 +18,27 @@ export interface LinkageDimensionState {
   status: 'triggered' | 'no_signal' | 'unavailable';
   label: '已触发' | '未触发' | '暂无判断';
   reason: string;
+  details?: {
+    changePercent?: number;
+    triggerThreshold?: number;
+    advancers?: number;
+    total?: number;
+    ratioPercent?: number;
+    triggerThresholdPercent?: number;
+    selectionMethod?: string;
+    leaders?: Array<{
+      rank?: number;
+      symbol?: string;
+      name?: string;
+      market_cap?: number;
+      change_percent?: number;
+      is_limit_down?: boolean;
+    }>;
+    direction?: 'inflow' | 'outflow';
+    value?: number | null;
+    rank?: number;
+    triggerRank?: number;
+  };
 }
 
 export interface LinkageRuleState extends LinkageDimensionState {

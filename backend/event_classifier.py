@@ -26,7 +26,7 @@ NEGATIVE_RULES = (
 )
 
 POSITIVE_RULES = (
-    (("业绩预增", "扭亏为盈"), "earnings_growth", "P2"),
+    (("业绩预增", "扭亏为盈", "同向上升"), "earnings_growth", "P2"),
     (("股份回购", "回购股份"), "share_buyback", "P2"),
     (("增持",), "shareholder_increase", "P2"),
     (("重大合同", "中标", "订单", "长期供货"), "major_contract", "P2"),

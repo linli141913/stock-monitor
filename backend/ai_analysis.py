@@ -20,10 +20,12 @@ import news_api
 import alert_repository
 import asset_context
 import market_calendar
+import risk_engine
 from ai_contract import (
     PROMPT_VERSION,
     build_evidence_fingerprint,
     build_evidence_snapshot,
+    build_market_view,
     evidence_completeness,
     validate_ai_payload,
 )
@@ -101,13 +103,6 @@ def cached_result_matches_source_session(result: dict, quote_data: dict) -> bool
     return bool(cached_date and current_date and cached_date == current_date)
 
 
-def _mark_result_reused(result: dict) -> dict:
-    reused = copy.deepcopy(result)
-    reused["resultReused"] = True
-    reused["reuseReason"] = "manual_cache_20m"
-    return reused
-
-
 def _analysis_metadata(quote_data: dict, reused: bool = False) -> dict:
     return {
         "sourceTime": quote_data.get("source_time"),
@@ -145,6 +140,10 @@ class AiAttributionResponse(BaseModel):
     durationMs: Optional[int] = None
     usage: Optional[Dict[str, Any]] = None
     reuseReason: Optional[str] = None
+    recheckedAt: Optional[str] = None
+    reuseMessage: Optional[str] = None
+    checkedDimensions: Optional[int] = None
+    marketView: Optional[Dict[str, Any]] = None
 
 def _format_dynamics_item(item: dict, source_counts: dict) -> Optional[dict]:
     if not news_api.is_source_published_today(item):
@@ -269,11 +268,35 @@ def fetch_real_industry_dynamics(
 fetcher = RealDataFetcher()
 
 
+def get_verified_linkage_risk(symbol: str, trade_date: str) -> Optional[dict]:
+    if not trade_date:
+        return None
+    record = alert_repository.get_latest_linkage_record(symbol, trade_date)
+    if record is None:
+        return None
+    linkage_risk = record.get("risk")
+    linkage_snapshot = record.get("snapshot")
+    dimensions = ((linkage_risk or {}).get("sectorRisk") or {}).get("dimensions") or {}
+    needs_detail_enrichment = any(
+        isinstance(item, dict)
+        and item.get("status") != "unavailable"
+        and not isinstance(item.get("details"), dict)
+        for item in dimensions.values()
+    )
+    if needs_detail_enrichment and isinstance(linkage_snapshot, dict):
+        return risk_engine.evaluate_linkage_risk({
+            "sector": linkage_snapshot.get("sector") or {"status": "unavailable"},
+            "overseas": linkage_snapshot.get("overseas") or [],
+        })
+    return linkage_risk if isinstance(linkage_risk, dict) else None
+
+
 def reuse_unchanged_single_attempt(
     symbol: str,
     trigger: str,
     quote_data: dict,
     fingerprint: str,
+    market_view: Optional[dict] = None,
 ) -> Optional[dict]:
     if not _is_single_attempt_trigger(trigger):
         return None
@@ -287,12 +310,18 @@ def reuse_unchanged_single_attempt(
         return None
     if previous.get("evidenceFingerprint") != fingerprint:
         return None
+    if previous.get("promptVersion") != PROMPT_VERSION:
+        return None
     reused = copy.deepcopy(previous)
     reused["resultReused"] = True
     reused["reuseReason"] = "evidence_unchanged"
-    reused["reusedAt"] = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(
+    reused["recheckedAt"] = datetime.now(market_calendar.SHANGHAI_TZ).isoformat(
         timespec="seconds"
     )
+    reused["reuseMessage"] = "已重新核对最新数据，七项证据没有变化，因此沿用上次结论，本次未重复调用模型。"
+    reused["checkedDimensions"] = len((market_view or {}).get("dimensions") or [])
+    if market_view is not None:
+        reused["marketView"] = market_view
     database.complete_analysis_trigger(
         symbol,
         trigger,
@@ -301,6 +330,39 @@ def reuse_unchanged_single_attempt(
     )
     store_success_result(symbol, reused)
     return reused
+
+
+def reuse_unchanged_manual_analysis(
+    symbol: str,
+    quote_data: dict,
+    fingerprint: str,
+    market_view: dict,
+) -> Optional[dict]:
+    candidates = [
+        database.get_recent_successful_analysis(symbol, AI_SUCCESS_TTL_SECONDS),
+        get_cached_success_result(symbol),
+    ]
+    for previous in candidates:
+        if previous is None:
+            continue
+        if previous.get("promptVersion") != PROMPT_VERSION:
+            continue
+        if not cached_result_matches_source_session(previous, quote_data):
+            continue
+        if previous.get("evidenceFingerprint") != fingerprint:
+            continue
+        reused = copy.deepcopy(previous)
+        reused["resultReused"] = True
+        reused["reuseReason"] = "evidence_unchanged"
+        reused["recheckedAt"] = datetime.now(
+            market_calendar.SHANGHAI_TZ
+        ).isoformat(timespec="seconds")
+        reused["reuseMessage"] = "已重新核对最新数据，七项证据没有变化，因此沿用上次结论，本次未重复调用模型。"
+        reused["checkedDimensions"] = len(market_view.get("dimensions") or [])
+        reused["marketView"] = market_view
+        store_success_result(symbol, reused)
+        return reused
+    return None
 
 
 def _failed_result(
@@ -312,6 +374,7 @@ def _failed_result(
     evidence_snapshot: Optional[dict] = None,
     fingerprint: Optional[str] = None,
     completeness: Optional[dict] = None,
+    market_view: Optional[dict] = None,
 ) -> dict:
     return {
         "stockName": quote_data.get("name", symbol),
@@ -334,6 +397,7 @@ def _failed_result(
         "evidenceFingerprint": fingerprint,
         "promptVersion": PROMPT_VERSION,
         "analysisStatus": "failed",
+        "marketView": market_view,
         **_analysis_metadata(quote_data),
     }
 
@@ -365,27 +429,6 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
                 if existing is not None:
                     return existing["full_json"]
     quote_data = fetcher.get_stock_quote(symbol)
-
-    if is_monitored and not _is_single_attempt_trigger(trigger):
-        cached_success = database.get_recent_successful_analysis(
-            symbol,
-            AI_SUCCESS_TTL_SECONDS,
-        )
-        if (
-            cached_success is not None
-            and cached_result_matches_source_session(cached_success, quote_data)
-            and cached_success.get("promptVersion") == PROMPT_VERSION
-        ):
-            store_success_result(symbol, cached_success)
-            return _mark_result_reused(cached_success)
-
-        cached_success = get_cached_success_result(symbol)
-        if (
-            cached_success is not None
-            and cached_result_matches_source_session(cached_success, quote_data)
-            and cached_success.get("promptVersion") == PROMPT_VERSION
-        ):
-            return _mark_result_reused(cached_success)
 
     if not is_monitored:
         return {
@@ -425,20 +468,8 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         search_terms=context["search_terms"],
     )
     latest_signal_state = alert_repository.get_latest_signal_state(context["symbol"])
-    linkage_risk = (
-        latest_signal_state.get("linkageRisk")
-        if latest_signal_state is not None
-        else None
-    )
-    linkage_snapshot = (
-        latest_signal_state.get("linkageSnapshot")
-        if latest_signal_state is not None
-        else None
-    )
     source_date = str(quote_data.get("source_date") or "").strip()
-    linkage_date = str((linkage_snapshot or {}).get("source_time") or "")[:10]
-    if source_date and linkage_date and source_date != linkage_date:
-        linkage_risk = None
+    linkage_risk = get_verified_linkage_risk(context["symbol"], source_date)
 
     evidence_snapshot = build_evidence_snapshot(
         symbol=context["symbol"],
@@ -454,15 +485,27 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
     )
     evidence_fingerprint = build_evidence_fingerprint(evidence_snapshot)
     completeness = evidence_completeness(evidence_snapshot)
+    market_view = build_market_view(evidence_snapshot)
 
     reused = reuse_unchanged_single_attempt(
         symbol,
         trigger,
         quote_data,
         evidence_fingerprint,
+        market_view,
     )
     if reused is not None:
         return reused
+
+    if not _is_single_attempt_trigger(trigger):
+        reused = reuse_unchanged_manual_analysis(
+            symbol,
+            quote_data,
+            evidence_fingerprint,
+            market_view,
+        )
+        if reused is not None:
+            return reused
 
     api_key = os.getenv("LLM_API_KEY", "").strip()
     if not api_key:
@@ -474,6 +517,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             evidence_snapshot=evidence_snapshot,
             fingerprint=evidence_fingerprint,
             completeness=completeness,
+            market_view=market_view,
         )
         _save_failed_single_attempt(symbol, trigger, failed_result)
         return failed_result
@@ -494,14 +538,19 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         【证据快照】
         {json.dumps(evidence_snapshot, ensure_ascii=False, default=str)}
 
+        【后端规则形成的市场结构判断】
+        {json.dumps(market_view, ensure_ascii=False, default=str)}
+
         【必须遵守】
         1. 把内容分成已确认事实、基于事实的推断、暂无法确认三类。
-        2. 数据状态为 unavailable 或 insufficient 时必须写“暂无判断”或“暂无法确认”。
+        2. 数据不可用或样本不足时必须写“暂无判断”或“暂无法确认”。
         3. 海外标的只有在 linkageRisk 中存在精确业务映射时才能讨论，不能因同属一个宽泛行业建立联系。
         4. 不得沿用任何历史 AI 结论，不得使用证据快照之外的知识补全公司、客户、供应商、数字或因果关系。
         5. 不提供交易指令、数值化价格承诺或确定性价格方向；情景分析必须写清触发条件、可能影响、风险和待验证证据。
         6. 正文不得输出 URL、HTML 或 Markdown 链接。引用来源只写证据目录编号，例如 [S1]；sourceIds 只能填写实际引用过的编号。
         7. plainEnglishSummary 用 50 至 140 字说明已知事实、证据缺口和需要继续观察的条件，不得用夸张措辞。
+        8. 所有面向用户的文字必须使用中文，不得输出 warning、negative、positive、available、unavailable、insufficient、null 等内部状态代码。
+        9. 市场结构判断由后端规则生成，你只能解释其证据、改善条件、延续条件和恶化条件，不得擅自改变方向。
 
         只返回合法 JSON 对象，不要代码块，结构如下：
         {{
@@ -570,6 +619,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             "durationMs": duration_ms,
             "usage": _usage_dict(response),
             "analysisStatus": "success",
+            "marketView": market_view,
             **_analysis_metadata(quote_data),
         }
         if _is_single_attempt_trigger(trigger):
@@ -594,6 +644,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             evidence_snapshot=evidence_snapshot,
             fingerprint=evidence_fingerprint,
             completeness=completeness,
+            market_view=market_view,
         )
         _save_failed_single_attempt(symbol, trigger, failed_result)
         return failed_result

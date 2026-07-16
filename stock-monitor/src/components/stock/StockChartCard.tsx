@@ -354,7 +354,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
         }
       },
       {
-        name: 'MA5',
+        name: '5日均线',
         type: 'line',
         data: ma5,
         smooth: true,
@@ -362,7 +362,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
         symbol: 'none'
       },
       {
-        name: 'MA10',
+        name: '10日均线',
         type: 'line',
         data: ma10,
         smooth: true,
@@ -370,7 +370,7 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
         symbol: 'none'
       },
       {
-        name: 'MA20',
+        name: '20日均线',
         type: 'line',
         data: ma20,
         smooth: true,
@@ -408,9 +408,9 @@ export default function StockChartCard({ data, period, loading, onPeriodChange }
           ))}
         </div>
         <div className={styles.legend} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ color: '#f59e0b' }}>MA5</span>
-          <span style={{ color: '#3b82f6' }}>MA10</span>
-          <span style={{ color: '#8b5cf6' }}>MA20</span>
+          <span style={{ color: '#f59e0b' }}>5日均线</span>
+          <span style={{ color: '#3b82f6' }}>10日均线</span>
+          <span style={{ color: '#8b5cf6' }}>20日均线</span>
           <button 
             onClick={toggleFullscreen} 
             style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#666', fontSize: '13px', fontWeight: 500 }}

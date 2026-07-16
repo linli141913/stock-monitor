@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, Optional, Set
 from urllib.parse import urlsplit
 
 
-PROMPT_VERSION = "evidence-v2"
+PROMPT_VERSION = "evidence-v3"
 
 _CHAIN_KEYS = (
     "technicalAndSentiment",
@@ -33,6 +33,37 @@ _FORBIDDEN_DIRECTIVES = (
     "止损",
 )
 _SOURCE_ID_PATTERN = re.compile(r"\[(S\d+)\]")
+_STATUS_TERMS = {
+    "warning": "警惕",
+    "negative": "负向风险",
+    "positive": "正向信号",
+    "neutral": "中性",
+    "uncertain": "暂无法确认",
+    "available": "数据可用",
+    "unavailable": "暂无可靠数据",
+    "insufficient": "样本不足",
+    "null": "本轮没有对应事件",
+    "triggered": "已触发",
+    "no_signal": "未触发",
+    "not_applicable": "不适用",
+}
+_STATUS_TERM_PATTERN = re.compile(
+    r"\b(" + "|".join(sorted(_STATUS_TERMS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+_PRICE_SIGNAL_CODES = {
+    "limit_move",
+    "extreme_price_move",
+    "high_amplitude",
+    "high_volume_ratio",
+    "turnover_warning",
+}
+_FUND_SIGNAL_CODES = {
+    "consecutive_fund_inflow",
+    "consecutive_fund_outflow",
+    "price_fund_divergence",
+}
 
 
 def is_safe_http_url(value: Any) -> bool:
@@ -53,6 +84,10 @@ def is_safe_http_url(value: Any) -> bool:
 
 def _clean_text(value: Any, *, limit: int) -> str:
     text = str(value or "").strip()
+    text = _STATUS_TERM_PATTERN.sub(
+        lambda match: _STATUS_TERMS[match.group(0).lower()],
+        text,
+    )
     text = re.sub(r"^【[^】]+】\s*", "", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if len(text) > limit:
@@ -350,4 +385,241 @@ def evidence_completeness(snapshot: dict) -> dict:
         "totalCount": total,
         "ratio": round(len(available) / total, 2),
         "label": f"{len(available)}/{total} 项证据可用",
+    }
+
+
+def _signal_items(market_risk: dict) -> list:
+    return [
+        item for item in market_risk.get("signals") or []
+        if isinstance(item, dict)
+    ]
+
+
+def _has_usable_status(value: Optional[dict]) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    status = value.get("status") or value.get("riskStatus")
+    return status not in {None, "unavailable", "insufficient"}
+
+
+def _periods_in_chinese(periods: Iterable[Any]) -> list:
+    labels = {
+        "MA5": "5日均线",
+        "MA10": "10日均线",
+        "MA20": "20日均线",
+    }
+    return [labels.get(str(period), str(period)) for period in periods]
+
+
+def _sector_dimension(
+    dimensions: dict,
+    key: str,
+    label: str,
+) -> dict:
+    raw = dimensions.get(key) if isinstance(dimensions, dict) else None
+    if not isinstance(raw, dict) or raw.get("status") == "unavailable":
+        return {
+            "key": key,
+            "label": label,
+            "state": "暂无判断",
+            "summary": (
+                raw.get("reason")
+                if isinstance(raw, dict) and raw.get("reason")
+                else f"{label}数据缺失或口径未验证"
+            ),
+            "details": {},
+        }
+    return {
+        "key": key,
+        "label": label,
+        "state": "已触发" if raw.get("status") == "triggered" else "未触发",
+        "summary": raw.get("reason") or "当前已完成规则核对",
+        "details": deepcopy(raw.get("details") or {}),
+    }
+
+
+def build_market_view(snapshot: dict) -> dict:
+    quote = snapshot.get("quote") or {}
+    market = snapshot.get("marketRisk") or {}
+    linkage = snapshot.get("linkageRisk") or {}
+    signals = _signal_items(market)
+    signal_codes = {
+        str(item.get("code")) for item in signals if item.get("code")
+    }
+    signal_directions = {
+        str(item.get("direction"))
+        for item in signals
+        if item.get("direction") in {"positive", "negative"}
+    }
+    market_direction = market.get("direction")
+    linkage_direction = linkage.get("direction")
+    directions = set(signal_directions)
+    if market_direction in {"positive", "negative"}:
+        directions.add(market_direction)
+    if linkage_direction in {"positive", "negative"}:
+        directions.add(linkage_direction)
+
+    market_available = _has_usable_status(market)
+    linkage_available = _has_usable_status(linkage)
+    has_negative = "negative" in directions
+    has_positive = "positive" in directions
+    has_fund_confirmation = bool(signal_codes & _FUND_SIGNAL_CODES)
+    has_ma_confirmation = "ma_breakdown" in signal_codes
+    has_sector_confirmation = linkage_available and linkage_direction == "negative"
+
+    if not market_available and not linkage_available and quote.get("changePercent") is None:
+        overall_state = "暂无判断"
+        structure_label = "关键行情与联动数据不足，暂时不能形成市场结构判断"
+    elif has_negative and has_positive:
+        overall_state = "中性"
+        structure_label = "多空信号并存，价格、资金或板块方向尚未统一"
+    elif has_negative:
+        if has_fund_confirmation and has_ma_confirmation and has_sector_confirmation:
+            overall_state = "风险升高"
+            structure_label = "价格、资金、均线与板块形成负向共振"
+        elif has_sector_confirmation and not has_fund_confirmation and not has_ma_confirmation:
+            overall_state = "偏弱"
+            structure_label = "单日走弱，板块同步承压，资金与均线尚未二次确认"
+        else:
+            overall_state = "偏弱"
+            structure_label = "价格偏弱，资金、均线或板块尚未形成完整确认"
+    elif has_positive:
+        overall_state = "偏强"
+        structure_label = "价格与现有已验证信号偏强，仍需观察资金和板块确认"
+    else:
+        overall_state = "中性"
+        structure_label = "现有信号未形成一致方向，继续等待新的确认条件"
+
+    price_signals = [
+        item.get("label") or str(item.get("code"))
+        for item in signals
+        if item.get("code") in _PRICE_SIGNAL_CODES
+    ]
+    if market_available:
+        if market.get("priority") == "P1":
+            price_state = "紧急风险"
+        elif market.get("priority") == "P2" or market.get("riskStatus") == "warning":
+            price_state = "重要风险"
+        elif market.get("priority") == "P3" or market.get("riskStatus") == "watch":
+            price_state = "观察信号"
+        else:
+            price_state = "未触发"
+        price_summary = market.get("reason") or "当前未触发量价风险规则"
+    elif quote.get("changePercent") is not None:
+        price_state = "仅有行情"
+        price_summary = "已有涨跌幅，但完整量价规则快照暂不可用"
+    else:
+        price_state = "暂无判断"
+        price_summary = market.get("reason") or "量价数据缺失或口径未验证"
+    dimensions = [{
+        "key": "priceVolume",
+        "label": "量价风险",
+        "state": price_state,
+        "summary": price_summary,
+        "details": {
+            "changePercent": quote.get("changePercent"),
+            "volumeRatio": quote.get("volumeRatio"),
+            "triggeredRules": price_signals,
+        },
+    }]
+
+    fund_risk = market.get("fundFlowRisk") or {}
+    fund_signal_codes = signal_codes & _FUND_SIGNAL_CODES
+    if not _has_usable_status(fund_risk):
+        fund_state = "暂无判断"
+    elif "consecutive_fund_outflow" in fund_signal_codes:
+        fund_state = "连续流出"
+    elif "consecutive_fund_inflow" in fund_signal_codes:
+        fund_state = "连续流入"
+    elif "price_fund_divergence" in fund_signal_codes:
+        fund_state = "价格资金背离"
+    else:
+        fund_state = "未形成连续信号"
+    dimensions.append({
+        "key": "continuousFund",
+        "label": "连续资金数据",
+        "state": fund_state,
+        "summary": fund_risk.get("reason") or "连续资金数据缺失或口径未验证",
+        "details": {
+            key: deepcopy(value)
+            for key, value in fund_risk.items()
+            if key not in {"status", "label"}
+        },
+    })
+
+    moving_average = market.get("movingAverageRisk") or {}
+    if not _has_usable_status(moving_average):
+        ma_state = "暂无判断"
+    elif has_ma_confirmation or moving_average.get("status") == "triggered":
+        ma_state = "已确认破位"
+    else:
+        ma_state = "未发生破位"
+    dimensions.append({
+        "key": "movingAverage",
+        "label": "均线破位",
+        "state": ma_state,
+        "summary": moving_average.get("reason") or "均线数据缺失或口径未验证",
+        "details": {
+            "periods": _periods_in_chinese(moving_average.get("periods") or []),
+        },
+    })
+
+    sector_dimensions = ((linkage.get("sectorRisk") or {}).get("dimensions") or {})
+    dimensions.extend((
+        _sector_dimension(sector_dimensions, "breadth", "板块上涨股票占比"),
+        _sector_dimension(sector_dimensions, "leader", "板块龙头与代表股"),
+        _sector_dimension(sector_dimensions, "fundFlow", "板块资金排名"),
+    ))
+    overseas = linkage.get("overseasRisk") or {}
+    dimensions.append({
+        "key": "overseas",
+        "label": "精确海外映射",
+        "state": (
+            "已触发"
+            if overseas.get("status") == "triggered"
+            else "未触发"
+            if overseas.get("status") == "no_signal"
+            else "暂无判断"
+        ),
+        "summary": overseas.get("reason") or "没有经过业务精确映射的海外标的",
+        "details": deepcopy(overseas.get("details") or {}),
+    })
+
+    confirmed_count = sum(item["state"] != "暂无判断" for item in dimensions)
+    unavailable_count = len(dimensions) - confirmed_count
+    improving_conditions = []
+    continuing_conditions = []
+    worsening_conditions = []
+    if overall_state in {"偏弱", "风险升高"}:
+        improving_conditions.append("大幅涨跌和高振幅规则退出，价格波动开始收敛")
+        continuing_conditions.append("量价风险继续触发，但没有新增连续资金流出或均线破位")
+        worsening_conditions.append("新增连续资金流出、价格资金负向背离或均线破位")
+    else:
+        improving_conditions.append("正向量价、资金和板块信号继续得到验证")
+        continuing_conditions.append("当前信号结构和规则状态保持不变")
+        worsening_conditions.append("新增大幅下跌、高振幅、连续资金流出或均线破位")
+
+    triggered_sector = {
+        key for key, item in sector_dimensions.items()
+        if isinstance(item, dict) and item.get("status") == "triggered"
+    }
+    if "breadth" in triggered_sector:
+        improving_conditions.append("板块上涨股票占比恢复到20%以上")
+    if "leader" in triggered_sector:
+        improving_conditions.append("板块龙头跌幅收窄至8%以内并退出跌停状态")
+    if "fundFlow" in triggered_sector:
+        improving_conditions.append("板块资金流出排名退出前5")
+    if triggered_sector:
+        continuing_conditions.append("板块上涨股票占比、龙头或资金排名仍处于触发区间")
+        worsening_conditions.append("个股、板块龙头和板块资金同时继续走弱")
+
+    return {
+        "overallState": overall_state,
+        "structureLabel": structure_label,
+        "dimensions": dimensions,
+        "improvingConditions": improving_conditions,
+        "continuingConditions": continuing_conditions,
+        "worseningConditions": worsening_conditions,
+        "confirmedCount": confirmed_count,
+        "unavailableCount": unavailable_count,
     }

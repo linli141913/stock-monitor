@@ -275,6 +275,7 @@ def build_verified_sector_snapshot(
                 "advancers": None,
                 "total": None,
                 "leader": None,
+                "leaders": None,
                 "fund_flow": {"verified": False},
                 "reason": "行业资金流列表无法唯一匹配所属板块",
             }
@@ -284,13 +285,40 @@ def build_verified_sector_snapshot(
         row for row in quote_rows
         if _number(row.get("change_percent")) is not None
     ]
+    reported_company_count_value = _number(matched.get("公司家数"))
+    reported_company_count = (
+        int(reported_company_count_value)
+        if reported_company_count_value is not None
+        and reported_company_count_value > 0
+        else None
+    )
     quotes_complete = (
-        expected_constituents > 0
+        expected_constituents > 1
+        and reported_company_count == expected_constituents
         and len(valid_quotes) == expected_constituents
     )
+    if expected_constituents <= 0:
+        constituent_reason = "板块成分抓取为空，上涨家数和龙头暂无判断"
+    elif expected_constituents == 1:
+        constituent_reason = "板块成分只有1只，上涨家数和龙头暂无判断"
+    elif reported_company_count is None:
+        constituent_reason = "行业公司家数缺失，无法确认成分口径一致"
+    elif reported_company_count != expected_constituents:
+        constituent_reason = (
+            f"行业公司家数{reported_company_count}与成分集合"
+            f"{expected_constituents}不一致，不跨口径计算上涨家数和龙头"
+        )
+    elif len(valid_quotes) != expected_constituents:
+        constituent_reason = (
+            f"成分行情仅返回{len(valid_quotes)}/{expected_constituents}只，"
+            "上涨家数和龙头暂无判断"
+        )
+    else:
+        constituent_reason = None
     advancers = None
     total = None
     leader = None
+    leaders = None
     if quotes_complete:
         advancers = sum(
             1 for row in valid_quotes
@@ -298,21 +326,27 @@ def build_verified_sector_snapshot(
         )
         total = len(valid_quotes)
         if all(_number(row.get("market_cap")) is not None for row in valid_quotes):
-            largest = max(
+            ranked_quotes = sorted(
                 valid_quotes,
                 key=lambda row: _number(row.get("market_cap")),
+                reverse=True,
             )
-            leader_change = _number(largest.get("change_percent"))
-            leader_symbol = str(largest.get("symbol") or "")
-            leader = {
-                "symbol": leader_symbol,
-                "name": str(largest.get("name") or leader_symbol),
-                "change_percent": leader_change,
-                "is_limit_down": (
-                    leader_change is not None
-                    and leader_change <= -_limit_threshold(leader_symbol)
-                ),
-            }
+            leaders = []
+            for rank, row in enumerate(ranked_quotes[:3], start=1):
+                leader_change = _number(row.get("change_percent"))
+                leader_symbol = str(row.get("symbol") or "")
+                leaders.append({
+                    "rank": rank,
+                    "symbol": leader_symbol,
+                    "name": str(row.get("name") or leader_symbol),
+                    "market_cap": _number(row.get("market_cap")),
+                    "change_percent": leader_change,
+                    "is_limit_down": (
+                        leader_change is not None
+                        and leader_change <= -_limit_threshold(leader_symbol)
+                    ),
+                })
+            leader = dict(leaders[0]) if leaders else None
 
     flow_value = _market_amount(matched.get("净额"))
     fund_flow = {"verified": False}
@@ -350,8 +384,9 @@ def build_verified_sector_snapshot(
         "advancers": advancers,
         "total": total,
         "leader": leader,
+        "leaders": leaders,
         "fund_flow": fund_flow,
-        "reason": None if quotes_complete else "板块成分行情未完整返回，广度和龙头暂无判断",
+        "reason": constituent_reason,
     }
 
 
@@ -576,6 +611,7 @@ def evaluate_market_risk(
 def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     signals = []
     sector = snapshot.get("sector") or {}
+    constituent_reason = str(sector.get("reason") or "").strip()
     sector_dimensions = {
         "decline": {
             "status": "unavailable",
@@ -585,12 +621,12 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "breadth": {
             "status": "unavailable",
             "label": "暂无判断",
-            "reason": "板块成分行情未完整返回，上涨家数暂无判断",
+            "reason": constituent_reason or "板块成分行情未完整返回，上涨家数暂无判断",
         },
         "leader": {
             "status": "unavailable",
             "label": "暂无判断",
-            "reason": "板块成分行情或市值数据不完整，龙头暂无判断",
+            "reason": constituent_reason or "板块成分行情或市值数据不完整，龙头暂无判断",
         },
         "fundFlow": {
             "status": "unavailable",
@@ -611,6 +647,10 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "triggered" if decline_triggered else "no_signal",
                 "label": "已触发" if decline_triggered else "未触发",
                 "reason": decline_reason,
+                "details": {
+                    "changePercent": change_percent,
+                    "triggerThreshold": -3.0,
+                },
             }
             if decline_triggered:
                 signals.append({
@@ -633,6 +673,12 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "triggered" if breadth_triggered else "no_signal",
                 "label": "已触发" if breadth_triggered else "未触发",
                 "reason": breadth_reason,
+                "details": {
+                    "advancers": int(advancers),
+                    "total": int(total),
+                    "ratioPercent": round(ratio * 100, 1),
+                    "triggerThresholdPercent": 20.0,
+                },
             }
             if breadth_triggered:
                 signals.append({
@@ -663,6 +709,11 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "triggered" if leader_triggered else "no_signal",
                 "label": "已触发" if leader_triggered else "未触发",
                 "reason": leader_reason,
+                "details": {
+                    "selectionMethod": "按本轮完整成分行情中的市值从高到低排序",
+                    "triggerThresholdPercent": -8.0,
+                    "leaders": sector.get("leaders") or [leader],
+                },
             }
             if leader_triggered:
                 signals.append({
@@ -688,6 +739,13 @@ def evaluate_linkage_risk(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "triggered" if flow_triggered else "no_signal",
                 "label": "已触发" if flow_triggered else "未触发",
                 "reason": flow_label if flow_triggered else f"{flow_label}，未进入前5",
+                "details": {
+                    "direction": direction,
+                    "value": fund_flow.get("value"),
+                    "rank": int(rank),
+                    "total": int(rank_total),
+                    "triggerRank": 5,
+                },
             }
             if flow_triggered:
                 flow_direction = "positive" if direction == "inflow" else "negative"

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IndustryMonitor, DynamicsItem } from '@/types/industry';
+import { IndustryMonitor, DynamicsItem, LinkageDimensionState } from '@/types/industry';
 import { BarChart3, ChevronDown, FileText, Layers, ExternalLink } from 'lucide-react';
 import styles from './IndustryMonitorCard.module.css';
 
@@ -64,11 +64,70 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
   const [dynamicsOpen, setDynamicsOpen] = useState(false);
   const sectorDimensions = data?.linkageRisk?.sectorRisk?.dimensions;
   const sectorRuleStates = [
-    { label: '板块跌幅', state: sectorDimensions?.decline },
-    { label: '上涨家数', state: sectorDimensions?.breadth },
-    { label: '板块龙头', state: sectorDimensions?.leader },
-    { label: '资金排名', state: sectorDimensions?.fundFlow },
+    { key: 'decline', label: '板块跌幅', state: sectorDimensions?.decline },
+    { key: 'breadth', label: '上涨家数 / 上涨股票占比', state: sectorDimensions?.breadth },
+    { key: 'leader', label: '板块龙头 / 代表股明细', state: sectorDimensions?.leader },
+    { key: 'fundFlow', label: '板块资金排名', state: sectorDimensions?.fundFlow },
   ];
+
+  const renderSectorDetails = (key: string, state?: LinkageDimensionState) => {
+    const details = state?.details;
+    if (!details || state?.status === 'unavailable') return null;
+    if (key === 'decline') {
+      return (
+        <div className={styles.dimensionMetrics}>
+          <span>实际涨跌 <strong>{details.changePercent?.toFixed(2)}%</strong></span>
+          <span>触发阈值 <strong>不高于 {details.triggerThreshold?.toFixed(1)}%</strong></span>
+        </div>
+      );
+    }
+    if (key === 'breadth') {
+      return (
+        <div className={styles.dimensionMetrics}>
+          <span>上涨 <strong>{details.advancers ?? '-'} 只</strong> / 共 <strong>{details.total ?? '-'} 只</strong></span>
+          <span>占比 <strong>{details.ratioPercent?.toFixed(1) ?? '-'}%</strong>，触发阈值低于 {details.triggerThresholdPercent ?? 20}%</span>
+        </div>
+      );
+    }
+    if (key === 'leader') {
+      const leaders = details.leaders || [];
+      return (
+        <div className={styles.leaderDetails}>
+          <div className={styles.selectionMethod}>按已验证总市值排序；触发阈值为跌幅不低于 {Math.abs(details.triggerThresholdPercent ?? -8)}% 或触及跌停</div>
+          {leaders.length > 0 && (
+            <div className={styles.leaderList} aria-label="板块代表股明细">
+              {leaders.map((leader, index) => (
+                <div key={`${leader.symbol || leader.name}-${index}`} className={styles.leaderRow}>
+                  <span className={styles.leaderRank}>{leader.rank || index + 1}</span>
+                  <span className={styles.leaderIdentity}>
+                    <strong>{leader.name || '名称暂缺'}</strong>
+                    <small>{leader.symbol || '代码暂缺'}</small>
+                  </span>
+                  <span className={styles.leaderMarketCap}>
+                    {leader.market_cap == null ? '市值暂缺' : `市值 ${leader.market_cap.toFixed(2)} 亿元`}
+                  </span>
+                  <span className={leader.change_percent != null && leader.change_percent < 0 ? styles.metricNegative : styles.metricNeutral}>
+                    {leader.change_percent == null ? '涨跌暂缺' : `${leader.change_percent > 0 ? '+' : ''}${leader.change_percent.toFixed(2)}%`}
+                    {leader.is_limit_down ? ' 跌停' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (key === 'fundFlow') {
+      return (
+        <div className={styles.dimensionMetrics}>
+          <span>资金方向 <strong>{details.direction === 'inflow' ? '净流入' : details.direction === 'outflow' ? '净流出' : '暂无判断'}</strong></span>
+          <span>同方向板块中排名 <strong>第 {details.rank ?? '-'} / {details.total ?? '-'} 名</strong></span>
+          <span>触发阈值 <strong>进入前 {details.triggerRank ?? 5}</strong></span>
+        </div>
+      );
+    }
+    return null;
+  };
 
   const getSourceClass = (source: string) => {
     if (source.includes('巨潮')) return styles.sourceCninfo;
@@ -266,19 +325,10 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
           <p className={styles.linkageReason}>
             {data?.linkageRisk?.reason || '真实板块或海外映射数据尚未完成，暂无判断'}
           </p>
-          <div className={styles.linkageSources}>
-            <span title={data?.linkageRisk?.sectorRisk?.reason}>
-              板块：{data?.linkageRisk?.sectorRisk?.label || '暂无判断'}
-            </span>
-            <span title={data?.linkageRisk?.overseasRisk?.reason}>
-              海外：{data?.linkageRisk?.overseasRisk?.label || '暂无判断'}
-            </span>
-          </div>
           <div className={styles.sectorDimensionGrid}>
-            {sectorRuleStates.map(({ label, state }) => (
-              <span
-                key={label}
-                title={state?.reason || `${label}数据缺失或口径未验证`}
+            {sectorRuleStates.map(({ key, label, state }) => (
+              <div
+                key={key}
                 className={`${styles.sectorDimensionItem} ${
                   state?.status === 'triggered'
                     ? styles.sectorDimensionTriggered
@@ -287,9 +337,27 @@ export default function IndustryMonitorCard({ data, loading, refreshing, statusM
                       : styles.sectorDimensionUnavailable
                 }`}
               >
-                {label}：{state?.label || '暂无判断'}
-              </span>
+                <div className={styles.dimensionHeader}>
+                  <strong>{label}</strong>
+                  <span>{state?.label || '暂无判断'}</span>
+                </div>
+                <p>{state?.reason || `${label}数据缺失或口径未验证`}</p>
+                {renderSectorDetails(key, state)}
+              </div>
             ))}
+          </div>
+          <div className={`${styles.overseasDetail} ${
+            data?.linkageRisk?.overseasRisk?.status === 'triggered'
+              ? styles.sectorDimensionTriggered
+              : data?.linkageRisk?.overseasRisk?.status === 'no_signal'
+                ? styles.sectorDimensionNormal
+                : styles.sectorDimensionUnavailable
+          }`}>
+            <div className={styles.dimensionHeader}>
+              <strong>精确海外映射</strong>
+              <span>{data?.linkageRisk?.overseasRisk?.label || '暂无判断'}</span>
+            </div>
+            <p>{data?.linkageRisk?.overseasRisk?.reason || '暂无经过公司业务精确验证的海外指数或核心公司映射'}</p>
           </div>
           <p className={styles.linkageFootnote}>
             海外标的仅在公司业务精确映射后参与；同属科技股不会自动关联。

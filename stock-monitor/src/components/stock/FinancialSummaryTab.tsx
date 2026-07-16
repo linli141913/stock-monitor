@@ -16,7 +16,7 @@ interface ReportData {
   netMargin: number;
   roe: number;
   assetLiabilityRatio: number;
-  operateCashFlow: number;
+  operateCashFlow: number | null;
   eps: number;
 }
 
@@ -91,6 +91,11 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
     return (val / 100000000).toFixed(2) + ' 亿';
   };
 
+  const formatOperatingCashFlow = (val?: number | null) => {
+    if (val === undefined || val === null) return '暂无数据';
+    return formatMoney(val);
+  };
+
   // 格式化百分比
   const formatPct = (val?: number) => {
     if (val === undefined || val === null) return '-';
@@ -137,7 +142,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
           </div>
         </div>
         <div className={styles.card}>
-          <div className={styles.cardTitle}>净资产收益率 (ROE)</div>
+          <div className={styles.cardTitle}>净资产收益率</div>
           <div className={styles.cardValue}>{formatPct(latest.roe)}</div>
         </div>
         <div className={styles.card}>
@@ -146,7 +151,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
         </div>
         <div className={styles.card}>
           <div className={styles.cardTitle}>经营现金流净额</div>
-          <div className={styles.cardValue}>{formatMoney(latest.operateCashFlow)}</div>
+          <div className={styles.cardValue}>{formatOperatingCashFlow(latest.operateCashFlow)}</div>
         </div>
       </div>
 
@@ -174,7 +179,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
             tooltip: {},
             radar: {
               indicator: [
-                { name: 'ROE', max: 30 },
+                { name: '净资产收益率', max: 30 },
                 { name: '毛利率', max: 60 },
                 { name: '净利率', max: 40 },
                 { name: '健康度 (反向负债率)', max: 100 },
@@ -217,7 +222,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
               <th>{isHongKong ? '扣非净利润（港股口径）' : '扣非净利润'}</th>
               <th>毛利率</th>
               <th>净利率</th>
-              <th>ROE</th>
+              <th>净资产收益率</th>
               <th>资产负债率</th>
               <th>经营现金流</th>
               <th>EPS</th>
@@ -234,7 +239,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
                 <td>{formatPct(row.netMargin)}</td>
                 <td>{formatPct(row.roe)}</td>
                 <td>{formatPct(row.assetLiabilityRatio)}</td>
-                <td>{formatMoney(row.operateCashFlow)}</td>
+                <td>{formatOperatingCashFlow(row.operateCashFlow)}</td>
                 <td>{row.eps !== null && row.eps !== undefined ? row.eps : '-'}</td>
               </tr>
             ))}
@@ -253,7 +258,7 @@ export const FinancialSummaryTab: React.FC<{ stockCode: string }> = ({ stockCode
               <th>营收同比</th>
               <th>净利润同比</th>
               <th>毛利率</th>
-              <th>ROE</th>
+              <th>净资产收益率</th>
               <th>资产负债率</th>
             </tr>
           </thead>

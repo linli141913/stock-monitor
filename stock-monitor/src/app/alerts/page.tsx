@@ -133,7 +133,7 @@ export default function AlertsPage() {
     <main className={styles.page}>
       <section className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>WATCHLIST SIGNAL DESK</p>
+          <p className={styles.eyebrow}>自选股信号台</p>
           <h1>强提醒中心</h1>
           <p className={styles.subtitle}>
             只展示有来源、有时间、有触发依据的事件；正面和负面同等提醒。

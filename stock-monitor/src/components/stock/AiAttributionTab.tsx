@@ -30,6 +30,25 @@ interface EvidenceCompleteness {
   label?: string;
 }
 
+interface MarketDimension {
+  key: string;
+  label: string;
+  state: string;
+  summary: string;
+  details?: Record<string, unknown>;
+}
+
+interface MarketView {
+  overallState: string;
+  structureLabel: string;
+  dimensions: MarketDimension[];
+  improvingConditions: string[];
+  continuingConditions: string[];
+  worseningConditions: string[];
+  confirmedCount: number;
+  unavailableCount: number;
+}
+
 interface AttributionData {
   stockName: string;
   stockCode: string;
@@ -53,6 +72,10 @@ interface AttributionData {
   unknowns?: string[];
   evidenceCompleteness?: EvidenceCompleteness | null;
   reuseReason?: string | null;
+  recheckedAt?: string | null;
+  reuseMessage?: string | null;
+  checkedDimensions?: number | null;
+  marketView?: MarketView | null;
   promptVersion?: string | null;
 }
 
@@ -83,8 +106,33 @@ function safeSourceUrl(value?: string) {
   }
 }
 
+function localizeAnalysisText(text?: string) {
+  const replacements: Array<[RegExp, string]> = [
+    [/\bunavailable\b/gi, '暂无可靠数据'],
+    [/\binsufficient\b/gi, '样本不足'],
+    [/\bnot_applicable\b/gi, '不适用'],
+    [/\bno_signal\b/gi, '未触发'],
+    [/\bwarning\b/gi, '警惕'],
+    [/\bnegative\b/gi, '负向风险'],
+    [/\bpositive\b/gi, '正向信号'],
+    [/\bneutral\b/gi, '中性'],
+    [/\buncertain\b/gi, '暂无法确认'],
+    [/\bavailable\b/gi, '数据可用'],
+    [/\btriggered\b/gi, '已触发'],
+    [/\bnull\b/gi, '本轮没有对应事件'],
+    [/\bMA5\b/g, '5日均线'],
+    [/\bMA10\b/g, '10日均线'],
+    [/\bMA20\b/g, '20日均线'],
+    [/\bROE\b/gi, '净资产收益率'],
+  ];
+  return replacements.reduce(
+    (result, [pattern, value]) => result.replace(pattern, value),
+    text || '暂无判断',
+  );
+}
+
 function renderSafeText(text?: string) {
-  const normalized = (text || '暂无判断')
+  const normalized = localizeAnalysisText(text)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/\\n/g, '\n');
   return normalized.split('\n').map((line, index) => (
@@ -95,10 +143,76 @@ function renderSafeText(text?: string) {
   ));
 }
 
+function formatMetric(value: unknown, suffix = '') {
+  return typeof value === 'number' ? `${value.toFixed(2)}${suffix}` : '暂无数据';
+}
+
+function renderMarketDimensionDetails(dimension: MarketDimension) {
+  const details = dimension.details || {};
+  if (dimension.key === 'priceVolume') {
+    const rules = Array.isArray(details.triggeredRules) ? details.triggeredRules as string[] : [];
+    return (
+      <div className={styles.dimensionEvidence}>
+        <span>涨跌幅 <strong>{formatMetric(details.changePercent, '%')}</strong></span>
+        <span>量比 <strong>{formatMetric(details.volumeRatio)}</strong></span>
+        <span>触发规则 <strong>{rules.length ? rules.join('、') : '无'}</strong></span>
+      </div>
+    );
+  }
+  if (dimension.key === 'continuousFund') {
+    return <div className={styles.dimensionBasis}>验证口径：最近3个交易日的真实主力资金与收盘价必须全部完整。</div>;
+  }
+  if (dimension.key === 'movingAverage') {
+    const periods = Array.isArray(details.periods) ? details.periods as string[] : [];
+    return <div className={styles.dimensionBasis}>可验证破位：前一交易日收盘价在均线上方，当日收盘价跌到均线下方。{periods.length ? ` 当前涉及：${periods.join('、')}` : ''}</div>;
+  }
+  if (dimension.key === 'breadth') {
+    return (
+      <div className={styles.dimensionEvidence}>
+        <span>上涨 <strong>{String(details.advancers ?? '-')} 只</strong> / 共 <strong>{String(details.total ?? '-')} 只</strong></span>
+        <span>占比 <strong>{formatMetric(details.ratioPercent, '%')}</strong></span>
+        <span>触发阈值 <strong>低于 {String(details.triggerThresholdPercent ?? 20)}%</strong></span>
+      </div>
+    );
+  }
+  if (dimension.key === 'leader') {
+    const leaders = Array.isArray(details.leaders) ? details.leaders as Array<Record<string, unknown>> : [];
+    return (
+      <div className={styles.marketLeaderList}>
+        <div className={styles.dimensionBasis}>选择口径：按本轮完整成分行情中的总市值从高到低排序。</div>
+        {leaders.map((leader, index) => (
+          <div key={`${String(leader.symbol || '')}-${index}`} className={styles.marketLeaderRow}>
+            <span>{String(leader.rank || index + 1)}</span>
+            <strong>{String(leader.name || '名称暂缺')} <small>{String(leader.symbol || '')}</small></strong>
+            <em>{formatMetric(leader.change_percent, '%')}</em>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (dimension.key === 'fundFlow') {
+    return (
+      <div className={styles.dimensionEvidence}>
+        <span>方向 <strong>{details.direction === 'inflow' ? '净流入' : details.direction === 'outflow' ? '净流出' : '暂无判断'}</strong></span>
+        <span>同方向板块中 <strong>第 {String(details.rank ?? '-')} / {String(details.total ?? '-')} 名</strong></span>
+        <span>触发阈值 <strong>前 {String(details.triggerRank ?? 5)}</strong></span>
+      </div>
+    );
+  }
+  return null;
+}
+
+function getMarketStateClass(state?: string) {
+  if (state === '风险升高' || state === '偏弱') return styles.marketStateRisk;
+  if (state === '偏强') return styles.marketStatePositive;
+  if (state === '暂无判断') return styles.marketStateUnavailable;
+  return styles.marketStateNeutral;
+}
+
 export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const [data, setData] = useState<AttributionData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('正在初始化 AI 推理引擎...');
+  const [loadingText, setLoadingText] = useState('正在初始化智能分析引擎...');
   const [error, setError] = useState('');
   const [analysisAt, setAnalysisAt] = useState<string | null>(null);
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
@@ -175,7 +289,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
     }
   };
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (selectLatest = true) => {
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_history/${stockCode}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (res.ok) {
@@ -188,7 +302,14 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         setHistoryList(currentItems);
         setBounds(json.bounds || null);
         setCalendarStatus(json.calendarStatus || 'unknown');
-        if (currentItems.length === 0) {
+        if (currentItems.length > 0) {
+          if (selectLatest) {
+            const latestCurrentItem = currentItems[currentItems.length - 1];
+            setData(latestCurrentItem.full_json);
+            setAnalysisAt(latestCurrentItem.full_json.analysisAt || null);
+            setSelectedHistoryItem(null);
+          }
+        } else {
           const allResponse = await fetch(
             `${API_BASE}/api/stock/ai_history_all/${stockCode}`,
             { headers: { 'ngrok-skip-browser-warning': 'true' } },
@@ -267,7 +388,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         '正在获取腾讯财经最新可追溯行情快照...',
         '正在筛选来源日期为当天的可追溯资讯...',
         '正在核对公司、行业、ETF或港股对应信息...',
-        '证据已拼装，AI正在进行影响与风险分析...'
+        '证据已拼装，正在进行影响与风险分析...'
       ];
       let i = 0;
       interval = setInterval(() => {
@@ -283,7 +404,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
   const fetchAttribution = async () => {
     setLoading(true);
     setError('');
-    setLoadingText('正在初始化 AI 推理引擎...');
+    setLoadingText('正在初始化智能分析引擎...');
     try {
       const res = await fetch(`${API_BASE}/api/stock/ai_attribution/${stockCode}?trigger=manual`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('无法获取归因分析数据');
@@ -291,7 +412,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       setData(json);
       setAnalysisAt(json.analysisAt || null);
       setSelectedHistoryItem(null);
-      fetchHistory(); // 刷新时间轴
+      void fetchHistory(false); // 只刷新时间轴，保留本次复核结果
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '网络异常');
     } finally {
@@ -330,8 +451,8 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
       </div>
       <div className={styles.emptyText}>当前交易周期暂无自动追踪记录。点击下方按钮，可基于最新可追溯行情快照生成分析。</div>
       <div className={styles.emptyActions}>
-        <button className={styles.refreshBtn} onClick={fetchAttribution}>
-          生成事件与风险解释
+        <button className={styles.refreshBtn} onClick={fetchAttribution} aria-label="生成事件与风险解释">
+          重新核对最新数据并分析
         </button>
         <button className={styles.historyBtn} onClick={openHistory} disabled={fetchingAllHistory}>
           {fetchingAllHistory ? '加载历史...' : '查看历史记录'}
@@ -380,12 +501,12 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           {data?.resultReused && (
             <span className={styles.lastUpdated}>
               {data.reuseReason === 'evidence_unchanged'
-                ? '证据未变化，复用上次解释'
-                : '20分钟内复用'}
+                ? '已重新核对，证据未变化'
+                : '已核对历史解释'}
             </span>
           )}
-          <button className={styles.refreshBtn} onClick={fetchAttribution} disabled={loading}>
-            生成事件与风险解释
+          <button className={styles.refreshBtn} onClick={fetchAttribution} disabled={loading} aria-label="生成事件与风险解释">
+            重新核对最新数据并分析
           </button>
         </div>
       </div>
@@ -430,7 +551,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                   <span>{item.time} ({triggerLabel(item.trigger_type)})</span>
                 </div>
                 <div style={{ color: '#0f172a', fontWeight: 500, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {item.plain_english_summary}
+                  {localizeAnalysisText(item.plain_english_summary)}
                 </div>
               </div>
             ))}
@@ -453,7 +574,15 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         </div>
       )}
 
-      {data && data.promptVersion !== 'evidence-v2' && (
+      {data?.resultReused && data.reuseMessage && (
+        <div className={styles.recheckNotice}>
+          <strong>本次已重新核对</strong>
+          <span>{localizeAnalysisText(data.reuseMessage)}</span>
+          <small>原分析时间：{data.analysisAt?.replace('T', ' ').slice(0, 19) || '暂缺'} · 本次复核时间：{data.recheckedAt?.replace('T', ' ').slice(0, 19) || '暂缺'}</small>
+        </div>
+      )}
+
+      {data && data.promptVersion !== 'evidence-v3' && (
         <div className={styles.legacyNotice}>
           <strong>旧版历史解释已停止展示详细结论</strong>
           <span>该记录生成于证据化规则上线前，可能包含未经当前来源校验的推断。原始记录仍保留用于审计，请生成一次新的事件与风险解释。</span>
@@ -463,10 +592,60 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
         </div>
       )}
 
-      {data && data.promptVersion === 'evidence-v2' && (
+      {data && data.promptVersion === 'evidence-v3' && (
         <>
+      {data.marketView && (
+        <section className={styles.marketViewCard}>
+          <div className={styles.marketViewHeader}>
+            <div>
+              <span className={styles.marketViewEyebrow}>当前市场结构</span>
+              <div className={styles.marketViewTitleRow}>
+                <strong className={`${styles.marketState} ${getMarketStateClass(data.marketView.overallState)}`}>
+                  {data.marketView.overallState}
+                </strong>
+                <span>{data.marketView.structureLabel}</span>
+              </div>
+            </div>
+            <div className={styles.evidenceCounter}>
+              <strong>{data.marketView.confirmedCount}</strong>
+              <span>/ 7 项已核对</span>
+            </div>
+          </div>
+
+          <div className={styles.marketDimensionTitle}>七项监测证据</div>
+          <div className={styles.marketDimensionGrid}>
+            {data.marketView.dimensions.map((dimension) => (
+              <article key={dimension.key} className={styles.marketDimensionCard}>
+                <div className={styles.marketDimensionHeader}>
+                  <strong>{dimension.label}</strong>
+                  <span className={dimension.state === '暂无判断' ? styles.dimensionStateUnavailable : styles.dimensionState}>{dimension.state}</span>
+                </div>
+                <p>{localizeAnalysisText(dimension.summary)}</p>
+                {renderMarketDimensionDetails(dimension)}
+              </article>
+            ))}
+          </div>
+
+          <div className={styles.conditionGrid}>
+            <div className={styles.conditionImprove}>
+              <strong>风险缓和需要看到</strong>
+              {data.marketView.improvingConditions.map((item, index) => <p key={index}>{localizeAnalysisText(item)}</p>)}
+            </div>
+            <div className={styles.conditionContinue}>
+              <strong>当前结构延续</strong>
+              {data.marketView.continuingConditions.map((item, index) => <p key={index}>{localizeAnalysisText(item)}</p>)}
+            </div>
+            <div className={styles.conditionWorsen}>
+              <strong>风险进一步确认</strong>
+              {data.marketView.worseningConditions.map((item, index) => <p key={index}>{localizeAnalysisText(item)}</p>)}
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className={styles.sectionTitle}>事件与风险解释</div>
-      
+      <details className={styles.analysisDetails}>
+        <summary>查看完整证据、事件解释和暂无法确认的内容</summary>
       <div className={styles.evidenceList}>
         <div className={styles.evidenceItem}>
           <div className={styles.evidenceLabel}>1. 量价与情绪面</div>
@@ -511,6 +690,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           </div>
         </div>
       )}
+      </details>
 
       {data.plainEnglishSummary && (
         <div className={styles.plainEnglishCard} style={{ marginTop: '16px', padding: '16px', borderRadius: '8px', border: '2px solid #1890ff', background: '#e6f4ff', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -518,7 +698,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
           <div>
             <div style={{ fontWeight: 'bold', color: '#0958d9', marginBottom: '4px', fontSize: '0.9rem' }}>通俗总结</div>
             <div style={{ color: '#1677ff', fontSize: '1.2rem', fontWeight: 600 }}>
-              {data.plainEnglishSummary ? data.plainEnglishSummary.replace(/^【[^】]+】\s*/, '') : ''}
+              {localizeAnalysisText(data.plainEnglishSummary?.replace(/^【[^】]+】\s*/, ''))}
             </div>
           </div>
         </div>
@@ -771,7 +951,7 @@ export default function AiAttributionTab({ stockCode }: { stockCode: string }) {
                               </span>
                             </div>
                             <div style={{ color: '#475569', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                              {item.plain_english_summary ? item.plain_english_summary.replace(/^【[^】]+】\s*/, '') : ''}
+                              {localizeAnalysisText(item.plain_english_summary?.replace(/^【[^】]+】\s*/, ''))}
                             </div>
                           </div>
                         ))}

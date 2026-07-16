@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -853,10 +854,13 @@ class AiIntegrityTests(unittest.TestCase):
         ))
         self.assertFalse(matcher({}, {"source_date": "2026-07-14"}))
 
-    def test_ai_endpoint_checks_success_cache_before_new_analysis(self):
+    def test_ai_endpoint_builds_current_evidence_before_manual_reuse(self):
         source = __import__("inspect").getsource(ai_analysis.get_ai_attribution)
 
-        self.assertIn("get_cached_success_result(symbol)", source)
+        self.assertLess(
+            source.index("build_evidence_fingerprint(evidence_snapshot)"),
+            source.index("reuse_unchanged_manual_analysis("),
+        )
 
     def test_manual_refresh_reuses_success_from_existing_history_table(self):
         payload = {
@@ -871,7 +875,9 @@ class AiIntegrityTests(unittest.TestCase):
             "credibility": "高",
             "riskNotice": "注意风险",
             "sourceDate": "2026-07-14",
-            "promptVersion": "evidence-v2",
+            "promptVersion": "evidence-v3",
+            "evidenceFingerprint": "same-fingerprint",
+            "analysisStatus": "success",
         }
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             database,
@@ -914,13 +920,147 @@ class AiIntegrityTests(unittest.TestCase):
                 ai_analysis,
                 "fetch_real_industry_dynamics",
                 return_value={"policies": [], "upstreamDownstream": []},
+            ), patch.object(
+                ai_analysis.alert_repository,
+                "get_latest_signal_state",
+                return_value=None,
+            ), patch.object(
+                ai_analysis.alert_repository,
+                "get_latest_linkage_record",
+                return_value=None,
+            ) as mock_linkage, patch.object(
+                ai_analysis,
+                "build_evidence_fingerprint",
+                return_value="same-fingerprint",
             ):
                 result = ai_analysis.get_ai_attribution("000725")
 
         self.assertEqual(result["sourceDate"], payload["sourceDate"])
         self.assertTrue(result["resultReused"])
-        self.assertEqual(result["reuseReason"], "manual_cache_20m")
+        self.assertEqual(result["reuseReason"], "evidence_unchanged")
+        self.assertIn("recheckedAt", result)
+        self.assertEqual(result["checkedDimensions"], 7)
+        self.assertIn("marketView", result)
         mock_quote.assert_called_once_with("000725")
+        mock_linkage.assert_called_once_with("000725", "2026-07-14")
+
+    def test_ai_uses_date_matched_linkage_even_when_market_snapshot_has_none(self):
+        linkage = {
+            "status": "triggered",
+            "riskStatus": "warning",
+            "priority": "P2",
+            "direction": "negative",
+            "sectorRisk": {
+                "dimensions": {
+                    "breadth": {
+                        "status": "triggered",
+                        "reason": "板块上涨股票5只，共30只，占16.7%",
+                        "details": {
+                            "advancers": 5,
+                            "total": 30,
+                            "ratioPercent": 16.7,
+                        },
+                    },
+                },
+            },
+            "overseasRisk": {
+                "status": "unavailable",
+                "reason": "没有经过业务精确映射的海外标的",
+            },
+        }
+        with patch.dict(ai_analysis.os.environ, {"LLM_API_KEY": ""}, clear=False), patch.object(
+            ai_analysis.database,
+            "is_in_watchlist",
+            return_value=True,
+        ), patch.object(
+            ai_analysis.fetcher,
+            "get_stock_quote",
+            return_value={
+                "name": "京东方A",
+                "change_pct": -9.12,
+                "source_date": "2026-07-15",
+                "source_time": "2026-07-15 16:14:06",
+            },
+        ), patch.object(
+            ai_analysis.fetcher,
+            "get_finance_summary",
+            return_value={},
+        ), patch.object(
+            ai_analysis,
+            "fetch_real_industry_dynamics",
+            return_value={"policies": [], "upstreamDownstream": []},
+        ), patch.object(
+            ai_analysis.alert_repository,
+            "get_latest_signal_state",
+            return_value={
+                "sourceTime": "2026-07-15 16:14:06",
+                "riskStatus": "warning",
+                "priority": "P2",
+                "direction": "negative",
+                "signals": [],
+                "linkageRisk": None,
+            },
+        ), patch.object(
+            ai_analysis.alert_repository,
+            "get_latest_linkage_record",
+            return_value={"risk": linkage, "snapshot": None},
+        ) as mock_linkage:
+            result = ai_analysis.get_ai_attribution("000725")
+
+        breadth = next(
+            item for item in result["marketView"]["dimensions"]
+            if item["key"] == "breadth"
+        )
+        self.assertEqual(breadth["state"], "已触发")
+        self.assertEqual(breadth["details"]["advancers"], 5)
+        mock_linkage.assert_called_once_with("000725", "2026-07-15")
+
+    def test_ai_enriches_legacy_linkage_from_same_verified_raw_snapshot(self):
+        legacy = {
+            "riskStatus": "warning",
+            "sectorRisk": {
+                "dimensions": {
+                    "breadth": {
+                        "status": "triggered",
+                        "reason": "板块上涨家数占比 15.0%",
+                    },
+                },
+            },
+        }
+        raw_snapshot = {
+            "sector": {
+                "status": "available",
+                "name": "光学光电子",
+                "change_percent": -3.2,
+                "advancers": 3,
+                "total": 20,
+                "leader": {
+                    "symbol": "000100",
+                    "name": "TCL科技",
+                    "change_percent": -8.3,
+                },
+                "fund_flow": {
+                    "verified": True,
+                    "direction": "outflow",
+                    "value": -12.0,
+                    "rank": 2,
+                    "total": 40,
+                },
+            },
+            "overseas": [],
+        }
+        with patch.object(
+            ai_analysis.alert_repository,
+            "get_latest_linkage_record",
+            return_value={"risk": legacy, "snapshot": raw_snapshot},
+            create=True,
+        ):
+            result = ai_analysis.get_verified_linkage_risk("000725", "2026-07-15")
+
+        self.assertEqual(
+            result["sectorRisk"]["dimensions"]["breadth"]["details"]["total"],
+            20,
+        )
 
     def test_p1_p2_event_bypasses_recent_cache_and_failure_is_not_retried(self):
         cached_payload = {
@@ -1211,6 +1351,32 @@ class AiIntegrityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validator({**valid_payload, "sourceIds": ["S9"]}, {"S1"})
 
+    def test_ai_output_contract_translates_internal_status_codes_to_chinese(self):
+        payload = {
+            "evidenceChain": {
+                "technicalAndSentiment": "市场状态 warning，方向 negative。",
+                "fundFactor": "连续资金数据 unavailable。",
+                "fundamentalAndNews": "财务状态 available。",
+                "sectorAndMacro": "海外映射 insufficient，事件为 null。",
+            },
+            "scenarioAnalysis": "若方向转为 positive，再核对证据。",
+            "plainEnglishSummary": "当前为 warning，部分证据 unavailable。",
+            "aiJudgment": "negative",
+            "riskNotice": "insufficient",
+        }
+
+        validated = ai_analysis.validate_ai_payload(payload, set())
+        rendered = json.dumps(validated, ensure_ascii=False)
+
+        for forbidden in (
+            "warning", "negative", "positive", "available",
+            "unavailable", "insufficient", "null",
+        ):
+            self.assertNotIn(forbidden, rendered)
+        self.assertIn("警惕", rendered)
+        self.assertIn("负向风险", rendered)
+        self.assertIn("暂无可靠数据", rendered)
+
     def test_evidence_snapshot_uses_verified_risk_and_exact_linkage_only(self):
         builder = getattr(ai_analysis, "build_evidence_snapshot", None)
         self.assertIsNotNone(builder, "统一 AI 证据快照尚未实现")
@@ -1291,6 +1457,129 @@ class AiIntegrityTests(unittest.TestCase):
             "报告期: 2026一季报, 营收: 510.01亿元",
         )
 
+    def test_market_view_marks_short_term_weak_without_fund_or_ma_confirmation(self):
+        builder = getattr(ai_analysis, "build_market_view", None)
+        self.assertIsNotNone(builder, "专业市场结构结论尚未实现")
+        snapshot = {
+            "quote": {"changePercent": -9.12, "volumeRatio": 0.88},
+            "marketRisk": {
+                "riskStatus": "warning",
+                "priority": "P2",
+                "direction": "negative",
+                "reason": "单日涨跌幅绝对值不低于5%；当日振幅不低于8%",
+                "signals": [
+                    {"code": "extreme_price_move", "label": "单日涨跌幅绝对值不低于5%", "direction": "negative"},
+                    {"code": "high_amplitude", "label": "当日振幅不低于8%", "direction": "negative"},
+                ],
+                "fundFlowRisk": {"status": "available", "reason": "近3日资金规则未触发"},
+                "movingAverageRisk": {"status": "available", "reason": "均线破位规则未触发"},
+            },
+            "linkageRisk": {
+                "riskStatus": "warning",
+                "direction": "negative",
+                "sectorRisk": {
+                    "dimensions": {
+                        "breadth": {"status": "triggered", "reason": "上涨3只/共20只，占15.0%", "details": {"advancers": 3, "total": 20}},
+                        "leader": {"status": "triggered", "reason": "龙头下跌8.3%", "details": {"leaders": [{"name": "TCL科技"}]}},
+                        "fundFlow": {"status": "triggered", "reason": "资金净流出排名第2", "details": {"rank": 2, "total": 86}},
+                    },
+                },
+                "overseasRisk": {"status": "unavailable", "reason": "没有精确业务映射"},
+            },
+        }
+
+        view = builder(snapshot)
+
+        self.assertEqual(view["overallState"], "偏弱")
+        self.assertIn("板块同步承压", view["structureLabel"])
+        self.assertIn("资金与均线尚未二次确认", view["structureLabel"])
+        self.assertEqual(view["confirmedCount"], 6)
+        self.assertEqual(view["unavailableCount"], 1)
+
+    def test_market_view_escalates_when_fund_ma_and_sector_confirm(self):
+        builder = getattr(ai_analysis, "build_market_view", None)
+        self.assertIsNotNone(builder)
+        snapshot = {
+            "quote": {"changePercent": -6.0, "volumeRatio": 2.3},
+            "marketRisk": {
+                "riskStatus": "warning",
+                "direction": "negative",
+                "signals": [
+                    {"code": "extreme_price_move", "direction": "negative"},
+                    {"code": "consecutive_fund_outflow", "direction": "negative"},
+                    {"code": "ma_breakdown", "direction": "negative"},
+                ],
+                "fundFlowRisk": {"status": "triggered", "reason": "连续3日资金净流出"},
+                "movingAverageRisk": {"status": "triggered", "reason": "放量跌破20日均线"},
+            },
+            "linkageRisk": {
+                "riskStatus": "warning",
+                "direction": "negative",
+                "sectorRisk": {"dimensions": {}},
+                "overseasRisk": {"status": "no_signal", "reason": "精确映射标的未触发"},
+            },
+        }
+
+        view = builder(snapshot)
+
+        self.assertEqual(view["overallState"], "风险升高")
+        self.assertIn("价格、资金、均线与板块", view["structureLabel"])
+
+    def test_market_view_reports_mixed_signals_instead_of_forcing_direction(self):
+        builder = getattr(ai_analysis, "build_market_view", None)
+        self.assertIsNotNone(builder)
+        snapshot = {
+            "quote": {"changePercent": 3.0, "volumeRatio": 2.1},
+            "marketRisk": {
+                "riskStatus": "watch",
+                "direction": "positive",
+                "signals": [{"code": "high_volume_ratio", "direction": "positive"}],
+                "fundFlowRisk": {"status": "available", "reason": "未形成连续信号"},
+                "movingAverageRisk": {"status": "available", "reason": "未发生均线破位"},
+            },
+            "linkageRisk": {
+                "riskStatus": "warning",
+                "direction": "negative",
+                "sectorRisk": {"dimensions": {}},
+                "overseasRisk": {"status": "unavailable", "reason": "没有精确业务映射"},
+            },
+        }
+
+        view = builder(snapshot)
+
+        self.assertEqual(view["overallState"], "中性")
+        self.assertIn("多空信号并存", view["structureLabel"])
+
+    def test_market_view_uses_only_chinese_user_facing_status_text(self):
+        builder = getattr(ai_analysis, "build_market_view", None)
+        self.assertIsNotNone(builder)
+        view = builder({
+            "quote": {"changePercent": None},
+            "marketRisk": {"status": "unavailable", "reason": "量价数据缺失"},
+            "linkageRisk": {
+                "status": "unavailable",
+                "sectorRisk": {"dimensions": {}},
+                "overseasRisk": {"status": "unavailable", "reason": "没有精确映射"},
+            },
+        })
+        visible_strings = []
+
+        def collect_values(value):
+            if isinstance(value, dict):
+                for item in value.values():
+                    collect_values(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect_values(item)
+            elif isinstance(value, str):
+                visible_strings.append(value)
+
+        collect_values(view)
+        rendered = " ".join(visible_strings)
+        self.assertEqual(view["overallState"], "暂无判断")
+        for forbidden in ("warning", "negative", "positive", "available", "unavailable", "insufficient", "null"):
+            self.assertNotIn(forbidden, rendered)
+
     def test_evidence_fingerprint_is_stable_and_changes_with_material_risk(self):
         fingerprint = getattr(ai_analysis, "build_evidence_fingerprint", None)
         self.assertIsNotNone(fingerprint, "AI 证据指纹尚未实现")
@@ -1321,6 +1610,7 @@ class AiIntegrityTests(unittest.TestCase):
             "plainEnglishSummary": "此前已按相同证据完成解释。",
             "analysisStatus": "success",
             "evidenceFingerprint": "same-fingerprint",
+            "promptVersion": "evidence-v3",
         }
         trigger = "auto:2026-07-15T11:30"
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
@@ -1413,6 +1703,73 @@ class AiIntegrityTests(unittest.TestCase):
 
 
 class MarketIntegrityTests(unittest.TestCase):
+    def test_a_share_finance_uses_direct_operating_cash_flow_total(self):
+        summary_report = {
+            "REPORT_DATE": "2026-03-31 00:00:00",
+            "REPORT_DATE_NAME": "2026一季报",
+            "REPORT_TYPE": "一季报",
+            "TOTALOPERATEREVE": 1_000.0,
+            "PARENTNETPROFIT": 100.0,
+            "EPSJB": 2.0,
+            "MGJYXJJE": 3.0,
+        }
+        responses = {
+            "type=0": {"data": [summary_report]},
+            "type=1": {"data": [summary_report]},
+            "RPT_DMSK_FN_CASHFLOW": {
+                "result": {
+                    "data": [{
+                        "SECUCODE": "000725.SZ",
+                        "REPORT_DATE": "2026-03-31 00:00:00",
+                        "NETCASH_OPERATE": 123.45,
+                    }],
+                },
+            },
+        }
+
+        def fake_get(url, **_kwargs):
+            response = MagicMock()
+            response.json.return_value = next(
+                payload for marker, payload in responses.items() if marker in url
+            )
+            return response
+
+        with patch.object(main.requests, "get", side_effect=fake_get):
+            result = main.get_finance_data("000725")
+
+        self.assertEqual(result["latest"]["operateCashFlow"], 123.45)
+
+    def test_a_share_finance_preserves_zero_and_missing_direct_cash_flow(self):
+        formatter = getattr(main, "format_a_share_finance_reports", None)
+        self.assertIsNotNone(formatter, "A股财报尚未使用直接现金流总额")
+        reports = [{
+            "REPORT_DATE": "2026-03-31 00:00:00",
+            "REPORT_DATE_NAME": "2026一季报",
+            "REPORT_TYPE": "一季报",
+            "PARENTNETPROFIT": 100.0,
+            "EPSJB": 2.0,
+            "MGJYXJJE": 3.0,
+        }]
+
+        zero_result = formatter(reports, {"2026-03-31": 0.0})
+        missing_result = formatter(reports, {})
+
+        self.assertEqual(zero_result[0]["operateCashFlow"], 0.0)
+        self.assertIsNone(missing_result[0]["operateCashFlow"])
+
+    def test_company_finance_summary_selects_latest_report_period(self):
+        selector = getattr(main, "select_latest_financial_record", None)
+        self.assertIsNotNone(selector, "公司概览尚未显式选择最新报告期")
+        records = [
+            {"REPORTDATE": "2025-03-31 00:00:00", "PARENT_NETPROFIT": 1},
+            {"REPORTDATE": "2026-03-31 00:00:00", "PARENT_NETPROFIT": 2},
+            {"REPORTDATE": "2025-12-31 00:00:00", "PARENT_NETPROFIT": 3},
+        ]
+
+        latest = selector(records)
+
+        self.assertEqual(latest["REPORTDATE"], "2026-03-31 00:00:00")
+
     def test_industry_fund_flow_uses_explicit_market_status(self):
         self.assertEqual(
             main.format_industry_fund_flow("trading", False, None, False),

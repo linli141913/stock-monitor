@@ -35,7 +35,7 @@ export default function SearchMonitorBar({ onSearch }: Props) {
       </button>
       <div className={styles.badge}>
         <Mail size={14} />
-        <span>Web端监测 + 邮件提醒</span>
+        <span>网页监测 + 邮件提醒</span>
       </div>
     </div>
   );
