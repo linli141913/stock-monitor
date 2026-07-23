@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.linjian.stock-monitor.ngrok</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/linjian/Library/Application Support/stock-monitor/launchd/run-ngrok.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Volumes/HermesSSD/AntigravityData/量化监测-股票</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/linjian/Library/Logs/stock-monitor/ngrok.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/linjian/Library/Logs/stock-monitor/ngrok.stderr.log</string>
+</dict>
+</plist>

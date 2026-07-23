@@ -475,6 +475,12 @@ def start_scheduler():
             max_instances=1,
             coalesce=True,
         )
+    # V5雷达保持默认关闭；只有两个RADAR开关同时开启时才注册分频影子任务。
+    from radar.runtime import register_production_shadow_jobs
+    register_production_shadow_jobs(
+        scheduler,
+        database_path=database.DB_PATH,
+    )
     scheduler.start()
     print("后台自动化追踪与资讯采集调度器已启动。")
 # ── 公共工具函数 ──────────────────────────────────────────────

@@ -60,6 +60,7 @@ def record_task_started(task_name: str) -> None:
         _TASKS[task_name] = {
             **current,
             "status": "running",
+            "lastOutcome": "running",
             "lastStartedAt": _now_iso(),
             "lastError": None,
         }
@@ -71,6 +72,7 @@ def record_task_success(task_name: str, item_count: Optional[int] = None) -> Non
         _TASKS[task_name] = {
             **current,
             "status": "healthy",
+            "lastOutcome": "succeeded",
             "lastSuccessAt": _now_iso(),
             "lastError": None,
             "itemCount": item_count,
@@ -90,6 +92,7 @@ def record_task_failure(task_name: str, error: Exception) -> None:
         _TASKS[task_name] = {
             **current,
             "status": "failed",
+            "lastOutcome": "failed",
             "lastFailedAt": _now_iso(),
             "lastError": type(error).__name__,
             "consecutiveFailures": consecutive_failures,
@@ -107,6 +110,26 @@ def record_task_failure(task_name: str, error: Exception) -> None:
             )
     if alert_event is not None:
         _save_system_alert(alert_event)
+
+
+def record_task_skipped(task_name: str, reason: str) -> None:
+    """记录非失败跳过，同时保留上一轮已确认的健康或失败状态。"""
+    reason = str(reason or "unspecified").strip() or "unspecified"
+    with _LOCK:
+        current = _TASKS.get(task_name, {})
+        previous_status = current.get("status")
+        status = (
+            previous_status
+            if previous_status in {"healthy", "failed"}
+            else "skipped"
+        )
+        _TASKS[task_name] = {
+            **current,
+            "status": status,
+            "lastOutcome": "skipped",
+            "lastSkippedAt": _now_iso(),
+            "lastSkipReason": reason,
+        }
 
 
 def get_task_states() -> Dict[str, Dict[str, Any]]:

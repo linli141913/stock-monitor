@@ -43,7 +43,8 @@ def create_database_backup(
     if backup_path.exists():
         raise FileExistsError(f"备份文件已存在：{backup_path}")
 
-    with sqlite3.connect(source) as source_connection:
+    source_uri = f"{source.as_uri()}?mode=ro"
+    with sqlite3.connect(source_uri, uri=True) as source_connection:
         with sqlite3.connect(backup_path) as backup_connection:
             source_connection.backup(backup_connection)
 

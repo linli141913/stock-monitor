@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.linjian.stock-monitor.fastapi</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/linjian/Library/Application Support/stock-monitor/launchd/run-backend.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Volumes/HermesSSD/AntigravityData/量化监测-股票/backend</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>RADAR_ENABLED</key>
+        <string>true</string>
+        <key>RADAR_SHADOW_MODE</key>
+        <string>true</string>
+        <key>RADAR_SCAN_INTERVAL_SECONDS</key>
+        <string>180</string>
+        <key>RADAR_ETF_SCAN_INTERVAL_SECONDS</key>
+        <string>300</string>
+        <key>RADAR_SECTOR_SHADOW_ENABLED</key>
+        <string>true</string>
+        <key>RADAR_SECTOR_SCAN_INTERVAL_SECONDS</key>
+        <string>180</string>
+        <key>RADAR_MARKET_SHADOW_ENABLED</key>
+        <string>false</string>
+        <key>RADAR_MARKET_SCAN_INTERVAL_SECONDS</key>
+        <string>180</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/linjian/Library/Logs/stock-monitor/backend.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/linjian/Library/Logs/stock-monitor/backend.stderr.log</string>
+</dict>
+</plist>
