@@ -213,6 +213,11 @@ class RadarRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["healthReasons"], ["source_returned_no_rows"])
         self.assertEqual(payload["sourceIssues"][0]["code"], "empty")
         self.assertEqual(payload["diagnostics"], diagnostics)
+        latest_run = self.repository.get_latest_run_row("run-")
+        self.assertEqual(latest_run["radarRunId"], "run-1")
+        source_rows = self.repository.list_source_status_rows("run-1")
+        self.assertEqual(len(source_rows), 1)
+        self.assertEqual(source_rows[0]["details"]["diagnostics"], diagnostics)
 
         changed_health = health.model_copy(update={"status": SourceStatus.DEGRADED})
         with self.assertRaises(RepositoryConflictError):

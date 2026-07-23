@@ -236,6 +236,76 @@ class RadarRepository:
             return None
         return _parse_datetime(str(row[0]), "来源健康as_of")
 
+    def get_latest_run_row(self, run_id_prefix: str) -> Optional[Dict[str, Any]]:
+        """按稳定任务前缀读取最近一次运行，不改变任何运行状态。"""
+        run_id_prefix = run_id_prefix.strip()
+        if not run_id_prefix:
+            raise ValueError("run_id_prefix不能为空")
+        row = self._connection.execute(
+            "SELECT radar_run_id, as_of, status, shadow_mode, rule_version_id, "
+            "started_at, completed_at, error_code "
+            "FROM radar_runs WHERE radar_run_id LIKE ? "
+            "ORDER BY as_of DESC, started_at DESC LIMIT 1",
+            (f"{run_id_prefix}%",),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "radarRunId": row[0],
+            "asOf": _parse_datetime(str(row[1]), "运行as_of"),
+            "status": row[2],
+            "shadowMode": bool(row[3]),
+            "ruleVersionId": row[4],
+            "startedAt": _parse_datetime(str(row[5]), "运行started_at"),
+            "completedAt": (
+                _parse_datetime(str(row[6]), "运行completed_at")
+                if row[6] is not None
+                else None
+            ),
+            "errorCode": row[7],
+        }
+
+    def list_source_status_rows(
+        self,
+        radar_run_id: str,
+    ) -> Tuple[Dict[str, Any], ...]:
+        """读取一轮运行的来源健康摘要，不返回证券明细。"""
+        radar_run_id = radar_run_id.strip()
+        if not radar_run_id:
+            raise ValueError("radar_run_id不能为空")
+        rows = self._connection.execute(
+            "SELECT batch_id, source, as_of, source_time, fetched_at, status, "
+            "expected_count, returned_count, row_coverage, "
+            "required_field_coverage_json, issues_json "
+            "FROM radar_source_status WHERE radar_run_id=? "
+            "ORDER BY batch_id, source",
+            (radar_run_id,),
+        ).fetchall()
+        return tuple({
+            "batchId": row[0],
+            "source": row[1],
+            "asOf": _parse_datetime(str(row[2]), "来源状态as_of"),
+            "sourceTime": (
+                _parse_datetime(str(row[3]), "来源状态source_time")
+                if row[3] is not None
+                else None
+            ),
+            "fetchedAt": _parse_datetime(
+                str(row[4]),
+                "来源状态fetched_at",
+            ),
+            "status": row[5],
+            "expectedCount": row[6],
+            "returnedCount": row[7],
+            "rowCoverage": row[8],
+            "requiredFieldCoverage": _load_json(
+                row[9],
+                "来源状态字段覆盖率",
+                dict,
+            ),
+            "details": _load_json(row[10], "来源状态详情", dict),
+        } for row in rows)
+
     def _require_industry_storage(self) -> None:
         try:
             row = self._connection.execute(
@@ -950,6 +1020,17 @@ class RadarRepository:
             } for item in index_rows),
         }
 
+    def get_latest_market_feature_row(self) -> Optional[Dict[str, Any]]:
+        """读取最近一轮已持久化市场聚合，不把失败运行冒充快照。"""
+        self._require_market_storage()
+        row = self._connection.execute(
+            "SELECT radar_run_id FROM market_environment_snapshots "
+            "ORDER BY as_of DESC, radar_run_id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return self.get_market_feature_row(str(row[0]))
+
     def record_industry_classification(
         self,
         snapshot: IndustryClassificationSnapshot,
@@ -1474,6 +1555,17 @@ class RadarRepository:
                 dict,
             ),
         } for row in rows)
+
+    def list_latest_sector_feature_rows(self) -> Tuple[Dict[str, Any], ...]:
+        """读取最近一轮已持久化行业聚合，不跨运行拼接。"""
+        self._require_industry_storage()
+        row = self._connection.execute(
+            "SELECT radar_run_id FROM sector_feature_snapshots "
+            "ORDER BY as_of DESC, radar_run_id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return ()
+        return self.list_sector_feature_rows(str(row[0]))
 
     def sync_security_master(
         self,

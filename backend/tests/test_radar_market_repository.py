@@ -177,7 +177,9 @@ class RadarMarketRepositoryTests(unittest.TestCase):
         )
 
         row = self.repository.get_market_feature_row("market-run")
+        latest_row = self.repository.get_latest_market_feature_row()
         self.assertEqual(row["radarRunId"], "market-run")
+        self.assertEqual(latest_row["radarRunId"], "market-run")
         self.assertEqual(row["indexBatchId"], "indices-1")
         self.assertEqual(row["quoteBatchId"], "quotes-1")
         self.assertEqual(

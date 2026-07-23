@@ -16,6 +16,7 @@ import news_api
 from news_api import router as news_router
 from ai_analysis import router as ai_analysis_router, get_ai_attribution
 from alerts_api import router as alerts_router
+from radar.api import router as radar_router
 from pydantic import BaseModel
 import database
 import alert_repository
@@ -81,6 +82,7 @@ async def protect_sensitive_endpoints(request: Request, call_next):
 app.include_router(ai_analysis_router)
 app.include_router(news_router)
 app.include_router(alerts_router)
+app.include_router(radar_router)
 
 # ── 后台定时追踪任务 ──────────────────────────────────────────────
 AI_ANALYSIS_SLOTS = ("10:30", "11:30", "15:00", "22:00")

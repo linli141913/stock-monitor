@@ -337,7 +337,9 @@ class RadarIndustryRepositoryTests(unittest.TestCase):
         )
 
         rows = self.repository.list_sector_feature_rows("sector-run")
+        latest_rows = self.repository.list_latest_sector_feature_rows()
         self.assertEqual(len(rows), 1)
+        self.assertEqual(latest_rows, rows)
         self.assertEqual(rows[0]["equalReturn"], 0.0)
         self.assertIsNone(rows[0]["capWeightedReturn"])
         self.assertIsNone(rows[0]["exTopReturn"])

@@ -1,0 +1,448 @@
+.panel {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #dfe6f1;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(30, 64, 175, 0.045);
+  overflow: hidden;
+}
+
+.panelHeader {
+  min-height: 58px;
+  padding: 12px 15px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e7edf5;
+}
+
+.panelHeader h2 {
+  color: #172238;
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0 0 3px;
+}
+
+.panelHeader p {
+  color: #7c889c;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.neutralBadge,
+.stageBadge,
+.goodBadge,
+.alertBadge {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.neutralBadge,
+.stageBadge {
+  background: #f5f7fb;
+  border: 1px solid #d8e0ec;
+  color: #5e6a7d;
+}
+
+.goodBadge {
+  background: #ebfbf3;
+  border: 1px solid #bee9d2;
+  color: #0e8a55;
+}
+
+.alertBadge {
+  background: #fff2f1;
+  border: 1px solid #f5c5c1;
+  color: #c9423d;
+}
+
+.statusStrip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid #dce5f1;
+  border-radius: 11px;
+  overflow: hidden;
+  box-shadow: 0 7px 18px rgba(15, 23, 42, 0.04);
+}
+
+.statusCell {
+  min-width: 0;
+  padding: 9px 14px;
+  border-right: 1px solid #e7edf5;
+}
+
+.statusCell:last-child {
+  border-right: 0;
+}
+
+.statusCell > span {
+  display: block;
+  color: #8a96a8;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.statusCell > strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusGood {
+  color: #078451;
+}
+
+.statusDanger {
+  color: #d23838;
+}
+
+.statusWarning {
+  color: #b56b06;
+}
+
+.statusNeutral {
+  color: #596579;
+}
+
+.statusAccent {
+  color: #2563eb;
+}
+
+.marketBreadth {
+  padding: 17px 15px 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.marketBreadth div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.marketBreadth strong {
+  color: #2c3a50;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.marketBreadth span {
+  color: #7f8a9c;
+  font-size: 11px;
+}
+
+.rise {
+  color: #e5484d !important;
+}
+
+.fall {
+  color: #0ca765 !important;
+}
+
+.muted {
+  color: #8490a2;
+}
+
+.indexLine {
+  padding: 0 15px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  color: #667287;
+  font-size: 11px;
+}
+
+.indexLine span {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.unitNotice {
+  margin: 0 15px 14px;
+  padding: 8px 10px;
+  border: 1px solid #f0d39a;
+  border-radius: 7px;
+  background: #fff8e8;
+  color: #9a6416;
+  font-size: 11px;
+}
+
+.warningBanner,
+.errorBanner {
+  margin: 12px 15px 0;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.warningBanner {
+  border: 1px solid #efd095;
+  background: #fff7e7;
+  color: #95600f;
+}
+
+.errorBanner {
+  border: 1px solid #f0c1be;
+  background: #fff1f0;
+  color: #b73834;
+}
+
+.inlineEmpty {
+  padding: 38px 16px;
+  color: #8591a4;
+  font-size: 12px;
+  text-align: center;
+}
+
+.textButton {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  background: #f8faff;
+  border: 1px solid #bfd1fb;
+  border-radius: 7px;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.textButton:hover {
+  background: #eef4ff;
+}
+
+.sectorList {
+  display: flex;
+  flex-direction: column;
+}
+
+.sectorGrid {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sectorCard {
+  padding: 14px 15px;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.sectorGrid .sectorCard {
+  border: 1px solid #e1e8f2;
+  border-radius: 9px;
+  background: #fbfcff;
+}
+
+.sectorList .sectorCard:last-child {
+  border-bottom: 0;
+}
+
+.sectorTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sectorTitleRow > div {
+  min-width: 0;
+}
+
+.sectorTitleRow strong {
+  display: block;
+  color: #1d283c;
+  font-size: 14px;
+  margin-bottom: 3px;
+}
+
+.sectorTitleRow span,
+.sectorMetrics,
+.sectorFooter {
+  color: #7c889c;
+  font-size: 11px;
+}
+
+.sectorTitleRow > b {
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sectorMetrics {
+  margin-top: 9px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sectorFooter {
+  margin-top: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usableBadge,
+.partialBadge {
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.usableBadge {
+  background: #eaf4ff;
+  color: #2167cc;
+}
+
+.partialBadge {
+  background: #fff5df;
+  color: #a5650b;
+}
+
+.gateGrid {
+  padding: 13px 15px 15px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gateGrid > div {
+  min-width: 0;
+  padding-right: 10px;
+  border-right: 1px solid #e5ebf3;
+}
+
+.gateGrid > div:last-child {
+  border-right: 0;
+}
+
+.gateGrid span,
+.gateGrid strong,
+.gateGrid small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gateGrid span {
+  color: #6d788a;
+  font-size: 11px;
+}
+
+.gateGrid strong {
+  margin-top: 4px;
+  color: #253249;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gateGrid small {
+  margin-top: 3px;
+  color: #98a2b1;
+  font-size: 10px;
+}
+
+.stateBody {
+  min-height: 205px;
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.compactStatePanel .stateBody {
+  min-height: 145px;
+}
+
+.stateIcon {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #bed2fd;
+  border-radius: 13px;
+  background: #f1f6ff;
+  color: #2563eb;
+}
+
+.stateBody strong {
+  color: #263247;
+  font-size: 15px;
+}
+
+.stateBody p {
+  max-width: 580px;
+  margin-top: 7px;
+  color: #788498;
+  font-size: 12px;
+}
+
+.stateBadges {
+  margin-top: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.stateBadges span {
+  padding: 4px 9px;
+  border: 1px solid #d6dfec;
+  border-radius: 6px;
+  background: #f8faff;
+  color: #68758a;
+  font-size: 11px;
+}
+
+.state_failed .stateIcon {
+  border-color: #f2bbb7;
+  background: #fff2f1;
+  color: #d43e39;
+}
+
+.state_stale .stateIcon {
+  border-color: #ecd196;
+  background: #fff8e8;
+  color: #aa6a10;
+}
+
+.state_empty .stateIcon,
+.state_not_ready .stateIcon,
+.state_not_enabled .stateIcon {
+  border-color: #d6dfec;
+  background: #f5f7fb;
+  color: #69768a;
+}
+
+@media (max-width: 1100px) {
+  .statusStrip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .statusCell:nth-child(4) {
+    border-right: 0;
+  }
+
+  .sectorGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

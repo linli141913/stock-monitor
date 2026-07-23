@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutList, LineChart, Bell, TrendingUp, ArrowUp } from 'lucide-react';
+import { LayoutList, LineChart, Bell, TrendingUp, ArrowUp, Activity } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
@@ -53,6 +53,7 @@ export default function AppHeader() {
 
   const navItems = [
     { name: '首页', path: '/', icon: <LineChart size={18} /> },
+    { name: '主线雷达', path: '/radar', icon: <Activity size={18} /> },
     { name: '监测列表', path: '/watchlist', icon: <LayoutList size={18} /> },
     { name: '提醒中心', path: '/alerts', icon: <Bell size={18} /> },
     { name: '行业洞察', path: '/industry', icon: <TrendingUp size={18} /> },
