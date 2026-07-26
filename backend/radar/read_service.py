@@ -4,6 +4,13 @@ from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Tuple
 import market_calendar
 from radar.api_contracts import (
     RadarDeferredModule,
+    RadarEtfAttempt,
+    RadarEtfCandidateItem,
+    RadarEtfModule,
+    RadarEtfProductItem,
+    RadarEtfSnapshot,
+    RadarEtfSummary,
+    RadarEtfsResponse,
     RadarFreshness,
     RadarLastAttempt,
     RadarLastSuccess,
@@ -17,6 +24,7 @@ from radar.api_contracts import (
     RadarSourceStatus,
 )
 from radar.config import RadarSettings
+from radar.etf_repository import EtfRepository
 from radar.repository import RadarRepository
 
 
@@ -36,11 +44,13 @@ class RadarReadService:
         settings: RadarSettings,
         clock: Callable[[], datetime],
         market_status_provider=market_calendar.get_market_status,
+        etf_repository: Optional[EtfRepository] = None,
     ):
         self.repository = repository
         self.settings = settings
         self.clock = clock
         self.market_status_provider = market_status_provider
+        self.etf_repository = etf_repository
 
     def _market_session(self, now: datetime) -> RadarMarketSession:
         status, calendar_day = self.market_status_provider("cn", now)
@@ -365,6 +375,286 @@ class RadarReadService:
             items=visible_items,
         )
 
+    @staticmethod
+    def _empty_etf_summary() -> RadarEtfSummary:
+        return RadarEtfSummary(
+            productCount=0,
+            eligibleProductCount=0,
+            candidateGroupCount=0,
+            computedCount=0,
+            staleCount=0,
+            missingCount=0,
+            coverage=0.0,
+            formalUsableCount=0,
+            ruleVersionId=None,
+            reasonCodes=[],
+        )
+
+    @classmethod
+    def _etf_not_enabled(cls, reason: str = "stage_not_enabled") -> RadarEtfModule:
+        return RadarEtfModule(
+            state="not_enabled",
+            quality="unavailable",
+            usingLastSuccess=False,
+            lastAttempt=None,
+            lastSuccess=None,
+            freshness=RadarFreshness(
+                ageSeconds=None,
+                staleAfterSeconds=630,
+                isStale=False,
+                reasonCodes=[reason],
+            ),
+            sources=[],
+            summary=cls._empty_etf_summary(),
+            products=[],
+            candidates=[],
+            reasonCodes=[reason],
+        )
+
+    @staticmethod
+    def _public_etf_product(row: Dict[str, Any]) -> Dict[str, Any]:
+        product = row["product"].model_dump(mode="json", by_alias=True)
+        return {
+            "symbol": product["symbol"],
+            "officialName": product["officialName"],
+            "exchange": product["exchange"],
+            "productType": product["productType"],
+            "managementStyle": product["managementStyle"],
+            "assetClass": product["assetClass"],
+            "targetIndexName": product.get("targetIndexName"),
+            "classificationMappingVersion": product[
+                "classificationMappingVersion"
+            ],
+            "classificationReasons": list(
+                product.get("classificationReasons") or []
+            ),
+            "sourceContractId": row["sourceContractId"],
+            "source": product["source"],
+            "sourceTime": row.get("sourceTime"),
+            "fetchedAt": product["fetchedAt"],
+            "versionTimeKind": row["versionTimeKind"],
+            "officialEffectiveFrom": row.get("officialEffectiveFrom"),
+            "firstObservedAt": row["firstObservedAt"],
+            "effectiveFrom": row["effectiveFrom"],
+            "historicalReplayReady": row["historicalReplayReady"],
+            "evidenceUrl": row.get("evidenceUrl"),
+        }
+
+    @staticmethod
+    def _public_etf_candidate(row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "industryCode": row["industryCode"],
+            "indexGroupKey": row["indexGroupKey"],
+            "rank": row["rank"],
+            "representativeSymbol": row.get("representativeSymbol"),
+            "alternativeSymbols": list(row.get("alternativeSymbols") or []),
+            "industryExposures": list(row.get("industryExposures") or []),
+            "rankingComponents": dict(row.get("rankingComponents") or {}),
+            "entryReasons": list(row.get("entryReasons") or []),
+            "riskReasons": list(row.get("riskReasons") or []),
+            "exitConditions": list(row.get("exitConditions") or []),
+            "formalUsable": bool(row.get("formalUsable", False)),
+        }
+
+    @staticmethod
+    def _public_etf_attempt(row: Dict[str, Any]) -> RadarEtfAttempt:
+        issue_codes = []
+        for issue in row.get("issues") or []:
+            if isinstance(issue, dict) and issue.get("code"):
+                issue_codes.append(str(issue["code"]))
+            elif issue:
+                issue_codes.append(str(issue))
+        return RadarEtfAttempt.model_validate({
+            **row,
+            "issues": list(row.get("issues") or []),
+        })
+
+    @staticmethod
+    def _etf_source_status(row: Dict[str, Any]) -> RadarSourceStatus:
+        issue_codes = []
+        for issue in row.get("issues") or []:
+            if isinstance(issue, dict) and issue.get("code"):
+                issue_codes.append(str(issue["code"]))
+            elif issue:
+                issue_codes.append(str(issue))
+        return RadarSourceStatus(
+            batchId=f'{row["productMasterRunId"]}:product-master',
+            source=row["source"],
+            asOf=row["asOf"],
+            sourceTime=row.get("sourceTime"),
+            fetchedAt=row["fetchedAt"],
+            status=row["status"],
+            expectedCount=row.get("expectedCount"),
+            returnedCount=row["returnedCount"],
+            rowCoverage=row.get("rowCoverage"),
+            requiredFieldCoverage=row.get("requiredFieldCoverage") or {},
+            reasonCodes=list(dict.fromkeys(issue_codes)),
+        )
+
+    def _etf_module(
+        self,
+        *,
+        now: datetime,
+        is_trading: bool,
+    ) -> RadarEtfModule:
+        if not self.settings.etf_stage5_enabled:
+            return self._etf_not_enabled()
+        if not self.settings.enabled or not self.settings.shadow_mode:
+            return self._etf_not_enabled("radar_not_enabled")
+        if self.etf_repository is None:
+            return RadarEtfModule(
+                state="not_ready",
+                quality="unavailable",
+                usingLastSuccess=False,
+                lastAttempt=None,
+                lastSuccess=None,
+                freshness=RadarFreshness(
+                    ageSeconds=None,
+                    staleAfterSeconds=self.settings.etf_scan_interval_seconds * 2 + 30,
+                    isStale=False,
+                    reasonCodes=["stage5_storage_not_ready"],
+                ),
+                sources=[],
+                summary=self._empty_etf_summary(),
+                products=[],
+                candidates=[],
+                reasonCodes=["stage5_storage_not_ready"],
+            )
+
+        read_failed = False
+        try:
+            attempt_row = self.etf_repository.get_latest_product_master_run()
+            success_row = self.etf_repository.get_latest_product_master_run(
+                successful_only=True,
+            )
+            profiles = self.etf_repository.list_current_product_profiles(now)
+            candidate_row = self.etf_repository.get_latest_candidate_snapshot()
+        except Exception:
+            attempt_row = None
+            success_row = None
+            profiles = ()
+            candidate_row = None
+            read_failed = True
+
+        last_success = None
+        if candidate_row is not None:
+            last_success = RadarEtfSnapshot(
+                radarRunId=candidate_row["radarRunId"],
+                asOf=candidate_row["asOf"],
+                sourceTime=candidate_row.get("sourceTime"),
+                fetchedAt=candidate_row.get("fetchedAt", candidate_row["asOf"]),
+            )
+        elif success_row is not None:
+            last_success = RadarEtfSnapshot(
+                radarRunId=success_row["productMasterRunId"],
+                asOf=success_row["asOf"],
+                sourceTime=success_row.get("sourceTime"),
+                fetchedAt=success_row["fetchedAt"],
+            )
+        freshness = self._freshness(
+            last_success=(
+                RadarLastSuccess(
+                    radarRunId=last_success.radar_run_id,
+                    asOf=last_success.as_of,
+                    sourceTime=last_success.source_time,
+                    fetchedAt=last_success.fetched_at,
+                )
+                if last_success is not None
+                else None
+            ),
+            now=now,
+            scan_interval_seconds=self.settings.etf_scan_interval_seconds,
+            is_trading=is_trading,
+        )
+        products = [
+            self._public_etf_product(row)
+            for row in profiles
+        ]
+        candidates = [
+            self._public_etf_candidate(row)
+            for row in (candidate_row or {}).get("entries") or []
+        ]
+        summary_source = candidate_row or {}
+        summary = RadarEtfSummary(
+            productCount=len(products),
+            eligibleProductCount=int(summary_source.get("eligibleProductCount", 0)),
+            candidateGroupCount=int(summary_source.get("candidateGroupCount", 0)),
+            computedCount=int(summary_source.get("computedCount", 0)),
+            staleCount=int(summary_source.get("staleCount", 0)),
+            missingCount=int(summary_source.get("missingCount", 0)),
+            coverage=float(summary_source.get("coverage", 0.0)),
+            formalUsableCount=sum(
+                1 for candidate in candidates if candidate["formalUsable"]
+            ),
+            ruleVersionId=summary_source.get("ruleVersionId"),
+            reasonCodes=list(
+                dict.fromkeys(
+                    list((summary_source.get("reasonCounts") or {}).keys())
+                    + [
+                        reason
+                        for product in products
+                        for reason in product["classificationReasons"]
+                    ]
+                )
+            ),
+        )
+        attempt = (
+            self._public_etf_attempt(attempt_row)
+            if attempt_row is not None
+            else None
+        )
+        sources = (
+            [self._etf_source_status(attempt_row)]
+            if attempt_row is not None
+            else []
+        )
+        reason_codes = list(summary.reason_codes)
+        if attempt_row is not None and attempt_row["status"] == "failed":
+            reason_codes.append("product_master_source_failed")
+        if candidate_row is None:
+            reason_codes.append("candidate_snapshot_missing")
+        elif candidate_row.get("quality") == "unavailable":
+            reason_codes.append("etf_rule_not_frozen")
+        if freshness.is_stale:
+            reason_codes.append("snapshot_age_exceeded")
+        reason_codes = list(dict.fromkeys(reason_codes))
+
+        if read_failed:
+            state = "failed"
+            quality = "unavailable"
+        elif attempt_row is not None and attempt_row["status"] == "failed":
+            state = "failed"
+            quality = "partial" if products or candidate_row else "unavailable"
+        elif candidate_row is None or candidate_row.get("quality") == "unavailable":
+            state = "not_ready"
+            quality = "unavailable" if not products else "partial"
+        elif freshness.is_stale:
+            state = "stale"
+            quality = "complete" if candidate_row.get("quality") == "complete" else "partial"
+        elif not candidates:
+            state = "empty"
+            quality = "complete"
+        else:
+            state = "available"
+            quality = "complete" if candidate_row.get("quality") == "complete" else "partial"
+
+        return RadarEtfModule(
+            state=state,
+            quality=quality,
+            usingLastSuccess=bool(
+                candidate_row is not None
+                and state in {"failed", "stale"}
+            ),
+            lastAttempt=attempt,
+            lastSuccess=last_success,
+            freshness=freshness,
+            sources=sources,
+            summary=summary,
+            products=products,
+            candidates=candidates,
+            reasonCodes=reason_codes,
+        )
+
     def _mode(self) -> str:
         return (
             "shadow"
@@ -382,6 +672,10 @@ class RadarReadService:
             is_trading=is_trading,
             limit=3,
         )
+        etf = self._etf_module(
+            now=now,
+            is_trading=is_trading,
+        )
         module_skew_seconds = None
         if market.last_success is not None and sectors.last_success is not None:
             module_skew_seconds = int(abs(
@@ -398,9 +692,22 @@ class RadarReadService:
             modules=RadarModuleCollection(
                 market=market,
                 sectors=sectors,
-                etf=RadarDeferredModule(enabledStage=5),
+                etf=etf,
                 leaders=RadarDeferredModule(enabledStage=6),
                 history=RadarDeferredModule(enabledStage=9),
+            ),
+        )
+
+    def build_etfs(self) -> RadarEtfsResponse:
+        now = self.clock()
+        market_session = self._market_session(now)
+        return RadarEtfsResponse(
+            checkedAt=now,
+            mode=self._mode(),
+            marketSession=market_session,
+            module=self._etf_module(
+                now=now,
+                is_trading=market_session.code == "trading",
             ),
         )
 

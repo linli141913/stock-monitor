@@ -30,6 +30,7 @@ export default function RadarStatusStrip({
 }: RadarStatusStripProps) {
   const market = overview.modules.market;
   const sectors = overview.modules.sectors;
+  const etf = overview.modules.etf;
   const cells = [
     {
       label: '当前交易状态',
@@ -50,8 +51,8 @@ export default function RadarStatusStrip({
     },
     {
       label: 'ETF模块',
-      value: '阶段5未启用',
-      tone: styles.statusNeutral,
+      value: `${formatTime(etf.lastSuccess?.sourceTime)} · ${stateLabel(etf.state)}`,
+      tone: stateTone(etf.state),
     },
     {
       label: '龙头模块',

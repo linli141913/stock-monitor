@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -31,9 +32,14 @@ from radar.source_health import SourceHealthPolicy, evaluate_source_health
 
 
 UTC = timezone.utc
+LOGGER = logging.getLogger(__name__)
 SECURITY_SOURCE = "official_exchange_security_master"
 ETF_SOURCE = "official_exchange_etf_registry"
 QUOTE_SOURCE = "tencent_finance"
+EtfStage5Processor = Callable[
+    [str, datetime, SourceBatch, SourceHealthResult],
+    object,
+]
 
 
 class RadarTaskScope(str, Enum):
@@ -58,6 +64,8 @@ class ScopedShadowRunResult:
     source_health: tuple[SourceHealthResult, ...]
     security_history: HistoryWriteResult = HistoryWriteResult()
     etf_history: HistoryWriteResult = HistoryWriteResult()
+    etf_stage5_status: Optional[str] = None
+    etf_stage5_reasons: tuple[str, ...] = ()
 
 
 def _utc_now() -> datetime:
@@ -80,11 +88,13 @@ class ScopedShadowRunner:
         settings: RadarSettings,
         sources: ShadowSources,
         clock: Callable[[], datetime] = _utc_now,
+        etf_stage5_processor: Optional[EtfStage5Processor] = None,
     ):
         self._repository = repository
         self._settings = settings
         self._sources = sources
         self._clock = clock
+        self._etf_stage5_processor = etf_stage5_processor
 
     def run_once(
         self,
@@ -303,6 +313,44 @@ class ScopedShadowRunner:
             ),
             **counts,
         )
+        etf_stage5_status = None
+        etf_stage5_reasons = ()
+        if (
+            scope == RadarTaskScope.ETF_QUOTES
+            and self._etf_stage5_processor is not None
+        ):
+            try:
+                stage5_result = self._etf_stage5_processor(
+                    radar_run_id,
+                    as_of,
+                    batch,
+                    quote_health,
+                )
+                etf_stage5_status = getattr(
+                    stage5_result,
+                    "status",
+                    "unknown",
+                )
+                etf_stage5_reasons = tuple(
+                    getattr(stage5_result, "gate_reasons", ())
+                )
+                LOGGER.info(
+                    "阶段5 ETF影子处理完成：run_id=%s status=%s "
+                    "gate_reasons=%s",
+                    radar_run_id,
+                    etf_stage5_status,
+                    ",".join(etf_stage5_reasons) or "none",
+                )
+            except Exception as exc:
+                etf_stage5_status = "failed"
+                etf_stage5_reasons = (
+                    f"etf_stage5_internal_error:{type(exc).__name__}",
+                )
+                LOGGER.exception(
+                    "阶段5 ETF影子处理失败但不影响既有ETF行情健康："
+                    "run_id=%s",
+                    radar_run_id,
+                )
         return ScopedShadowRunResult(
             radar_run_id=radar_run_id,
             as_of=as_of,
@@ -310,6 +358,8 @@ class ScopedShadowRunner:
             status=status,
             item_count=batch.meta.returned_count,
             source_health=(quote_health,),
+            etf_stage5_status=etf_stage5_status,
+            etf_stage5_reasons=etf_stage5_reasons,
         )
 
     def _fetch_or_failure(

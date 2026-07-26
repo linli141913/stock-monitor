@@ -21,10 +21,15 @@ from radar.contracts import (
     SourceBatch,
     SourceStatus,
 )
-from radar.migrations import apply_pending_migrations
+from radar.etf_repository import EtfRepository
+from radar.migrations import (
+    STAGE5_RADAR_MIGRATIONS,
+    apply_pending_migrations,
+)
 from radar.repository import RadarRepository
 from radar.runtime import (
     RADAR_ETF_QUOTES_JOB_ID,
+    RADAR_ETF_PRODUCT_MASTER_JOB_ID,
     RADAR_MARKET_FEATURES_JOB_ID,
     RADAR_REGISTRY_JOB_ID,
     RADAR_SECTOR_FEATURES_JOB_ID,
@@ -805,6 +810,116 @@ class RadarRuntimeTests(unittest.TestCase):
             ],
         )
         scheduler.start.assert_not_called()
+
+    def test_stage5_registration_adds_only_one_daily_product_master_job(self):
+        stage5_database_path = (
+            Path(self.temp_dir.name) / "radar-stage5-runtime.db"
+        )
+        with sqlite3.connect(stage5_database_path) as connection:
+            apply_pending_migrations(
+                connection,
+                migrations=STAGE5_RADAR_MIGRATIONS,
+            )
+        scheduler = Mock()
+        scheduler.get_job.return_value = None
+        stage5_settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+        )
+        product_fetcher = Mock()
+
+        registrations = register_production_shadow_jobs(
+            scheduler,
+            database_path=stage5_database_path,
+            lock_path=self.lock_path,
+            etf_product_master_lock_path=(
+                Path(self.temp_dir.name) / "product-master.lock"
+            ),
+            settings=stage5_settings,
+            sources=self.sources,
+            etf_product_master_fetcher=product_fetcher,
+            clock=lambda: TRADE_AS_OF,
+            market_status_provider=market_provider(),
+        )
+
+        self.assertEqual(
+            [item.job_id for item in registrations],
+            [
+                RADAR_REGISTRY_JOB_ID,
+                RADAR_STOCK_QUOTES_JOB_ID,
+                RADAR_ETF_QUOTES_JOB_ID,
+                RADAR_SECTOR_FEATURES_JOB_ID,
+                RADAR_MARKET_FEATURES_JOB_ID,
+                RADAR_ETF_PRODUCT_MASTER_JOB_ID,
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs["seconds"] for call in scheduler.add_job.call_args_list],
+            [1800, 180, 300, 86400],
+        )
+        self.assertEqual(
+            [
+                call.kwargs["next_run_time"]
+                for call in scheduler.add_job.call_args_list
+            ],
+            [
+                TRADE_AS_OF + timedelta(seconds=90),
+                TRADE_AS_OF,
+                TRADE_AS_OF + timedelta(seconds=30),
+                TRADE_AS_OF + timedelta(seconds=150),
+            ],
+        )
+        product_fetcher.assert_not_called()
+
+    def test_stage5_product_master_readiness_is_once_per_shanghai_day(self):
+        stage5_database_path = (
+            Path(self.temp_dir.name) / "radar-stage5-readiness.db"
+        )
+        with sqlite3.connect(stage5_database_path) as connection:
+            apply_pending_migrations(
+                connection,
+                migrations=STAGE5_RADAR_MIGRATIONS,
+            )
+        stage5_settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+        )
+        runtime = RadarRuntime(
+            database_path=stage5_database_path,
+            lock_path=self.lock_path,
+            settings=stage5_settings,
+            sources=self.sources,
+            clock=lambda: TRADE_AS_OF,
+            market_status_provider=market_provider(),
+        )
+        self.assertIsNone(
+            runtime.etf_product_master_readiness_reason(TRADE_AS_OF)
+        )
+        with sqlite3.connect(stage5_database_path) as connection:
+            repository = EtfRepository(
+                connection,
+                clock=lambda: TRADE_AS_OF,
+            )
+            repository.sync_product_master_batch(
+                product_master_run_id="product-run",
+                as_of=TRADE_AS_OF,
+                source="official_exchange_listed_fund_product_master",
+                source_time=None,
+                fetched_at=TRADE_AS_OF,
+                status="failed",
+                expected_count=None,
+                returned_count=0,
+                row_coverage=None,
+                required_field_coverage={},
+                issues=[{"code": "source_request_failed"}],
+                transitions=(),
+            )
+        self.assertEqual(
+            runtime.etf_product_master_readiness_reason(TRADE_AS_OF),
+            "etf_product_master_already_attempted_today",
+        )
 
     def test_explicit_sector_enable_registers_staggered_fourth_job(self):
         scheduler = Mock()

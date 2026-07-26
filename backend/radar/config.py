@@ -13,6 +13,7 @@ class RadarSettings:
     shadow_mode: bool = False
     sector_shadow_enabled: bool = False
     market_shadow_enabled: bool = False
+    etf_stage5_enabled: bool = False
     stock_scan_interval_seconds: int = 180
     etf_scan_interval_seconds: int = 300
     sector_scan_interval_seconds: int = 180
@@ -72,6 +73,11 @@ def load_radar_settings(
         market_shadow_enabled=_read_bool(
             values,
             "RADAR_MARKET_SHADOW_ENABLED",
+            False,
+        ),
+        etf_stage5_enabled=_read_bool(
+            values,
+            "RADAR_ETF_STAGE5_ENABLED",
             False,
         ),
         stock_scan_interval_seconds=_read_int(

@@ -7,6 +7,9 @@
 __all__ = [
     "config",
     "contracts",
+    "etf_repository",
+    "etf_shadow_runner",
+    "etf_stage5_policy",
     "migrations",
     "repository",
     "run_lock",

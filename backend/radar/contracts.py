@@ -50,6 +50,53 @@ class IndustryMiddleClassStatus(str, Enum):
     SOURCE_NOT_PUBLISHED = "source_not_published"
 
 
+class ListedFundProductType(str, Enum):
+    ETF = "etf"
+    LOF = "lof"
+    REIT = "reit"
+    OTHER_LISTED_FUND = "other_listed_fund"
+    UNKNOWN = "unknown"
+
+
+class EtfManagementStyle(str, Enum):
+    PASSIVE_INDEX = "passive_index"
+    ACTIVE = "active"
+    UNKNOWN = "unknown"
+
+
+class EtfAssetClass(str, Enum):
+    DOMESTIC_EQUITY = "domestic_equity"
+    CROSS_BORDER_EQUITY = "cross_border_equity"
+    BOND = "bond"
+    COMMODITY = "commodity"
+    MONEY_MARKET = "money_market"
+    MIXED = "mixed"
+    STRATEGY = "strategy"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class EtfMetricState(str, Enum):
+    VERIFIED = "verified"
+    SOURCE_UNVERIFIED = "source_unverified"
+    MISSING = "missing"
+    STALE = "stale"
+    SOURCE_CONFLICT = "source_conflict"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class IndexEvidenceStatus(str, Enum):
+    VERIFIED = "verified"
+    PENDING_EVIDENCE = "pending_evidence"
+    CONFLICT = "conflict"
+    SOURCE_FAILED = "source_failed"
+
+
+class EvidenceVersionKind(str, Enum):
+    OFFICIAL = "official"
+    INTERNAL_EVIDENCE = "internal_evidence"
+
+
 class SourceIssue(ContractModel):
     code: str
     message: str
@@ -863,6 +910,840 @@ class EtfRegistryRecord(ContractModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("fetchedAt必须包含时区")
         return value
+
+
+class EtfShareObservation(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    source_report_date: date = Field(alias="sourceReportDate")
+    fund_shares: float = Field(alias="fundShares", ge=0)
+    fund_shares_unit: str = Field(
+        default="share",
+        alias="fundSharesUnit",
+        min_length=1,
+    )
+    source_contract_id: str = Field(alias="sourceContractId", min_length=1)
+    source: str = Field(min_length=1)
+    fetched_at: datetime = Field(alias="fetchedAt")
+
+    @field_validator("fetched_at")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("fetchedAt必须包含时区")
+        return value
+
+
+class EtfShareChangeFact(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    window_trading_days: int = Field(alias="windowTradingDays", ge=1)
+    current_report_date: date = Field(alias="currentReportDate")
+    prior_report_date: date = Field(alias="priorReportDate")
+    current_fund_shares: float = Field(alias="currentFundShares", ge=0)
+    prior_fund_shares: float = Field(alias="priorFundShares", ge=0)
+    share_change: Optional[float] = Field(
+        default=None,
+        alias="shareChange",
+    )
+    sample_count: int = Field(alias="sampleCount", ge=0)
+    formula_version: str = Field(alias="formulaVersion", min_length=1)
+    formal_usable: bool = Field(alias="formalUsable")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("份额变化原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_share_change(self):
+        if self.current_report_date <= self.prior_report_date:
+            raise ValueError("份额变化当前日期必须晚于前一日期")
+        if self.sample_count < 2:
+            raise ValueError("份额变化至少需要两个观测点")
+        if self.formal_usable and (
+            self.share_change is None or self.reasons
+        ):
+            raise ValueError("正式可用份额变化不能缺少数值或保留阻断原因")
+        if self.share_change is not None:
+            if self.prior_fund_shares <= 0:
+                raise ValueError("有份额变化数值时前一期份额必须大于0")
+            expected = (
+                self.current_fund_shares / self.prior_fund_shares
+            ) - 1
+            if abs(self.share_change - expected) > 1e-12:
+                raise ValueError("份额变化必须由当前/前一期份额计算")
+        return self
+
+
+ETF_DAILY_FACT_FIELDS: Tuple[str, ...] = (
+    "fundSize",
+    "fundShares",
+    "nav",
+    "shareChange5d",
+    "shareChange20d",
+    "averageTurnover20d",
+    "trackingDifference",
+    "trackingError",
+    "indexCorrelation",
+)
+
+
+class EtfDailyFact(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    trade_date: Optional[date] = Field(default=None, alias="tradeDate")
+    source_report_date: Optional[date] = Field(
+        default=None,
+        alias="sourceReportDate",
+    )
+    fund_size: Optional[float] = Field(
+        default=None,
+        alias="fundSize",
+        ge=0,
+    )
+    fund_size_unit: Optional[str] = Field(
+        default=None,
+        alias="fundSizeUnit",
+    )
+    fund_shares: Optional[float] = Field(
+        default=None,
+        alias="fundShares",
+        ge=0,
+    )
+    fund_shares_unit: Optional[str] = Field(
+        default=None,
+        alias="fundSharesUnit",
+    )
+    nav: Optional[float] = Field(default=None, ge=0)
+    nav_currency: Optional[str] = Field(default=None, alias="navCurrency")
+    share_change_5d: Optional[float] = Field(
+        default=None,
+        alias="shareChange5d",
+    )
+    share_change_20d: Optional[float] = Field(
+        default=None,
+        alias="shareChange20d",
+    )
+    average_turnover_20d: Optional[float] = Field(
+        default=None,
+        alias="averageTurnover20d",
+        ge=0,
+    )
+    tracking_difference: Optional[float] = Field(
+        default=None,
+        alias="trackingDifference",
+    )
+    tracking_error: Optional[float] = Field(
+        default=None,
+        alias="trackingError",
+        ge=0,
+    )
+    index_correlation: Optional[float] = Field(
+        default=None,
+        alias="indexCorrelation",
+        ge=-1,
+        le=1,
+    )
+    window_trading_days: Optional[int] = Field(
+        default=None,
+        alias="windowTradingDays",
+        ge=0,
+    )
+    sample_count: Optional[int] = Field(
+        default=None,
+        alias="sampleCount",
+        ge=0,
+    )
+    formula_version: Optional[str] = Field(
+        default=None,
+        alias="formulaVersion",
+    )
+    field_states: Dict[str, EtfMetricState] = Field(
+        alias="fieldStates",
+    )
+    source_contract_ids: Dict[str, str] = Field(
+        default_factory=dict,
+        alias="sourceContractIds",
+    )
+    fetched_at: datetime = Field(alias="fetchedAt")
+    computed_at: datetime = Field(alias="computedAt")
+    formal_usable: bool = Field(alias="formalUsable")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("fetched_at", "computed_at")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("ETF日频事实时间必须包含时区")
+        return value
+
+    @field_validator("field_states")
+    @classmethod
+    def validate_field_states(cls, value):
+        unknown = set(value) - set(ETF_DAILY_FACT_FIELDS)
+        missing = set(ETF_DAILY_FACT_FIELDS) - set(value)
+        if unknown:
+            raise ValueError("ETF日频事实包含未知字段状态")
+        if missing:
+            raise ValueError("ETF日频事实必须为每个字段提供状态")
+        return value
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("ETF日频事实原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_daily_fact(self):
+        if self.trade_date is None and self.source_report_date is None:
+            raise ValueError("ETF日频事实必须包含交易日或来源报告日")
+        if self.formal_usable and self.reasons:
+            raise ValueError("正式可用ETF日频事实不得保留阻断原因")
+        value_by_field = {
+            "fundSize": self.fund_size,
+            "fundShares": self.fund_shares,
+            "nav": self.nav,
+            "shareChange5d": self.share_change_5d,
+            "shareChange20d": self.share_change_20d,
+            "averageTurnover20d": self.average_turnover_20d,
+            "trackingDifference": self.tracking_difference,
+            "trackingError": self.tracking_error,
+            "indexCorrelation": self.index_correlation,
+        }
+        for field_name, state in self.field_states.items():
+            if state == EtfMetricState.VERIFIED and (
+                value_by_field[field_name] is None
+            ):
+                raise ValueError(
+                    f"{field_name}标记verified时必须有数值"
+                )
+        return self
+
+
+class EtfRankingInputAudit(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    as_of: datetime = Field(alias="asOf")
+    fetched_at: datetime = Field(alias="fetchedAt")
+    metric_values: Dict[str, Optional[float]] = Field(
+        default_factory=dict,
+        alias="metricValues",
+    )
+    field_states: Dict[str, EtfMetricState] = Field(
+        alias="fieldStates",
+    )
+    rankable_fields: Tuple[str, ...] = Field(
+        default=(),
+        alias="rankableFields",
+    )
+    excluded_fields: Tuple[str, ...] = Field(
+        default=(),
+        alias="excludedFields",
+    )
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("as_of", "fetched_at")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("ETF排名输入时间必须包含时区")
+        return value
+
+    @field_validator("rankable_fields", "excluded_fields", "reasons")
+    @classmethod
+    def require_unique_values(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("ETF排名输入列表不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_audit(self):
+        state_fields = set(self.field_states)
+        value_fields = set(self.metric_values)
+        if not value_fields.issubset(state_fields):
+            raise ValueError("排名输入数值必须有对应字段状态")
+        if not set(self.rankable_fields).issubset(state_fields):
+            raise ValueError("可排名字段必须有对应字段状态")
+        if not set(self.excluded_fields).issubset(state_fields):
+            raise ValueError("排除字段必须有对应字段状态")
+        for field_name in self.rankable_fields:
+            if self.field_states[field_name] != EtfMetricState.VERIFIED:
+                raise ValueError("未验证字段不能进入排名输入")
+            if self.metric_values.get(field_name) is None:
+                raise ValueError("可排名字段不能缺少数值")
+        if self.formal_ready and self.reasons:
+            raise ValueError("正式排名输入不得保留阻断原因")
+        return self
+
+
+class EtfProductMasterRecord(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    official_name: str = Field(alias="officialName")
+    exchange: str
+    product_type: ListedFundProductType = Field(alias="productType")
+    management_style: EtfManagementStyle = Field(alias="managementStyle")
+    asset_class: EtfAssetClass = Field(alias="assetClass")
+    source_category_code: Optional[str] = Field(
+        default=None,
+        alias="sourceCategoryCode",
+    )
+    source_category_name: Optional[str] = Field(
+        default=None,
+        alias="sourceCategoryName",
+    )
+    source_investment_type: Optional[str] = Field(
+        default=None,
+        alias="sourceInvestmentType",
+    )
+    target_index_name: Optional[str] = Field(
+        default=None,
+        alias="targetIndexName",
+    )
+    listing_date: Optional[date] = Field(default=None, alias="listingDate")
+    manager: Optional[str] = None
+    classification_mapping_version: str = Field(
+        alias="classificationMappingVersion",
+        min_length=1,
+    )
+    classification_reasons: Tuple[str, ...] = Field(
+        default_factory=tuple,
+        alias="classificationReasons",
+    )
+    source: str
+    fetched_at: datetime = Field(alias="fetchedAt")
+    source_fields: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="sourceFields",
+    )
+
+    @field_validator("fetched_at")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("fetchedAt必须包含时区")
+        return value
+
+    @field_validator("classification_reasons")
+    @classmethod
+    def require_unique_classification_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("classificationReasons不得重复")
+        return value
+
+
+class EtfIndexIdentityEvidence(ContractModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    management_style: EtfManagementStyle = Field(alias="managementStyle")
+    fund_index_code: Optional[str] = Field(
+        default=None,
+        alias="fundIndexCode",
+        min_length=1,
+    )
+    fund_index_name: Optional[str] = Field(
+        default=None,
+        alias="fundIndexName",
+        min_length=1,
+    )
+    index_provider: str = Field(alias="indexProvider", min_length=1)
+    provider_index_code: str = Field(
+        alias="providerIndexCode",
+        min_length=1,
+    )
+    provider_index_name: str = Field(
+        alias="providerIndexName",
+        min_length=1,
+    )
+    identity_matched: bool = Field(alias="identityMatched")
+    published_at: Optional[datetime] = Field(
+        default=None,
+        alias="publishedAt",
+    )
+    effective_from: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveFrom",
+    )
+    effective_to: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveTo",
+    )
+    as_of: datetime = Field(alias="asOf")
+    fund_evidence_url: str = Field(alias="fundEvidenceUrl", min_length=1)
+    fund_evidence_sha256: str = Field(
+        alias="fundEvidenceSha256",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    provider_evidence_url: str = Field(
+        alias="providerEvidenceUrl",
+        min_length=1,
+    )
+    provider_evidence_sha256: str = Field(
+        alias="providerEvidenceSha256",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    first_observed_at: datetime = Field(alias="firstObservedAt")
+    fetched_at: datetime = Field(alias="fetchedAt")
+    status: IndexEvidenceStatus
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator(
+        "published_at",
+        "effective_from",
+        "effective_to",
+        "as_of",
+        "first_observed_at",
+        "fetched_at",
+    )
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("ETF指数关系时间必须包含时区")
+        return value
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("ETF指数关系原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_identity(self):
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to <= self.effective_from
+        ):
+            raise ValueError("ETF指数关系失效时间必须晚于生效时间")
+        if self.status == IndexEvidenceStatus.CONFLICT and self.identity_matched:
+            raise ValueError("冲突的ETF指数关系不能标记为身份一致")
+        if self.formal_ready and (
+            self.status != IndexEvidenceStatus.VERIFIED
+            or not self.identity_matched
+            or self.published_at is None
+            or self.effective_from is None
+        ):
+            raise ValueError("正式可用ETF指数关系必须具备完整已验证证据")
+        return self
+
+
+class IndexMethodologyEvidence(ContractModel):
+    index_provider: str = Field(alias="indexProvider", min_length=1)
+    index_code: str = Field(alias="indexCode", min_length=1)
+    index_name: str = Field(alias="indexName", min_length=1)
+    provider_version: Optional[str] = Field(
+        default=None,
+        alias="providerVersion",
+        min_length=1,
+    )
+    version_kind: EvidenceVersionKind = Field(alias="versionKind")
+    published_at: Optional[datetime] = Field(
+        default=None,
+        alias="publishedAt",
+    )
+    effective_from: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveFrom",
+    )
+    effective_to: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveTo",
+    )
+    universe_rule: Optional[str] = Field(
+        default=None,
+        alias="universeRule",
+        min_length=1,
+    )
+    selection_rule: Optional[str] = Field(
+        default=None,
+        alias="selectionRule",
+        min_length=1,
+    )
+    weighting_method: Optional[str] = Field(
+        default=None,
+        alias="weightingMethod",
+        min_length=1,
+    )
+    constituent_cap: Optional[int] = Field(
+        default=None,
+        alias="constituentCap",
+        ge=1,
+    )
+    rebalance_frequency: Optional[str] = Field(
+        default=None,
+        alias="rebalanceFrequency",
+        min_length=1,
+    )
+    as_of: datetime = Field(alias="asOf")
+    evidence_url: str = Field(alias="evidenceUrl", min_length=1)
+    evidence_sha256: str = Field(
+        alias="evidenceSha256",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    first_observed_at: datetime = Field(alias="firstObservedAt")
+    fetched_at: datetime = Field(alias="fetchedAt")
+    status: IndexEvidenceStatus
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator(
+        "published_at",
+        "effective_from",
+        "effective_to",
+        "as_of",
+        "first_observed_at",
+        "fetched_at",
+    )
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("指数方法时间必须包含时区")
+        return value
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数方法原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_methodology(self):
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to <= self.effective_from
+        ):
+            raise ValueError("指数方法失效时间必须晚于生效时间")
+        if self.formal_ready and self.status != IndexEvidenceStatus.VERIFIED:
+            raise ValueError("正式可用指数方法必须通过证据验证")
+        return self
+
+
+class IndexConstituentEvidenceItem(ContractModel):
+    stock_code: str = Field(alias="stockCode", pattern=r"^\d{6}$")
+    stock_name: str = Field(alias="stockName")
+    weight: Optional[float] = Field(default=None, ge=0)
+    weight_unit: str = Field(default="percent", alias="weightUnit")
+
+
+class IndexConstituentSetEvidence(ContractModel):
+    index_provider: str = Field(alias="indexProvider", min_length=1)
+    index_code: str = Field(alias="indexCode", min_length=1)
+    index_name: str = Field(alias="indexName", min_length=1)
+    announced_at: Optional[datetime] = Field(
+        default=None,
+        alias="announcedAt",
+    )
+    effective_from: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveFrom",
+    )
+    effective_to: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveTo",
+    )
+    source_date: Optional[date] = Field(default=None, alias="sourceDate")
+    expected_count: Optional[int] = Field(
+        default=None,
+        alias="expectedCount",
+        ge=0,
+    )
+    returned_count: int = Field(alias="returnedCount", ge=0)
+    weight_count: int = Field(alias="weightCount", ge=0)
+    weight_total: Optional[float] = Field(
+        default=None,
+        alias="weightTotal",
+        ge=0,
+    )
+    as_of: datetime = Field(alias="asOf")
+    evidence_url: str = Field(alias="evidenceUrl", min_length=1)
+    evidence_sha256: str = Field(
+        alias="evidenceSha256",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    first_observed_at: datetime = Field(alias="firstObservedAt")
+    fetched_at: datetime = Field(alias="fetchedAt")
+    items: List[IndexConstituentEvidenceItem] = Field(default_factory=list)
+    status: IndexEvidenceStatus
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator(
+        "announced_at",
+        "effective_from",
+        "effective_to",
+        "as_of",
+        "first_observed_at",
+        "fetched_at",
+    )
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("指数成分时间必须包含时区")
+        return value
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数成分原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_constituents(self):
+        if self.returned_count != len(self.items):
+            raise ValueError("returnedCount必须等于成分明细数量")
+        if self.weight_count > self.returned_count:
+            raise ValueError("weightCount不能大于returnedCount")
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to <= self.effective_from
+        ):
+            raise ValueError("指数成分失效时间必须晚于生效时间")
+        if self.formal_ready and self.status != IndexEvidenceStatus.VERIFIED:
+            raise ValueError("正式可用指数成分必须通过证据验证")
+        return self
+
+
+class IndexIndustryExposureItem(ContractModel):
+    industry_code: str = Field(alias="industryCode", pattern=r"^\d{2}$")
+    industry_name: str = Field(alias="industryName", min_length=1)
+    raw_weight: float = Field(alias="rawWeight", ge=0)
+    exposure_ratio: float = Field(alias="exposureRatio", ge=0, le=1)
+
+
+class IndexIndustryExposureResult(ContractModel):
+    constituent_set_id: str = Field(alias="constituentSetId", min_length=1)
+    index_provider: str = Field(alias="indexProvider", min_length=1)
+    index_code: str = Field(alias="indexCode", min_length=1)
+    index_name: str = Field(alias="indexName", min_length=1)
+    constituent_source_date: Optional[date] = Field(
+        default=None,
+        alias="constituentSourceDate",
+    )
+    industry_release_id: str = Field(alias="industryReleaseId", min_length=1)
+    industry_release_period: str = Field(
+        alias="industryReleasePeriod",
+        pattern=r"^\d{4}H[12]$",
+    )
+    industry_document_sha256: str = Field(
+        alias="industryDocumentSha256",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    total_weight: float = Field(alias="totalWeight", gt=0)
+    mapped_weight: float = Field(alias="mappedWeight", ge=0)
+    unmapped_weight: float = Field(alias="unmappedWeight", ge=0)
+    mapping_coverage: float = Field(alias="mappingCoverage", ge=0, le=1)
+    unmapped_symbols: Tuple[str, ...] = Field(
+        default=(),
+        alias="unmappedSymbols",
+    )
+    exposures: List[IndexIndustryExposureItem] = Field(default_factory=list)
+    as_of: datetime = Field(alias="asOf")
+    computed_at: datetime = Field(alias="computedAt")
+    calculation_version: str = Field(alias="calculationVersion", min_length=1)
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("as_of", "computed_at")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("指数行业暴露时间必须包含时区")
+        return value
+
+    @field_validator("unmapped_symbols", "reasons")
+    @classmethod
+    def require_unique_values(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数行业暴露列表不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_exposure_totals(self):
+        tolerance = 1e-6
+        if abs(
+            self.mapped_weight + self.unmapped_weight - self.total_weight
+        ) > tolerance:
+            raise ValueError("已映射与未映射权重必须等于总权重")
+        expected_coverage = self.mapped_weight / self.total_weight
+        if abs(self.mapping_coverage - expected_coverage) > tolerance:
+            raise ValueError("mappingCoverage必须由原始权重计算")
+        industry_codes = [item.industry_code for item in self.exposures]
+        if len(industry_codes) != len(set(industry_codes)):
+            raise ValueError("同一行业暴露结果不得重复")
+        if abs(
+            sum(item.raw_weight for item in self.exposures)
+            - self.mapped_weight
+        ) > tolerance:
+            raise ValueError("行业原始权重合计必须等于mappedWeight")
+        if abs(
+            sum(item.exposure_ratio for item in self.exposures)
+            - self.mapping_coverage
+        ) > tolerance:
+            raise ValueError("行业暴露比例合计必须等于mappingCoverage")
+        if self.formal_ready and self.reasons:
+            raise ValueError("正式可用行业暴露不得保留阻断原因")
+        return self
+
+
+class IndexProductGroup(ContractModel):
+    group_key: str = Field(alias="groupKey", min_length=3)
+    index_provider: str = Field(alias="indexProvider", min_length=1)
+    index_code: str = Field(alias="indexCode", min_length=1)
+    member_symbols: Tuple[str, ...] = Field(
+        alias="memberSymbols",
+        min_length=1,
+    )
+    formally_ready_symbols: Tuple[str, ...] = Field(
+        default=(),
+        alias="formallyReadySymbols",
+    )
+    candidate_slot_count: int = Field(
+        default=1,
+        alias="candidateSlotCount",
+        ge=1,
+        le=1,
+    )
+    representative_symbol: Optional[str] = Field(
+        default=None,
+        alias="representativeSymbol",
+        pattern=r"^\d{6}$",
+    )
+    group_ready: bool = Field(alias="groupReady")
+    candidate_ready: bool = Field(alias="candidateReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator(
+        "member_symbols",
+        "formally_ready_symbols",
+        "reasons",
+    )
+    @classmethod
+    def require_unique_values(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数产品组列表不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_group(self):
+        members = set(self.member_symbols)
+        if not set(self.formally_ready_symbols).issubset(members):
+            raise ValueError("正式就绪产品必须属于组内成员")
+        if (
+            self.representative_symbol is not None
+            and self.representative_symbol not in members
+        ):
+            raise ValueError("代表ETF必须属于组内成员")
+        if self.candidate_ready and self.representative_symbol is None:
+            raise ValueError("候选就绪产品组必须已经选择代表ETF")
+        return self
+
+
+class IndexProductGroupCollection(ContractModel):
+    relation_count: int = Field(alias="relationCount", ge=0)
+    group_count: int = Field(alias="groupCount", ge=0)
+    candidate_slot_count: int = Field(alias="candidateSlotCount", ge=0)
+    groups: List[IndexProductGroup] = Field(default_factory=list)
+    excluded_symbols: Tuple[str, ...] = Field(
+        default=(),
+        alias="excludedSymbols",
+    )
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("excluded_symbols", "reasons")
+    @classmethod
+    def require_unique_values(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数产品组汇总列表不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_counts(self):
+        if self.group_count != len(self.groups):
+            raise ValueError("groupCount必须等于产品组数量")
+        if self.candidate_slot_count != sum(
+            group.candidate_slot_count
+            for group in self.groups
+        ):
+            raise ValueError("候选槽位必须按产品组计算")
+        keys = [group.group_key for group in self.groups]
+        if len(keys) != len(set(keys)):
+            raise ValueError("指数产品组键不得重复")
+        return self
+
+
+class IndexConstituentOverlap(ContractModel):
+    left_group_key: str = Field(alias="leftGroupKey", min_length=3)
+    right_group_key: str = Field(alias="rightGroupKey", min_length=3)
+    left_source_date: Optional[date] = Field(
+        default=None,
+        alias="leftSourceDate",
+    )
+    right_source_date: Optional[date] = Field(
+        default=None,
+        alias="rightSourceDate",
+    )
+    common_count: int = Field(alias="commonCount", ge=0)
+    union_count: int = Field(alias="unionCount", ge=0)
+    symbol_jaccard: Optional[float] = Field(
+        default=None,
+        alias="symbolJaccard",
+        ge=0,
+        le=1,
+    )
+    common_minimum_weight: Optional[float] = Field(
+        default=None,
+        alias="commonMinimumWeight",
+        ge=0,
+    )
+    weighted_overlap: Optional[float] = Field(
+        default=None,
+        alias="weightedOverlap",
+        ge=0,
+        le=1,
+    )
+    as_of: datetime = Field(alias="asOf")
+    formal_ready: bool = Field(alias="formalReady")
+    reasons: Tuple[str, ...] = ()
+
+    @field_validator("as_of")
+    @classmethod
+    def require_aware_datetime(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("指数重合度时间必须包含时区")
+        return value
+
+    @field_validator("reasons")
+    @classmethod
+    def require_unique_reasons(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("指数重合度原因码不得重复")
+        return value
+
+    @model_validator(mode="after")
+    def validate_overlap(self):
+        if self.common_count > self.union_count:
+            raise ValueError("共同成分数不能大于并集数量")
+        expected_jaccard = (
+            self.common_count / self.union_count
+            if self.union_count
+            else None
+        )
+        if self.symbol_jaccard != expected_jaccard:
+            raise ValueError("symbolJaccard必须由共同数和并集数计算")
+        if (self.common_minimum_weight is None) != (
+            self.weighted_overlap is None
+        ):
+            raise ValueError("加权重合明细必须同时存在或缺失")
+        if self.formal_ready and self.reasons:
+            raise ValueError("正式可用重合度不得保留阻断原因")
+        return self
 
 
 T = TypeVar("T")

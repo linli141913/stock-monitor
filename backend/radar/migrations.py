@@ -6,7 +6,7 @@ import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Iterable, Sequence, Tuple
+from typing import Callable, Iterable, Optional, Sequence, Tuple
 
 
 class MigrationError(RuntimeError):
@@ -873,10 +873,660 @@ MARKET_ENVIRONMENT_STORAGE_MIGRATION = Migration(
 )
 
 
+ETF_STORAGE_MIGRATION = Migration(
+    version=4,
+    name="etf_versioned_storage",
+    statements=(
+        """
+        CREATE TABLE radar_etf_product_profiles (
+            profile_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            exchange TEXT NOT NULL CHECK (exchange IN ('sse', 'szse')),
+            official_name TEXT NOT NULL,
+            product_type TEXT NOT NULL,
+            management_style TEXT NOT NULL,
+            asset_class TEXT NOT NULL,
+            source_category_code TEXT,
+            source_category_name TEXT,
+            source_investment_type TEXT,
+            target_index_name TEXT,
+            classification_mapping_version TEXT NOT NULL,
+            classification_reasons_json TEXT NOT NULL DEFAULT '[]',
+            source_contract_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_time TEXT,
+            fetched_at TEXT NOT NULL,
+            version_time_kind TEXT NOT NULL CHECK (
+                version_time_kind IN ('official_effective', 'first_observed')
+            ),
+            official_effective_from TEXT,
+            first_observed_at TEXT NOT NULL,
+            effective_from TEXT NOT NULL,
+            effective_to TEXT,
+            evidence_url TEXT,
+            evidence_sha256 TEXT,
+            listing_date TEXT,
+            manager TEXT,
+            source_fields_json TEXT NOT NULL DEFAULT '{}',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            UNIQUE (symbol, source_contract_id, effective_from),
+            CHECK (effective_to IS NULL OR effective_to > effective_from),
+            CHECK (fetched_at >= first_observed_at),
+            CHECK (
+                (
+                    version_time_kind = 'first_observed'
+                    AND official_effective_from IS NULL
+                    AND effective_from = first_observed_at
+                )
+                OR (
+                    version_time_kind = 'official_effective'
+                    AND official_effective_from IS NOT NULL
+                    AND effective_from = official_effective_from
+                )
+            ),
+            CHECK (evidence_sha256 IS NULL OR (
+                length(evidence_sha256) = 64
+                AND evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+            ))
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_profile_symbol_effective
+        ON radar_etf_product_profiles (symbol, effective_from, effective_to)
+        """,
+        """
+        CREATE UNIQUE INDEX uq_etf_profile_current_source
+        ON radar_etf_product_profiles (symbol, source_contract_id)
+        WHERE effective_to IS NULL
+        """,
+        """
+        CREATE TABLE radar_etf_product_master_runs (
+            product_master_run_id TEXT PRIMARY KEY,
+            as_of TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_time TEXT,
+            fetched_at TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (
+                status IN ('succeeded', 'degraded', 'failed')
+            ),
+            expected_count INTEGER CHECK (
+                expected_count IS NULL OR expected_count >= 0
+            ),
+            returned_count INTEGER NOT NULL CHECK (returned_count >= 0),
+            row_coverage REAL CHECK (
+                row_coverage IS NULL
+                OR (row_coverage >= 0 AND row_coverage <= 1)
+            ),
+            required_field_coverage_json TEXT NOT NULL DEFAULT '{}',
+            issues_json TEXT NOT NULL DEFAULT '[]',
+            inserted_count INTEGER NOT NULL CHECK (inserted_count >= 0),
+            unchanged_count INTEGER NOT NULL CHECK (unchanged_count >= 0),
+            created_at TEXT NOT NULL,
+            CHECK (fetched_at >= as_of),
+            CHECK (
+                status <> 'succeeded'
+                OR (
+                    expected_count = returned_count
+                    AND returned_count > 0
+                    AND row_coverage = 1.0
+                )
+            )
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_product_master_run_fetched
+        ON radar_etf_product_master_runs (fetched_at DESC)
+        """,
+        """
+        CREATE TABLE radar_etf_index_relations (
+            relation_id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            index_provider TEXT NOT NULL,
+            index_code TEXT NOT NULL,
+            index_name TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            published_at TEXT,
+            effective_from TEXT,
+            effective_to TEXT,
+            source_contract_id TEXT NOT NULL,
+            fund_evidence_url TEXT NOT NULL,
+            fund_evidence_sha256 TEXT NOT NULL CHECK (
+                length(fund_evidence_sha256) = 64
+                AND fund_evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            provider_evidence_url TEXT NOT NULL,
+            provider_evidence_sha256 TEXT NOT NULL CHECK (
+                length(provider_evidence_sha256) = 64
+                AND provider_evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            status TEXT NOT NULL,
+            formal_ready INTEGER NOT NULL CHECK (formal_ready IN (0, 1)),
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            as_of TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (profile_id)
+                REFERENCES radar_etf_product_profiles(profile_id)
+                ON DELETE RESTRICT,
+            CHECK (
+                effective_to IS NULL
+                OR effective_from IS NULL
+                OR effective_to > effective_from
+            ),
+            UNIQUE (profile_id, source_contract_id, effective_from)
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_relation_symbol_effective
+        ON radar_etf_index_relations (symbol, effective_from, effective_to)
+        """,
+        """
+        CREATE TABLE radar_index_methodology_versions (
+            methodology_version_id TEXT PRIMARY KEY,
+            index_provider TEXT NOT NULL,
+            index_code TEXT NOT NULL,
+            index_name TEXT NOT NULL,
+            provider_version TEXT,
+            version_kind TEXT NOT NULL,
+            published_at TEXT,
+            effective_from TEXT,
+            effective_to TEXT,
+            universe_rule TEXT,
+            selection_rule TEXT,
+            weighting_method TEXT,
+            constituent_cap INTEGER CHECK (
+                constituent_cap IS NULL OR constituent_cap > 0
+            ),
+            rebalance_frequency TEXT,
+            as_of TEXT NOT NULL,
+            evidence_url TEXT NOT NULL,
+            evidence_sha256 TEXT NOT NULL CHECK (
+                length(evidence_sha256) = 64
+                AND evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            first_observed_at TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            formal_ready INTEGER NOT NULL CHECK (formal_ready IN (0, 1)),
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            CHECK (
+                effective_to IS NULL
+                OR effective_from IS NULL
+                OR effective_to > effective_from
+            ),
+            UNIQUE (index_provider, index_code, effective_from, evidence_sha256)
+        )
+        """,
+        """
+        CREATE INDEX idx_index_methodology_effective
+        ON radar_index_methodology_versions (
+            index_provider, index_code, effective_from, effective_to
+        )
+        """,
+        """
+        CREATE TABLE radar_index_constituent_sets (
+            constituent_set_id TEXT PRIMARY KEY,
+            index_provider TEXT NOT NULL,
+            index_code TEXT NOT NULL,
+            index_name TEXT NOT NULL,
+            announced_at TEXT,
+            effective_from TEXT,
+            effective_to TEXT,
+            source_date TEXT,
+            expected_count INTEGER CHECK (
+                expected_count IS NULL OR expected_count >= 0
+            ),
+            returned_count INTEGER NOT NULL CHECK (returned_count >= 0),
+            weight_count INTEGER NOT NULL CHECK (weight_count >= 0),
+            weight_total REAL CHECK (weight_total IS NULL OR weight_total >= 0),
+            as_of TEXT NOT NULL,
+            evidence_url TEXT NOT NULL,
+            evidence_sha256 TEXT NOT NULL CHECK (
+                length(evidence_sha256) = 64
+                AND evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            first_observed_at TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            formal_ready INTEGER NOT NULL CHECK (formal_ready IN (0, 1)),
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            CHECK (
+                expected_count IS NULL OR returned_count <= expected_count
+            ),
+            UNIQUE (
+                index_provider, index_code, source_date, evidence_sha256
+            )
+        )
+        """,
+        """
+        CREATE INDEX idx_index_constituent_set_as_of
+        ON radar_index_constituent_sets (
+            index_provider, index_code, source_date, as_of
+        )
+        """,
+        """
+        CREATE TABLE radar_index_constituents (
+            constituent_set_id TEXT NOT NULL,
+            stock_code TEXT NOT NULL CHECK (
+                length(stock_code) = 6 AND stock_code NOT GLOB '*[^0-9]*'
+            ),
+            stock_name TEXT NOT NULL,
+            weight REAL CHECK (weight IS NULL OR weight >= 0),
+            weight_unit TEXT NOT NULL,
+            PRIMARY KEY (constituent_set_id, stock_code),
+            FOREIGN KEY (constituent_set_id)
+                REFERENCES radar_index_constituent_sets(constituent_set_id)
+                ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE INDEX idx_index_constituent_stock
+        ON radar_index_constituents (stock_code, constituent_set_id)
+        """,
+        """
+        CREATE TABLE radar_index_industry_exposures (
+            exposure_version_id TEXT NOT NULL,
+            constituent_set_id TEXT NOT NULL,
+            industry_release_id TEXT NOT NULL,
+            index_provider TEXT NOT NULL,
+            index_code TEXT NOT NULL,
+            index_name TEXT NOT NULL,
+            constituent_source_date TEXT,
+            industry_release_period TEXT NOT NULL,
+            industry_document_sha256 TEXT NOT NULL CHECK (
+                length(industry_document_sha256) = 64
+                AND industry_document_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            industry_code TEXT NOT NULL,
+            industry_name TEXT NOT NULL,
+            raw_weight REAL NOT NULL CHECK (raw_weight >= 0),
+            exposure_ratio REAL NOT NULL CHECK (
+                exposure_ratio BETWEEN 0 AND 1
+            ),
+            total_weight REAL NOT NULL CHECK (total_weight > 0),
+            mapped_weight REAL NOT NULL CHECK (mapped_weight >= 0),
+            unmapped_weight REAL NOT NULL CHECK (unmapped_weight >= 0),
+            mapping_coverage REAL NOT NULL CHECK (
+                mapping_coverage BETWEEN 0 AND 1
+            ),
+            unmapped_symbols_json TEXT NOT NULL DEFAULT '[]',
+            as_of TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            calculation_version TEXT NOT NULL,
+            formal_ready INTEGER NOT NULL CHECK (formal_ready IN (0, 1)),
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (exposure_version_id, industry_code),
+            FOREIGN KEY (constituent_set_id)
+                REFERENCES radar_index_constituent_sets(constituent_set_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY (industry_release_id)
+                REFERENCES industry_classification_releases(industry_release_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_index_exposure_as_of
+        ON radar_index_industry_exposures (
+            index_provider, index_code, industry_code, as_of
+        )
+        """,
+        """
+        CREATE TABLE radar_etf_daily_facts (
+            daily_fact_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            fact_key_date TEXT NOT NULL,
+            trade_date TEXT,
+            source_report_date TEXT,
+            fund_size REAL CHECK (fund_size IS NULL OR fund_size >= 0),
+            fund_size_unit TEXT,
+            fund_shares REAL CHECK (fund_shares IS NULL OR fund_shares >= 0),
+            fund_shares_unit TEXT,
+            nav REAL CHECK (nav IS NULL OR nav >= 0),
+            nav_currency TEXT,
+            share_change_5d REAL,
+            share_change_20d REAL,
+            average_turnover_20d REAL CHECK (
+                average_turnover_20d IS NULL OR average_turnover_20d >= 0
+            ),
+            tracking_difference REAL,
+            tracking_error REAL CHECK (
+                tracking_error IS NULL OR tracking_error >= 0
+            ),
+            index_correlation REAL CHECK (
+                index_correlation IS NULL OR index_correlation BETWEEN -1 AND 1
+            ),
+            window_trading_days INTEGER CHECK (
+                window_trading_days IS NULL OR window_trading_days >= 0
+            ),
+            sample_count INTEGER CHECK (
+                sample_count IS NULL OR sample_count >= 0
+            ),
+            formula_version TEXT,
+            field_states_json TEXT NOT NULL,
+            source_contract_ids_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            formal_usable INTEGER NOT NULL CHECK (formal_usable IN (0, 1)),
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            UNIQUE (symbol, fact_key_date, record_checksum)
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_daily_fact_symbol_date
+        ON radar_etf_daily_facts (symbol, fact_key_date, computed_at)
+        """,
+        """
+        CREATE INDEX idx_etf_daily_fact_formal_date
+        ON radar_etf_daily_facts (fact_key_date, formal_usable)
+        """,
+        """
+        CREATE TABLE radar_etf_feature_snapshots (
+            radar_run_id TEXT NOT NULL,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            as_of TEXT NOT NULL,
+            source_time TEXT,
+            fetched_at TEXT NOT NULL,
+            price REAL,
+            change_percent REAL,
+            turnover_volume REAL,
+            turnover_amount REAL,
+            bid1 REAL,
+            ask1 REAL,
+            spread_bps REAL,
+            iopv REAL,
+            premium_discount_rate REAL,
+            field_states_json TEXT NOT NULL,
+            formal_usable INTEGER NOT NULL CHECK (formal_usable IN (0, 1)),
+            reason_codes_json TEXT NOT NULL DEFAULT '[]',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (radar_run_id, symbol),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_runs(radar_run_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_feature_symbol_as_of
+        ON radar_etf_feature_snapshots (symbol, as_of)
+        """,
+        """
+        CREATE TABLE radar_etf_candidate_snapshots (
+            radar_run_id TEXT PRIMARY KEY,
+            as_of TEXT NOT NULL,
+            rule_version_id TEXT,
+            registry_count INTEGER NOT NULL CHECK (registry_count >= 0),
+            etf_count INTEGER NOT NULL CHECK (etf_count >= 0),
+            eligible_product_count INTEGER NOT NULL CHECK (
+                eligible_product_count >= 0
+            ),
+            industry_theme_count INTEGER NOT NULL CHECK (
+                industry_theme_count >= 0
+            ),
+            computed_count INTEGER NOT NULL CHECK (computed_count >= 0),
+            stale_count INTEGER NOT NULL CHECK (stale_count >= 0),
+            missing_count INTEGER NOT NULL CHECK (missing_count >= 0),
+            excluded_count INTEGER NOT NULL CHECK (excluded_count >= 0),
+            candidate_group_count INTEGER NOT NULL CHECK (
+                candidate_group_count >= 0
+            ),
+            coverage REAL NOT NULL CHECK (coverage BETWEEN 0 AND 1),
+            quality TEXT NOT NULL,
+            reason_counts_json TEXT NOT NULL DEFAULT '{}',
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_runs(radar_run_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY (rule_version_id)
+                REFERENCES radar_rule_versions(rule_version_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_candidate_snapshot_as_of
+        ON radar_etf_candidate_snapshots (as_of)
+        """,
+        """
+        CREATE TABLE radar_etf_candidate_entries (
+            radar_run_id TEXT NOT NULL,
+            industry_code TEXT NOT NULL,
+            index_group_key TEXT NOT NULL,
+            rank INTEGER NOT NULL CHECK (rank >= 1),
+            representative_symbol TEXT CHECK (
+                representative_symbol IS NULL
+                OR (
+                    length(representative_symbol) = 6
+                    AND representative_symbol NOT GLOB '*[^0-9]*'
+                )
+            ),
+            alternative_symbols_json TEXT NOT NULL DEFAULT '[]',
+            industry_exposures_json TEXT NOT NULL DEFAULT '[]',
+            ranking_components_json TEXT NOT NULL DEFAULT '{}',
+            entry_reasons_json TEXT NOT NULL DEFAULT '[]',
+            risk_reasons_json TEXT NOT NULL DEFAULT '[]',
+            exit_conditions_json TEXT NOT NULL DEFAULT '[]',
+            formal_usable INTEGER NOT NULL CHECK (formal_usable IN (0, 1)),
+            PRIMARY KEY (radar_run_id, industry_code, index_group_key),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_etf_candidate_snapshots(radar_run_id)
+                ON DELETE CASCADE,
+            CHECK (
+                formal_usable = 0 OR representative_symbol IS NOT NULL
+            )
+        )
+        """,
+        """
+        CREATE INDEX idx_etf_candidate_entry_industry
+        ON radar_etf_candidate_entries (industry_code, rank, radar_run_id)
+        """,
+        """
+        CREATE TRIGGER trg_etf_profile_interval_insert
+        BEFORE INSERT ON radar_etf_product_profiles
+        WHEN EXISTS (
+            SELECT 1
+            FROM radar_etf_product_profiles existing
+            WHERE existing.symbol = NEW.symbol
+              AND existing.source_contract_id = NEW.source_contract_id
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'ETF产品归一化版本时间区间重叠');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_etf_profile_interval_update
+        BEFORE UPDATE OF
+            symbol, source_contract_id, effective_from, effective_to
+        ON radar_etf_product_profiles
+        WHEN EXISTS (
+            SELECT 1
+            FROM radar_etf_product_profiles existing
+            WHERE existing.profile_id <> OLD.profile_id
+              AND existing.symbol = NEW.symbol
+              AND existing.source_contract_id = NEW.source_contract_id
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'ETF产品归一化版本时间区间重叠');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_etf_relation_interval_insert
+        BEFORE INSERT ON radar_etf_index_relations
+        WHEN NEW.effective_from IS NOT NULL
+         AND EXISTS (
+            SELECT 1
+            FROM radar_etf_index_relations existing
+            WHERE existing.profile_id = NEW.profile_id
+              AND existing.source_contract_id = NEW.source_contract_id
+              AND existing.effective_from IS NOT NULL
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'ETF指数关系时间区间重叠');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_etf_relation_interval_update
+        BEFORE UPDATE OF
+            profile_id, source_contract_id, effective_from, effective_to
+        ON radar_etf_index_relations
+        WHEN NEW.effective_from IS NOT NULL
+         AND EXISTS (
+            SELECT 1
+            FROM radar_etf_index_relations existing
+            WHERE existing.relation_id <> OLD.relation_id
+              AND existing.profile_id = NEW.profile_id
+              AND existing.source_contract_id = NEW.source_contract_id
+              AND existing.effective_from IS NOT NULL
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'ETF指数关系时间区间重叠');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_etf_methodology_interval_insert
+        BEFORE INSERT ON radar_index_methodology_versions
+        WHEN NEW.effective_from IS NOT NULL
+         AND EXISTS (
+            SELECT 1
+            FROM radar_index_methodology_versions existing
+            WHERE existing.index_provider = NEW.index_provider
+              AND existing.index_code = NEW.index_code
+              AND existing.effective_from IS NOT NULL
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, '指数方法时间区间重叠');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_etf_methodology_interval_update
+        BEFORE UPDATE OF
+            index_provider, index_code, effective_from, effective_to
+        ON radar_index_methodology_versions
+        WHEN NEW.effective_from IS NOT NULL
+         AND EXISTS (
+            SELECT 1
+            FROM radar_index_methodology_versions existing
+            WHERE existing.methodology_version_id
+                    <> OLD.methodology_version_id
+              AND existing.index_provider = NEW.index_provider
+              AND existing.index_code = NEW.index_code
+              AND existing.effective_from IS NOT NULL
+              AND existing.effective_from <
+                    COALESCE(
+                        NEW.effective_to,
+                        '9999-12-31T23:59:59.999999+00:00'
+                    )
+              AND COALESCE(
+                    existing.effective_to,
+                    '9999-12-31T23:59:59.999999+00:00'
+                  ) > NEW.effective_from
+        )
+        BEGIN
+            SELECT RAISE(ABORT, '指数方法时间区间重叠');
+        END
+        """,
+    ),
+)
+
+
 RADAR_MIGRATIONS: Tuple[Migration, ...] = (
     INITIAL_RADAR_MIGRATION,
     INDUSTRY_STORAGE_MIGRATION,
     MARKET_ENVIRONMENT_STORAGE_MIGRATION,
+)
+
+# 5F临时演练和未来受控启用使用；默认生产运行仍只要求版本1至3。
+STAGE5_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
+    *RADAR_MIGRATIONS,
+    ETF_STORAGE_MIGRATION,
 )
 
 REQUIRED_RADAR_SCHEMA_OBJECTS_V1 = frozenset({
@@ -916,10 +1566,44 @@ REQUIRED_RADAR_SCHEMA_OBJECTS_V3 = frozenset({
     ("index", "idx_market_index_feature_key_as_of"),
 })
 
+REQUIRED_RADAR_SCHEMA_OBJECTS_V4 = frozenset({
+    ("table", "radar_etf_product_profiles"),
+    ("table", "radar_etf_product_master_runs"),
+    ("table", "radar_etf_index_relations"),
+    ("table", "radar_index_methodology_versions"),
+    ("table", "radar_index_constituent_sets"),
+    ("table", "radar_index_constituents"),
+    ("table", "radar_index_industry_exposures"),
+    ("table", "radar_etf_daily_facts"),
+    ("table", "radar_etf_feature_snapshots"),
+    ("table", "radar_etf_candidate_snapshots"),
+    ("table", "radar_etf_candidate_entries"),
+    ("index", "idx_etf_profile_symbol_effective"),
+    ("index", "uq_etf_profile_current_source"),
+    ("index", "idx_etf_product_master_run_fetched"),
+    ("index", "idx_etf_relation_symbol_effective"),
+    ("index", "idx_index_methodology_effective"),
+    ("index", "idx_index_constituent_set_as_of"),
+    ("index", "idx_index_constituent_stock"),
+    ("index", "idx_index_exposure_as_of"),
+    ("index", "idx_etf_daily_fact_symbol_date"),
+    ("index", "idx_etf_daily_fact_formal_date"),
+    ("index", "idx_etf_feature_symbol_as_of"),
+    ("index", "idx_etf_candidate_snapshot_as_of"),
+    ("index", "idx_etf_candidate_entry_industry"),
+    ("trigger", "trg_etf_profile_interval_insert"),
+    ("trigger", "trg_etf_profile_interval_update"),
+    ("trigger", "trg_etf_relation_interval_insert"),
+    ("trigger", "trg_etf_relation_interval_update"),
+    ("trigger", "trg_etf_methodology_interval_insert"),
+    ("trigger", "trg_etf_methodology_interval_update"),
+})
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_BY_VERSION = {
     1: REQUIRED_RADAR_SCHEMA_OBJECTS_V1,
     2: REQUIRED_RADAR_SCHEMA_OBJECTS_V2,
     3: REQUIRED_RADAR_SCHEMA_OBJECTS_V3,
+    4: REQUIRED_RADAR_SCHEMA_OBJECTS_V4,
 }
 
 REQUIRED_RADAR_SCHEMA_OBJECTS = frozenset().union(
@@ -953,12 +1637,14 @@ def _validate_applied_rows(
     applied_rows: Sequence[tuple],
     *,
     require_all: bool,
+    known_migrations: Optional[Sequence[Migration]] = None,
 ) -> dict:
     applied = {
         int(version): (str(name), str(checksum))
         for version, name, checksum in applied_rows
     }
-    known_versions = {migration.version for migration in ordered}
+    known = tuple(known_migrations or ordered)
+    known_versions = {migration.version for migration in known}
     unknown_versions = sorted(set(applied) - known_versions)
     if unknown_versions:
         raise MigrationDriftError(
@@ -966,10 +1652,12 @@ def _validate_applied_rows(
         )
 
     missing_versions = []
-    for migration in ordered:
+    required_versions = {migration.version for migration in ordered}
+    for migration in known:
         existing = applied.get(migration.version)
         if existing is None:
-            missing_versions.append(migration.version)
+            if migration.version in required_versions:
+                missing_versions.append(migration.version)
             continue
         if existing != (migration.name, migration.checksum):
             raise MigrationDriftError(
@@ -1021,6 +1709,11 @@ def validate_applied_migrations(
         ordered,
         applied_rows,
         require_all=True,
+        known_migrations=(
+            STAGE5_RADAR_MIGRATIONS
+            if ordered == RADAR_MIGRATIONS
+            else ordered
+        ),
     )
     return sorted(applied)
 
@@ -1050,6 +1743,11 @@ def apply_pending_migrations(
         ordered,
         applied_rows,
         require_all=False,
+        known_migrations=(
+            STAGE5_RADAR_MIGRATIONS
+            if ordered == RADAR_MIGRATIONS
+            else ordered
+        ),
     )
 
     applied_now = []

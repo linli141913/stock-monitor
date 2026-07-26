@@ -25,6 +25,7 @@ class RadarConfigTests(unittest.TestCase):
         self.assertFalse(settings.shadow_mode)
         self.assertFalse(settings.sector_shadow_enabled)
         self.assertFalse(settings.market_shadow_enabled)
+        self.assertFalse(settings.etf_stage5_enabled)
         self.assertEqual(settings.stock_scan_interval_seconds, 180)
         self.assertEqual(settings.etf_scan_interval_seconds, 300)
         self.assertEqual(settings.sector_scan_interval_seconds, 180)
@@ -41,6 +42,7 @@ class RadarConfigTests(unittest.TestCase):
             "RADAR_SHADOW_MODE": "1",
             "RADAR_SECTOR_SHADOW_ENABLED": "yes",
             "RADAR_MARKET_SHADOW_ENABLED": "on",
+            "RADAR_ETF_STAGE5_ENABLED": "true",
             "RADAR_SCAN_INTERVAL_SECONDS": "240",
             "RADAR_ETF_SCAN_INTERVAL_SECONDS": "360",
             "RADAR_SECTOR_SCAN_INTERVAL_SECONDS": "420",
@@ -52,6 +54,7 @@ class RadarConfigTests(unittest.TestCase):
         self.assertTrue(settings.shadow_mode)
         self.assertTrue(settings.sector_shadow_enabled)
         self.assertTrue(settings.market_shadow_enabled)
+        self.assertTrue(settings.etf_stage5_enabled)
         self.assertEqual(settings.stock_scan_interval_seconds, 240)
         self.assertEqual(settings.etf_scan_interval_seconds, 360)
         self.assertEqual(settings.sector_scan_interval_seconds, 420)

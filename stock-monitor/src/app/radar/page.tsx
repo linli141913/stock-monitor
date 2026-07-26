@@ -12,8 +12,10 @@ import MarketContextPanel from '@/components/radar/MarketContextPanel';
 import ModuleStatePanel from '@/components/radar/ModuleStatePanel';
 import RadarDataGatePanel from '@/components/radar/RadarDataGatePanel';
 import RadarStatusStrip from '@/components/radar/RadarStatusStrip';
+import EtfObservationPanel from '@/components/radar/EtfObservationPanel';
 import SectorObservationPanel from '@/components/radar/SectorObservationPanel';
 import type {
+  RadarEtfsResponse,
   RadarOverviewResponse,
   RadarSectorsResponse,
 } from '@/types/radar';
@@ -62,13 +64,16 @@ export default function RadarPage() {
   const [activeTab, setActiveTab] = useState<RadarTab>('overview');
   const [overview, setOverview] = useState<RadarOverviewResponse | null>(null);
   const [sectors, setSectors] = useState<RadarSectorsResponse | null>(null);
+  const [etfs, setEtfs] = useState<RadarEtfsResponse | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const [sectorsRefreshError, setSectorsRefreshError] = useState('');
+  const [etfsRefreshError, setEtfsRefreshError] = useState('');
   const [renderedAt, setRenderedAt] = useState<string | null>(null);
   const overviewInFlight = useRef(false);
   const sectorsInFlight = useRef(false);
+  const etfsInFlight = useRef(false);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (overviewInFlight.current) return;
@@ -123,6 +128,31 @@ export default function RadarPage() {
     }
   }, []);
 
+  const loadEtfs = useCallback(async () => {
+    if (etfsInFlight.current) return;
+    etfsInFlight.current = true;
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/etfs?_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('行业ETF快照暂不可用');
+      const payload = await response.json() as RadarEtfsResponse;
+      if (payload.schemaVersion !== 'radar-etfs-v1') {
+        throw new Error('行业ETF数据契约不匹配');
+      }
+      setEtfs(payload);
+      setRenderedAt(new Date().toISOString());
+      setEtfsRefreshError('');
+    } catch (error) {
+      setEtfsRefreshError(
+        error instanceof Error ? error.message : '行业ETF快照暂不可用',
+      );
+    } finally {
+      etfsInFlight.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadOverview(false), 0);
     const timer = window.setInterval(() => {
@@ -146,9 +176,22 @@ export default function RadarPage() {
     };
   }, [activeTab, loadSectors]);
 
+  useEffect(() => {
+    if (activeTab !== 'etf') return;
+    const initialTimer = window.setTimeout(() => void loadEtfs(), 0);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadEtfs();
+    }, 180_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [activeTab, loadEtfs]);
+
   const refreshNow = async () => {
     await loadOverview(false);
     if (activeTab === 'sectors') await loadSectors();
+    if (activeTab === 'etf') await loadEtfs();
   };
 
   const showTab = (tab: RadarTab) => {
@@ -178,6 +221,7 @@ export default function RadarPage() {
 
   const market = overview.modules.market;
   const sectorModule = overview.modules.sectors;
+  const etfModule = overview.modules.etf;
   const dataHealthy = overview.mode === 'shadow'
     && market.state === 'available'
     && sectorModule.state === 'available';
@@ -234,7 +278,7 @@ export default function RadarPage() {
           <span><b>{market.data ? 1 : 0}</b> 市场快照</span>
           <span><b>{sectorModule.summary.totalCount}</b> 行业快照</span>
           <span><b className={styles.greenNumber}>{sectorModule.summary.usableCount}</b> 影子可用</span>
-          <span><b>—</b> ETF未启用</span>
+          <span><b>{etfModule.summary.productCount}</b> ETF产品</span>
           <span><b>—</b> 龙头未启用</span>
           <span className={anomalyCount ? styles.anomalyStat : ''}><b>{anomalyCount}</b> 模块异常</span>
         </div>
@@ -262,11 +306,15 @@ export default function RadarPage() {
           </div>
           <div className={styles.mainRail}>
             <ModuleStatePanel
-              state={overview.modules.etf.state}
+              state={etfModule.state}
               title="行业ETF监测"
-              description="页面位置已预留；阶段5才接入官方产品信息、指数版本和真实观察池。"
-              stage={overview.modules.etf.enabledStage}
-              badges={['不生成ETF候选', '不展示基础名册数量']}
+              description="总览只显示真实产品主档与候选摘要，详细时间和替代标的进入行业ETF页查看。"
+              stage={etfModule.state === 'not_enabled' ? 5 : undefined}
+              badges={[
+                `官方产品 ${etfModule.summary.productCount}`,
+                `候选组 ${etfModule.summary.candidateGroupCount}`,
+                etfModule.summary.formalStateEnabled ? '正式状态可用' : '正式状态未启用',
+              ]}
             />
             <ModuleStatePanel
               state={overview.modules.leaders.state}
@@ -299,13 +347,26 @@ export default function RadarPage() {
       )}
 
       {activeTab === 'etf' && (
-        <ModuleStatePanel
-          state="not_enabled"
-          title="行业ETF"
-          description="阶段5接入官方ETF名册、指数版本、产品归组和真实观察池。"
-          stage={5}
-          badges={['趋势轮动未计算', '中期跟踪未计算']}
-        />
+        <>
+          {etfsRefreshError && (
+            <div className={styles.refreshError}>
+              {etfsRefreshError}。当前保留上一轮成功页面内容。
+            </div>
+          )}
+          {etfs ? (
+            <EtfObservationPanel
+              module={etfs.module}
+              formatTime={formatTime}
+              renderedAt={renderedAt}
+            />
+          ) : (
+            <EtfObservationPanel
+              module={etfModule}
+              formatTime={formatTime}
+              renderedAt={renderedAt}
+            />
+          )}
+        </>
       )}
 
       {activeTab === 'leaders' && (
@@ -331,7 +392,7 @@ export default function RadarPage() {
       <footer className={styles.radarFooter}>
         <span>V2 · 阶段4真实数据骨架</span>
         <p>规则聚合仅用于分析与监测，不构成交易建议。</p>
-        <span>{stateLabel(market.state)} · {stateLabel(sectorModule.state)}</span>
+        <span>{stateLabel(market.state)} · {stateLabel(sectorModule.state)} · {stateLabel(etfModule.state)}</span>
       </footer>
     </div>
   );

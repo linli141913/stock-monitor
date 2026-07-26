@@ -157,6 +157,84 @@ export interface RadarDeferredModule {
   data: null;
 }
 
+export interface RadarEtfAttempt {
+  productMasterRunId: string;
+  asOf: string;
+  source: string;
+  sourceTime: string | null;
+  fetchedAt: string;
+  status: 'succeeded' | 'degraded' | 'failed';
+  expectedCount: number | null;
+  returnedCount: number;
+  rowCoverage: number | null;
+  requiredFieldCoverage: Record<string, number>;
+  issues: Array<Record<string, unknown>>;
+  insertedCount: number;
+  unchangedCount: number;
+}
+
+export interface RadarEtfProductItem {
+  symbol: string;
+  officialName: string;
+  exchange: 'sse' | 'szse';
+  productType: string;
+  managementStyle: string;
+  assetClass: string;
+  targetIndexName: string | null;
+  classificationMappingVersion: string;
+  classificationReasons: string[];
+  sourceContractId: string;
+  source: string;
+  sourceTime: string | null;
+  fetchedAt: string;
+  versionTimeKind: 'official_effective' | 'first_observed';
+  officialEffectiveFrom: string | null;
+  firstObservedAt: string;
+  effectiveFrom: string;
+  historicalReplayReady: boolean;
+  evidenceUrl: string | null;
+}
+
+export interface RadarEtfCandidateItem {
+  industryCode: string;
+  indexGroupKey: string;
+  rank: number;
+  representativeSymbol: string | null;
+  alternativeSymbols: string[];
+  industryExposures: Array<Record<string, unknown>>;
+  rankingComponents: Record<string, unknown>;
+  entryReasons: string[];
+  riskReasons: string[];
+  exitConditions: string[];
+  formalUsable: boolean;
+}
+
+export interface RadarEtfModule {
+  state: RadarModuleState;
+  quality: RadarModuleQuality;
+  usingLastSuccess: boolean;
+  lastAttempt: RadarEtfAttempt | null;
+  lastSuccess: RadarLastSuccess | null;
+  freshness: RadarFreshness;
+  sources: RadarSourceStatus[];
+  summary: {
+    productCount: number;
+    eligibleProductCount: number;
+    candidateGroupCount: number;
+    computedCount: number;
+    staleCount: number;
+    missingCount: number;
+    coverage: number;
+    formalUsableCount: number;
+    ruleVersionId: string | null;
+    formalStateEnabled: false;
+    reasonCodes: string[];
+  };
+  products: RadarEtfProductItem[];
+  candidates: RadarEtfCandidateItem[];
+  reasonCodes: string[];
+}
+
 export interface RadarMarketSession {
   code: string;
   label: string;
@@ -174,7 +252,7 @@ export interface RadarOverviewResponse {
   modules: {
     market: RadarMarketModule;
     sectors: RadarSectorModule;
-    etf: RadarDeferredModule;
+    etf: RadarEtfModule;
     leaders: RadarDeferredModule;
     history: RadarDeferredModule;
   };
@@ -186,4 +264,12 @@ export interface RadarSectorsResponse {
   mode: 'shadow' | 'disabled';
   marketSession: RadarMarketSession;
   module: RadarSectorModule;
+}
+
+export interface RadarEtfsResponse {
+  schemaVersion: 'radar-etfs-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  marketSession: RadarMarketSession;
+  module: RadarEtfModule;
 }

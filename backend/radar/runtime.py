@@ -28,7 +28,7 @@ from radar.market_shadow_runner import (
     build_default_market_index_fetcher,
     build_default_market_quote_fetcher,
 )
-from radar.repository import RadarRepository
+from radar.repository import RadarRepository, RadarRepositoryError
 from radar.scheduler import (
     ScheduleRegistration,
     ScheduleRegistrationState,
@@ -71,17 +71,28 @@ RADAR_MARKET_RUNTIME_LOCK_PATH = Path(
     "/Users/linjian/Library/Application Support/stock-monitor/runtime/"
     "radar-market-shadow.lock"
 )
+RADAR_ETF_STAGE5_RUNTIME_LOCK_PATH = Path(
+    "/Users/linjian/Library/Application Support/stock-monitor/runtime/"
+    "radar-etf-stage5-shadow.lock"
+)
+RADAR_ETF_PRODUCT_MASTER_RUNTIME_LOCK_PATH = Path(
+    "/Users/linjian/Library/Application Support/stock-monitor/runtime/"
+    "radar-etf-product-master.lock"
+)
 RADAR_REGISTRY_JOB_ID = "radar-shadow-registry"
 RADAR_STOCK_QUOTES_JOB_ID = "radar-shadow-stock-quotes"
 RADAR_ETF_QUOTES_JOB_ID = "radar-shadow-etf-quotes"
 RADAR_SECTOR_FEATURES_JOB_ID = "radar-shadow-sector-features"
 RADAR_MARKET_FEATURES_JOB_ID = "radar-shadow-market-features"
+RADAR_ETF_PRODUCT_MASTER_JOB_ID = "radar-etf-stage5-product-master"
 RADAR_REGISTRY_INTERVAL_SECONDS = 1800
 RADAR_REGISTRY_INITIAL_DELAY_SECONDS = 90
 RADAR_STOCK_INITIAL_DELAY_SECONDS = 0
 RADAR_ETF_INITIAL_DELAY_SECONDS = 30
 RADAR_SECTOR_INITIAL_DELAY_SECONDS = 60
 RADAR_MARKET_INITIAL_DELAY_SECONDS = 120
+RADAR_ETF_PRODUCT_MASTER_INTERVAL_SECONDS = 86400
+RADAR_ETF_PRODUCT_MASTER_INITIAL_DELAY_SECONDS = 150
 RADAR_REGISTRY_WINDOW_START = time(8, 45)
 RADAR_REGISTRY_WINDOW_END = time(16, 0)
 
@@ -98,6 +109,7 @@ JOB_IDS = {
 RUN_ID_PREFIXES = dict(JOB_IDS)
 RADAR_SECTOR_TASK_NAME = "radarSectorFeatures"
 RADAR_MARKET_TASK_NAME = "radarMarketFeatures"
+RADAR_ETF_PRODUCT_MASTER_TASK_NAME = "radarEtfProductMaster"
 
 
 class RadarSourceDegradedError(RuntimeError):
@@ -183,6 +195,11 @@ class RadarRuntime:
         market_lock_path: PathLike = RADAR_MARKET_RUNTIME_LOCK_PATH,
         market_index_fetcher: Optional[MarketIndexFetcher] = None,
         market_quote_fetcher: Optional[MarketQuoteFetcher] = None,
+        etf_stage5_lock_path: PathLike = RADAR_ETF_STAGE5_RUNTIME_LOCK_PATH,
+        etf_product_master_lock_path: PathLike = (
+            RADAR_ETF_PRODUCT_MASTER_RUNTIME_LOCK_PATH
+        ),
+        etf_product_master_fetcher: Optional[Callable] = None,
         clock: Callable[[], datetime] = _utc_now,
         market_status_provider: MarketStatusProvider = (
             market_calendar.get_market_status
@@ -193,6 +210,10 @@ class RadarRuntime:
         self.lock_path = Path(lock_path)
         self.sector_lock_path = Path(sector_lock_path)
         self.market_lock_path = Path(market_lock_path)
+        self.etf_stage5_lock_path = Path(etf_stage5_lock_path)
+        self.etf_product_master_lock_path = Path(
+            etf_product_master_lock_path
+        )
         self.settings = settings
         self.sources = sources
         self.sector_quote_fetcher = (
@@ -214,6 +235,16 @@ class RadarRuntime:
                 clock=clock,
             )
         )
+        self.etf_product_master_fetcher = etf_product_master_fetcher
+        if (
+            self.settings.etf_stage5_enabled
+            and self.etf_product_master_fetcher is None
+        ):
+            from radar.sources.etf_product_master import (
+                fetch_etf_product_master,
+            )
+
+            self.etf_product_master_fetcher = fetch_etf_product_master
         self._sector_run_lock = threading.Lock()
         self._market_run_lock = threading.Lock()
         self.clock = clock
@@ -276,6 +307,29 @@ class RadarRuntime:
             return "registry_already_current"
         return None
 
+    def etf_product_master_readiness_reason(
+        self,
+        as_of: datetime,
+    ) -> Optional[str]:
+        as_of = _aware_utc(as_of)
+        try:
+            with self._connection(read_only=True) as connection:
+                from radar.etf_repository import EtfRepository
+
+                latest_attempt = EtfRepository(
+                    connection,
+                    clock=self.clock,
+                ).latest_product_master_attempt_at()
+        except RadarRepositoryError:
+            return "etf_stage5_storage_not_ready"
+        if (
+            latest_attempt is not None
+            and latest_attempt.astimezone(SHANGHAI_TZ).date()
+            == as_of.astimezone(SHANGHAI_TZ).date()
+        ):
+            return "etf_product_master_already_attempted_today"
+        return None
+
     def execute(
         self,
         scope: RadarTaskScope,
@@ -284,11 +338,40 @@ class RadarRuntime:
     ):
         with self._connection(read_only=False) as connection:
             repository = RadarRepository(connection, clock=self.clock)
+            etf_stage5_processor = None
+            if (
+                scope == RadarTaskScope.ETF_QUOTES
+                and self.settings.etf_stage5_enabled
+            ):
+                def process_etf_stage5(
+                    current_run_id,
+                    current_as_of,
+                    quote_batch,
+                    quote_health,
+                ):
+                    from radar.etf_repository import EtfRepository
+                    from radar.etf_shadow_runner import EtfStage5ShadowRunner
+
+                    stage5_runner = EtfStage5ShadowRunner(
+                        EtfRepository(connection, clock=self.clock),
+                        settings=self.settings,
+                        lock_path=self.etf_stage5_lock_path,
+                        clock=self.clock,
+                    )
+                    return stage5_runner.run_once(
+                        current_run_id,
+                        current_as_of,
+                        quote_batch,
+                        quote_health,
+                    )
+
+                etf_stage5_processor = process_etf_stage5
             runner = ScopedShadowRunner(
                 repository=repository,
                 settings=self.settings,
                 sources=self.sources,
                 clock=self.clock,
+                etf_stage5_processor=etf_stage5_processor,
             )
             return runner.run_once(scope, radar_run_id, as_of)
 
@@ -342,6 +425,27 @@ class RadarRuntime:
                 ),
                 clock=self.clock,
                 run_lock=self._market_run_lock,
+            )
+            return runner.run_once(radar_run_id, as_of)
+
+    def execute_etf_product_master(
+        self,
+        radar_run_id: str,
+        as_of: datetime,
+    ):
+        if self.etf_product_master_fetcher is None:
+            raise RuntimeError("ETF产品主档来源未配置")
+        with self._connection(read_only=False) as connection:
+            from radar.etf_product_master_runner import (
+                EtfProductMasterRunner,
+            )
+            from radar.etf_repository import EtfRepository
+
+            runner = EtfProductMasterRunner(
+                EtfRepository(connection, clock=self.clock),
+                settings=self.settings,
+                fetcher=self.etf_product_master_fetcher,
+                clock=self.clock,
             )
             return runner.run_once(radar_run_id, as_of)
 
@@ -416,6 +520,30 @@ class RadarRuntime:
             scheduled_job=scheduled,
         )
 
+    def build_etf_product_master_job(self) -> HealthTrackedJob:
+        product_settings = replace(
+            self.settings,
+            enabled=(
+                self.settings.enabled
+                and self.settings.etf_stage5_enabled
+            ),
+        )
+        scheduled = ScheduledShadowJob(
+            settings=product_settings,
+            execute_once=self.execute_etf_product_master,
+            lock_path=self.etf_product_master_lock_path,
+            clock=self.clock,
+            readiness_check=self.etf_product_master_readiness_reason,
+            run_id_prefix=RADAR_ETF_PRODUCT_MASTER_JOB_ID,
+            on_started=lambda: monitoring_health.record_task_started(
+                RADAR_ETF_PRODUCT_MASTER_TASK_NAME
+            ),
+        )
+        return HealthTrackedJob(
+            task_name=RADAR_ETF_PRODUCT_MASTER_TASK_NAME,
+            scheduled_job=scheduled,
+        )
+
     def job_specs(self) -> tuple[ShadowJobSpec, ...]:
         phase_anchor = _aware_utc(self.clock())
         specs = [
@@ -462,6 +590,15 @@ class RadarRuntime:
                     seconds=RADAR_MARKET_INITIAL_DELAY_SECONDS
                 ),
             ))
+        if self.settings.etf_stage5_enabled:
+            specs.append(ShadowJobSpec(
+                RADAR_ETF_PRODUCT_MASTER_JOB_ID,
+                self.build_etf_product_master_job(),
+                RADAR_ETF_PRODUCT_MASTER_INTERVAL_SECONDS,
+                phase_anchor + timedelta(
+                    seconds=RADAR_ETF_PRODUCT_MASTER_INITIAL_DELAY_SECONDS
+                ),
+            ))
         return tuple(specs)
 
 
@@ -472,11 +609,16 @@ def register_production_shadow_jobs(
     lock_path: PathLike = RADAR_RUNTIME_LOCK_PATH,
     sector_lock_path: PathLike = RADAR_SECTOR_RUNTIME_LOCK_PATH,
     market_lock_path: PathLike = RADAR_MARKET_RUNTIME_LOCK_PATH,
+    etf_stage5_lock_path: PathLike = RADAR_ETF_STAGE5_RUNTIME_LOCK_PATH,
+    etf_product_master_lock_path: PathLike = (
+        RADAR_ETF_PRODUCT_MASTER_RUNTIME_LOCK_PATH
+    ),
     settings: Optional[RadarSettings] = None,
     sources: Optional[ShadowSources] = None,
     sector_quote_fetcher: Optional[SectorQuoteFetcher] = None,
     market_index_fetcher: Optional[MarketIndexFetcher] = None,
     market_quote_fetcher: Optional[MarketQuoteFetcher] = None,
+    etf_product_master_fetcher: Optional[Callable] = None,
     clock: Callable[[], datetime] = _utc_now,
     market_status_provider: MarketStatusProvider = (
         market_calendar.get_market_status
@@ -486,19 +628,22 @@ def register_production_shadow_jobs(
     """把默认关闭的分频任务接到现有调度器，但不启动调度器。"""
 
     effective_settings = settings or load_radar_settings()
+    ordered_job_ids = [
+        RADAR_REGISTRY_JOB_ID,
+        RADAR_STOCK_QUOTES_JOB_ID,
+        RADAR_ETF_QUOTES_JOB_ID,
+        RADAR_SECTOR_FEATURES_JOB_ID,
+        RADAR_MARKET_FEATURES_JOB_ID,
+    ]
+    if effective_settings.etf_stage5_enabled:
+        ordered_job_ids.append(RADAR_ETF_PRODUCT_MASTER_JOB_ID)
     if not effective_settings.enabled or not effective_settings.shadow_mode:
         return tuple(
             ScheduleRegistration(
                 state=ScheduleRegistrationState.DISABLED,
                 job_id=job_id,
             )
-            for job_id in (
-                RADAR_REGISTRY_JOB_ID,
-                RADAR_STOCK_QUOTES_JOB_ID,
-                RADAR_ETF_QUOTES_JOB_ID,
-                RADAR_SECTOR_FEATURES_JOB_ID,
-                RADAR_MARKET_FEATURES_JOB_ID,
-            )
+            for job_id in ordered_job_ids
         )
 
     runtime = RadarRuntime(
@@ -506,6 +651,8 @@ def register_production_shadow_jobs(
         lock_path=lock_path,
         sector_lock_path=sector_lock_path,
         market_lock_path=market_lock_path,
+        etf_stage5_lock_path=etf_stage5_lock_path,
+        etf_product_master_lock_path=etf_product_master_lock_path,
         settings=effective_settings,
         sources=sources or build_default_shadow_sources(
             effective_settings,
@@ -514,6 +661,7 @@ def register_production_shadow_jobs(
         sector_quote_fetcher=sector_quote_fetcher,
         market_index_fetcher=market_index_fetcher,
         market_quote_fetcher=market_quote_fetcher,
+        etf_product_master_fetcher=etf_product_master_fetcher,
         clock=clock,
         market_status_provider=market_status_provider,
         connection_factory=connection_factory,
@@ -539,11 +687,5 @@ def register_production_shadow_jobs(
         )
     return tuple(
         registration_by_id[job_id]
-        for job_id in (
-            RADAR_REGISTRY_JOB_ID,
-            RADAR_STOCK_QUOTES_JOB_ID,
-            RADAR_ETF_QUOTES_JOB_ID,
-            RADAR_SECTOR_FEATURES_JOB_ID,
-            RADAR_MARKET_FEATURES_JOB_ID,
-        )
+        for job_id in ordered_job_ids
     )

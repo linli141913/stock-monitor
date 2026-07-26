@@ -7,8 +7,13 @@ from typing import Iterator, Union
 from fastapi import APIRouter, HTTPException, Response
 
 import market_calendar
-from radar.api_contracts import RadarOverviewResponse, RadarSectorsResponse
+from radar.api_contracts import (
+    RadarEtfsResponse,
+    RadarOverviewResponse,
+    RadarSectorsResponse,
+)
 from radar.config import load_radar_settings
+from radar.etf_repository import EtfRepository
 from radar.migrations import validate_applied_migrations
 from radar.read_service import RadarReadService
 from radar.repository import RadarRepository
@@ -45,11 +50,20 @@ def open_radar_read_connection(
 
 def _service(connection: sqlite3.Connection) -> RadarReadService:
     validate_applied_migrations(connection)
+    settings = load_radar_settings()
+    etf_repository = None
+    if settings.etf_stage5_enabled:
+        try:
+            etf_repository = EtfRepository(connection)
+        except Exception:
+            # 阶段5存储尚未迁移时，API返回not_ready而不是把整个总览打成503。
+            etf_repository = None
     return RadarReadService(
         RadarRepository(connection),
-        settings=load_radar_settings(),
+        settings=settings,
         clock=lambda: datetime.now(timezone.utc),
         market_status_provider=market_calendar.get_market_status,
+        etf_repository=etf_repository,
     )
 
 
@@ -80,4 +94,17 @@ def get_radar_sectors(response: Response):
         raise HTTPException(
             status_code=503,
             detail="雷达只读数据暂不可用",
+        ) from exc
+
+
+@router.get("/etfs", response_model=RadarEtfsResponse)
+def get_radar_etfs(response: Response):
+    _no_store(response)
+    try:
+        with open_radar_read_connection(_database_path()) as connection:
+            return _service(connection).build_etfs()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="行业ETF只读数据暂不可用",
         ) from exc

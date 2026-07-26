@@ -162,6 +162,23 @@ class FakeRepository:
         return ()
 
 
+class FakeEtfRepository:
+    def __init__(self, *, attempt=None, successful_attempt=None, profiles=(), candidate=None):
+        self.attempt = attempt
+        self.successful_attempt = successful_attempt
+        self.profiles = tuple(profiles)
+        self.candidate = candidate
+
+    def get_latest_product_master_run(self, *, successful_only=False):
+        return self.successful_attempt if successful_only else self.attempt
+
+    def list_current_product_profiles(self, as_of):
+        return self.profiles
+
+    def get_latest_candidate_snapshot(self):
+        return self.candidate
+
+
 class BrokenMarketRepository(FakeRepository):
     def get_latest_market_feature_row(self):
         raise sqlite3.OperationalError("read failed")
@@ -205,15 +222,23 @@ class RadarReadServiceTests(unittest.TestCase):
             market_scan_interval_seconds=180,
         )
 
-    def service(self, repository, *, market_code="trading"):
+    def service(
+        self,
+        repository,
+        *,
+        market_code="trading",
+        settings=None,
+        etf_repository=None,
+    ):
         return RadarReadService(
             repository,
-            settings=self.settings(),
+            settings=settings or self.settings(),
             clock=lambda: NOW,
             market_status_provider=market_status_provider(
                 market_code,
                 "交易中" if market_code == "trading" else "已收市",
             ),
+            etf_repository=etf_repository,
         )
 
     def test_available_payload_preserves_true_zero_and_hides_unverified_amount(self):
@@ -258,7 +283,11 @@ class RadarReadServiceTests(unittest.TestCase):
             "电子设备制造业",
         )
         self.assertEqual(payload["modules"]["etf"]["state"], "not_enabled")
-        self.assertIsNone(payload["modules"]["etf"]["data"])
+        self.assertEqual(payload["modules"]["etf"]["summary"]["productCount"], 0)
+        self.assertEqual(
+            payload["modules"]["etf"]["reasonCodes"],
+            ["stage_not_enabled"],
+        )
 
     def test_trading_snapshot_older_than_two_cycles_plus_grace_is_stale(self):
         repository = FakeRepository(
@@ -364,6 +393,211 @@ class RadarReadServiceTests(unittest.TestCase):
         self.assertIsNone(payload["modules"]["market"]["data"])
         self.assertEqual(payload["modules"]["sectors"]["state"], "available")
 
+    def test_stage5_storage_missing_is_explicitly_not_ready(self):
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+            etf_scan_interval_seconds=300,
+        )
+        payload = self.service(
+            FakeRepository(),
+            settings=settings,
+        ).build_etfs().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "not_ready")
+        self.assertIn(
+            "stage5_storage_not_ready",
+            payload["module"]["reasonCodes"],
+        )
+
+    def test_stage5_successful_empty_snapshot_is_not_faked_as_candidates(self):
+        as_of = NOW - timedelta(seconds=30)
+        attempt = {
+            "productMasterRunId": "product-master-1",
+            "asOf": as_of,
+            "source": "official_exchange_listed_fund_product_master",
+            "sourceTime": as_of,
+            "fetchedAt": as_of + timedelta(seconds=2),
+            "status": "succeeded",
+            "expectedCount": 0,
+            "returnedCount": 0,
+            "rowCoverage": 1.0,
+            "requiredFieldCoverage": {},
+            "issues": [],
+            "insertedCount": 0,
+            "unchangedCount": 0,
+        }
+        candidate = {
+            "radarRunId": "etf-run-1",
+            "asOf": as_of,
+            "ruleVersionId": "radar-etf-rule-v1",
+            "eligibleProductCount": 0,
+            "computedCount": 0,
+            "staleCount": 0,
+            "missingCount": 0,
+            "candidateGroupCount": 0,
+            "coverage": 1.0,
+            "quality": "complete",
+            "reasonCounts": {},
+            "entries": [],
+        }
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+            etf_scan_interval_seconds=300,
+        )
+        payload = self.service(
+            FakeRepository(),
+            settings=settings,
+            etf_repository=FakeEtfRepository(
+                attempt=attempt,
+                successful_attempt=attempt,
+                candidate=candidate,
+            ),
+        ).build_etfs().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "empty")
+        self.assertEqual(payload["module"]["candidates"], [])
+        self.assertEqual(payload["module"]["summary"]["candidateGroupCount"], 0)
+
+    def test_stage5_rule_not_frozen_is_not_presented_as_true_empty(self):
+        as_of = NOW - timedelta(seconds=30)
+        attempt = {
+            "productMasterRunId": "product-master-1",
+            "asOf": as_of,
+            "source": "official_exchange_listed_fund_product_master",
+            "sourceTime": as_of,
+            "fetchedAt": as_of + timedelta(seconds=2),
+            "status": "succeeded",
+            "expectedCount": 0,
+            "returnedCount": 0,
+            "rowCoverage": 1.0,
+            "requiredFieldCoverage": {},
+            "issues": [],
+            "insertedCount": 0,
+            "unchangedCount": 0,
+        }
+        candidate = {
+            "radarRunId": "etf-run-1",
+            "asOf": as_of,
+            "ruleVersionId": None,
+            "eligibleProductCount": 0,
+            "computedCount": 0,
+            "staleCount": 0,
+            "missingCount": 1,
+            "candidateGroupCount": 0,
+            "coverage": 0.0,
+            "quality": "unavailable",
+            "reasonCounts": {"etf_rule_not_frozen": 1},
+            "entries": [],
+        }
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+            etf_scan_interval_seconds=300,
+        )
+        payload = self.service(
+            FakeRepository(),
+            settings=settings,
+            etf_repository=FakeEtfRepository(
+                attempt=attempt,
+                successful_attempt=attempt,
+                candidate=candidate,
+            ),
+        ).build_etfs().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "not_ready")
+        self.assertIn("etf_rule_not_frozen", payload["module"]["reasonCodes"])
+
+    def test_stage5_candidate_snapshot_ages_into_stale_during_trading(self):
+        as_of = NOW - timedelta(seconds=631)
+        attempt = {
+            "productMasterRunId": "product-master-1",
+            "asOf": as_of,
+            "source": "official_exchange_listed_fund_product_master",
+            "sourceTime": as_of,
+            "fetchedAt": as_of + timedelta(seconds=2),
+            "status": "succeeded",
+            "expectedCount": 0,
+            "returnedCount": 0,
+            "rowCoverage": 1.0,
+            "requiredFieldCoverage": {},
+            "issues": [],
+            "insertedCount": 0,
+            "unchangedCount": 0,
+        }
+        candidate = {
+            "radarRunId": "etf-run-1",
+            "asOf": as_of,
+            "fetchedAt": as_of + timedelta(seconds=2),
+            "ruleVersionId": "radar-etf-rule-v1",
+            "eligibleProductCount": 0,
+            "computedCount": 0,
+            "staleCount": 0,
+            "missingCount": 0,
+            "candidateGroupCount": 0,
+            "coverage": 1.0,
+            "quality": "complete",
+            "reasonCounts": {},
+            "entries": [],
+        }
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+            etf_scan_interval_seconds=300,
+        )
+        payload = self.service(
+            FakeRepository(),
+            settings=settings,
+            etf_repository=FakeEtfRepository(
+                attempt=attempt,
+                successful_attempt=attempt,
+                candidate=candidate,
+            ),
+        ).build_etfs().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "stale")
+        self.assertTrue(payload["module"]["freshness"]["isStale"])
+
+    def test_stage5_failed_product_master_is_not_hidden_as_empty(self):
+        as_of = NOW - timedelta(seconds=30)
+        attempt = {
+            "productMasterRunId": "product-master-failed",
+            "asOf": as_of,
+            "source": "official_exchange_listed_fund_product_master",
+            "sourceTime": None,
+            "fetchedAt": as_of + timedelta(seconds=2),
+            "status": "failed",
+            "expectedCount": None,
+            "returnedCount": 0,
+            "rowCoverage": None,
+            "requiredFieldCoverage": {},
+            "issues": [{"code": "source_request_failed"}],
+            "insertedCount": 0,
+            "unchangedCount": 0,
+        }
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            etf_stage5_enabled=True,
+            etf_scan_interval_seconds=300,
+        )
+        payload = self.service(
+            FakeRepository(),
+            settings=settings,
+            etf_repository=FakeEtfRepository(attempt=attempt),
+        ).build_etfs().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "failed")
+        self.assertIn(
+            "product_master_source_failed",
+            payload["module"]["reasonCodes"],
+        )
+
 
 class RadarReadOnlyConnectionTests(unittest.TestCase):
     def test_router_exposes_get_only_endpoints(self):
@@ -375,6 +609,7 @@ class RadarReadOnlyConnectionTests(unittest.TestCase):
         }
         self.assertEqual(routes["/api/radar/overview"], {"GET"})
         self.assertEqual(routes["/api/radar/sectors"], {"GET"})
+        self.assertEqual(routes["/api/radar/etfs"], {"GET"})
 
     def test_connection_is_query_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
