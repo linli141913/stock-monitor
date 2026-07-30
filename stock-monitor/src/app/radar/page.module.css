@@ -20,7 +20,7 @@
   color: #2464df;
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.025em;
+  letter-spacing: 0;
 }
 
 .hero h1 {
@@ -28,7 +28,7 @@
   color: #172238;
   font-size: 30px;
   line-height: 1.15;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .hero p {
@@ -332,5 +332,69 @@
 
   .snapshotStats {
     width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .pageShell {
+    width: min(100% - 24px, 1400px);
+    padding-top: 48px;
+  }
+
+  .hero {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .hero h1 {
+    font-size: 26px;
+    letter-spacing: 0;
+  }
+
+  .heroActions {
+    padding: 8px 0 12px;
+    flex-wrap: wrap;
+  }
+
+  .tabs {
+    gap: 16px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .tabs button {
+    flex: 0 0 auto;
+  }
+
+  .snapshotBand {
+    padding: 11px 12px;
+  }
+
+  .snapshotBand > div:first-child {
+    min-width: 0;
+  }
+
+  .snapshotStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overviewGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .radarFooter {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    text-align: left;
+  }
+
+  .radarFooter > span:first-child,
+  .radarFooter > span:last-child {
+    justify-self: start;
+  }
+
+  .radarFooter p {
+    margin: 0;
   }
 }

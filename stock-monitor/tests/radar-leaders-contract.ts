@@ -1,0 +1,71 @@
+import type { RadarLeadersResponse } from '@/types/radar';
+
+const availableLeadersResponse = {
+  schemaVersion: 'radar-leaders-v1',
+  checkedAt: '2026-07-27T01:35:00Z',
+  mode: 'shadow',
+  marketSession: {
+    code: 'trading',
+    label: '交易中',
+    calendarKind: 'official',
+    calendarSourceUrl: null,
+    calendarCheckedAt: '2026-07-27T01:35:00Z',
+  },
+  module: {
+    state: 'available',
+    quality: 'complete',
+    usingLastSuccess: false,
+    lastAttempt: null,
+    lastSuccess: {
+      radarRunId: 'leader-shadow-001',
+      asOf: '2026-07-27T01:34:30Z',
+      createdAt: '2026-07-27T01:34:32Z',
+      ruleVersion: 'radar-leader-state-machine-v1',
+    },
+    freshness: {
+      ageSeconds: 30,
+      staleAfterSeconds: 390,
+      isStale: false,
+      reasonCodes: [],
+    },
+    sources: [],
+    summary: {
+      eligibleCount: 3,
+      preliminaryCount: 1,
+      candidateCount: 1,
+      confirmedCount: 1,
+      removedCount: 0,
+      overflowCounts: {
+        preliminary: 0,
+        candidate: 0,
+        confirmed: 0,
+      },
+      coverage: 1,
+      formalUsableCount: 0,
+      ruleVersion: 'radar-leader-state-machine-v1',
+      formalStateEnabled: false,
+      reasonCodes: [],
+    },
+    preliminary: [{
+      symbol: '000001',
+      name: '平安银行',
+      industryCode: 'J66',
+      industryName: '货币金融服务',
+      state: 'preliminary',
+      score: 82.5,
+      businessExposureStatus: 'verified',
+      dataStatus: 'healthy',
+      firstRejectionReason: null,
+      reasons: ['state_entered'],
+      evidence: { source: 'stage6h-contract' },
+      invalidation: { action: 'hold' },
+      stateAgePeriods: 1,
+      formalUsable: false,
+    }],
+    candidates: [],
+    confirmed: [],
+    reasonCodes: [],
+  },
+} satisfies RadarLeadersResponse;
+
+void availableLeadersResponse;

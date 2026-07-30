@@ -6,7 +6,7 @@ import { BellRing, RefreshCw } from 'lucide-react';
 import styles from './AlertSettingCard.module.css';
 
 interface TaskHealth {
-  status: 'healthy' | 'running' | 'failed';
+  status: 'healthy' | 'running' | 'degraded' | 'failed';
   lastSuccessAt?: string;
   lastFailedAt?: string;
   itemCount?: number | null;

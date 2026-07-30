@@ -14,6 +14,11 @@ from radar.api_contracts import (
     RadarFreshness,
     RadarLastAttempt,
     RadarLastSuccess,
+    RadarLeaderItem,
+    RadarLeaderModule,
+    RadarLeaderSnapshot,
+    RadarLeaderSummary,
+    RadarLeadersResponse,
     RadarMarketModule,
     RadarMarketSession,
     RadarModuleCollection,
@@ -25,6 +30,11 @@ from radar.api_contracts import (
 )
 from radar.config import RadarSettings
 from radar.etf_repository import EtfRepository
+from radar.leader_board import (
+    LeaderBoardEntry,
+    build_leader_board_projection,
+)
+from radar.leader_repository import LeaderRepository
 from radar.repository import RadarRepository
 
 
@@ -45,12 +55,14 @@ class RadarReadService:
         clock: Callable[[], datetime],
         market_status_provider=market_calendar.get_market_status,
         etf_repository: Optional[EtfRepository] = None,
+        leader_repository: Optional[LeaderRepository] = None,
     ):
         self.repository = repository
         self.settings = settings
         self.clock = clock
         self.market_status_provider = market_status_provider
         self.etf_repository = etf_repository
+        self.leader_repository = leader_repository
 
     def _market_session(self, now: datetime) -> RadarMarketSession:
         status, calendar_day = self.market_status_provider("cn", now)
@@ -662,6 +674,241 @@ class RadarReadService:
             else "disabled"
         )
 
+    @staticmethod
+    def _empty_leader_summary(
+        reason_codes: Sequence[str] = (),
+    ) -> RadarLeaderSummary:
+        return RadarLeaderSummary(
+            eligibleCount=0,
+            preliminaryCount=0,
+            candidateCount=0,
+            confirmedCount=0,
+            removedCount=0,
+            overflowCounts={
+                "preliminary": 0,
+                "candidate": 0,
+                "confirmed": 0,
+            },
+            coverage=0.0,
+            formalUsableCount=0,
+            ruleVersion=None,
+            reasonCodes=list(reason_codes),
+        )
+
+    def _empty_leader_module(
+        self,
+        *,
+        state: str,
+        reason_codes: Sequence[str],
+    ) -> RadarLeaderModule:
+        stale_after_seconds = (
+            self.settings.stock_scan_interval_seconds * 2 + 30
+        )
+        return RadarLeaderModule(
+            state=state,
+            quality="unavailable",
+            usingLastSuccess=False,
+            lastAttempt=None,
+            lastSuccess=None,
+            freshness=RadarFreshness(
+                ageSeconds=None,
+                staleAfterSeconds=stale_after_seconds,
+                isStale=False,
+                reasonCodes=list(reason_codes),
+            ),
+            sources=[],
+            summary=self._empty_leader_summary(reason_codes),
+            preliminary=[],
+            candidates=[],
+            confirmed=[],
+            reasonCodes=list(reason_codes),
+        )
+
+    @staticmethod
+    def _public_leader_item(
+        entry: LeaderBoardEntry,
+    ) -> RadarLeaderItem:
+        return RadarLeaderItem(
+            symbol=entry.symbol,
+            name=entry.name,
+            industryCode=entry.industry_code,
+            industryName=entry.industry_name,
+            state=entry.state.value,
+            score=entry.score,
+            businessExposureStatus=entry.business_exposure_status.value,
+            dataStatus=entry.data_status.value,
+            firstRejectionReason=entry.first_rejection_reason,
+            reasons=list(entry.reasons),
+            evidence=dict(entry.evidence),
+            invalidation=dict(entry.invalidation),
+            stateAgePeriods=entry.state_age_periods,
+            formalUsable=False,
+        )
+
+    def _leader_module(
+        self,
+        *,
+        now: datetime,
+        is_trading: bool,
+    ) -> RadarLeaderModule:
+        if not self.settings.leader_stage6_enabled:
+            return self._empty_leader_module(
+                state="not_enabled",
+                reason_codes=["stage_not_enabled"],
+            )
+        if not self.settings.enabled or not self.settings.shadow_mode:
+            return self._empty_leader_module(
+                state="not_enabled",
+                reason_codes=["radar_not_enabled"],
+            )
+        if self.leader_repository is None:
+            return self._empty_leader_module(
+                state="not_ready",
+                reason_codes=["stage6_storage_not_ready"],
+            )
+        try:
+            snapshot = self.leader_repository.get_latest_candidate_snapshot()
+        except Exception:
+            return self._empty_leader_module(
+                state="failed",
+                reason_codes=["stage6_read_failed"],
+            )
+        if snapshot is None:
+            return self._empty_leader_module(
+                state="not_ready",
+                reason_codes=["candidate_snapshot_missing"],
+            )
+        try:
+            board = build_leader_board_projection(snapshot)
+        except Exception:
+            return self._empty_leader_module(
+                state="failed",
+                reason_codes=["stage6_snapshot_invalid"],
+            )
+        board_entries = (
+            *board.preliminary,
+            *board.candidate,
+            *board.confirmed,
+        )
+        if board.formal_usable or any(
+            entry.formal_usable
+            for entry in board_entries
+        ):
+            return self._empty_leader_module(
+                state="not_ready",
+                reason_codes=["stage6_formal_state_forbidden"],
+            )
+        created_at = snapshot.get("createdAt")
+        if (
+            not isinstance(created_at, datetime)
+            or created_at.tzinfo is None
+            or created_at.utcoffset() is None
+        ):
+            return self._empty_leader_module(
+                state="failed",
+                reason_codes=["stage6_snapshot_invalid"],
+            )
+        if (board.as_of - now).total_seconds() > 5:
+            return self._empty_leader_module(
+                state="failed",
+                reason_codes=["stage6_snapshot_from_future"],
+            )
+        if created_at < board.as_of:
+            return self._empty_leader_module(
+                state="failed",
+                reason_codes=["stage6_snapshot_invalid"],
+            )
+        reason_codes = list(
+            (snapshot.get("reasonCounts") or {}).keys()
+        )
+        snapshot_quality = snapshot.get("quality")
+        if (
+            float(snapshot.get("coverage", 0.0)) <= 0
+            and snapshot_quality != "empty"
+        ):
+            return self._empty_leader_module(
+                state="not_ready",
+                reason_codes=(
+                    reason_codes
+                    or ["leader_inputs_unavailable"]
+                ),
+            )
+
+        last_success = RadarLeaderSnapshot(
+            radarRunId=board.radar_run_id,
+            asOf=board.as_of,
+            createdAt=created_at,
+            ruleVersion=board.rule_version,
+        )
+        freshness = self._freshness(
+            last_success=RadarLastSuccess(
+                radarRunId=board.radar_run_id,
+                asOf=board.as_of,
+                sourceTime=None,
+                fetchedAt=created_at,
+            ),
+            now=now,
+            scan_interval_seconds=self.settings.stock_scan_interval_seconds,
+            is_trading=is_trading,
+        )
+        preliminary = [
+            self._public_leader_item(entry)
+            for entry in board.preliminary
+        ]
+        candidates = [
+            self._public_leader_item(entry)
+            for entry in board.candidate
+        ]
+        confirmed = [
+            self._public_leader_item(entry)
+            for entry in board.confirmed
+        ]
+        if snapshot_quality == "unavailable":
+            return self._empty_leader_module(
+                state="not_ready",
+                reason_codes=reason_codes or ["leader_rule_not_ready"],
+            )
+        if freshness.is_stale:
+            state = "stale"
+        elif not preliminary and not candidates and not confirmed:
+            state = "empty"
+        else:
+            state = "available"
+        quality = (
+            "complete"
+            if snapshot_quality in {"complete", "empty"}
+            else "partial"
+        )
+        overflow_counts = {
+            leader_state.value: count
+            for leader_state, count in board.overflow_counts
+        }
+        return RadarLeaderModule(
+            state=state,
+            quality=quality,
+            usingLastSuccess=state == "stale",
+            lastAttempt=None,
+            lastSuccess=last_success,
+            freshness=freshness,
+            sources=[],
+            summary=RadarLeaderSummary(
+                eligibleCount=int(snapshot.get("eligibleCount", 0)),
+                preliminaryCount=len(preliminary),
+                candidateCount=len(candidates),
+                confirmedCount=len(confirmed),
+                removedCount=int(snapshot.get("removedCount", 0)),
+                overflowCounts=overflow_counts,
+                coverage=float(snapshot.get("coverage", 0.0)),
+                formalUsableCount=0,
+                ruleVersion=board.rule_version,
+                reasonCodes=reason_codes,
+            ),
+            preliminary=preliminary,
+            candidates=candidates,
+            confirmed=confirmed,
+            reasonCodes=reason_codes,
+        )
+
     def build_overview(self) -> RadarOverviewResponse:
         now = self.clock()
         market_session = self._market_session(now)
@@ -675,6 +922,14 @@ class RadarReadService:
         etf = self._etf_module(
             now=now,
             is_trading=is_trading,
+        )
+        leaders = (
+            self._leader_module(
+                now=now,
+                is_trading=is_trading,
+            )
+            if self.settings.leader_stage6_enabled
+            else RadarDeferredModule(enabledStage=6)
         )
         module_skew_seconds = None
         if market.last_success is not None and sectors.last_success is not None:
@@ -693,7 +948,7 @@ class RadarReadService:
                 market=market,
                 sectors=sectors,
                 etf=etf,
-                leaders=RadarDeferredModule(enabledStage=6),
+                leaders=leaders,
                 history=RadarDeferredModule(enabledStage=9),
             ),
         )
@@ -706,6 +961,19 @@ class RadarReadService:
             mode=self._mode(),
             marketSession=market_session,
             module=self._etf_module(
+                now=now,
+                is_trading=market_session.code == "trading",
+            ),
+        )
+
+    def build_leaders(self) -> RadarLeadersResponse:
+        now = self.clock()
+        market_session = self._market_session(now)
+        return RadarLeadersResponse(
+            checkedAt=now,
+            mode=self._mode(),
+            marketSession=market_session,
+            module=self._leader_module(
                 now=now,
                 is_trading=market_session.code == "trading",
             ),

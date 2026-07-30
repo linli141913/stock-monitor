@@ -19,6 +19,7 @@ from radar.contracts import (
     SourceStatus,
     UnitVerificationStatus,
 )
+from radar.source_health import quote_item_time_reasons
 
 
 def _normalize_universe(values: Iterable[str], label: str) -> Tuple[str, ...]:
@@ -37,7 +38,7 @@ def _dedupe_reasons(values: Iterable[str]) -> Tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
 
 
-def _source_time_reasons(
+def _batch_source_time_reasons(
     source_time: Optional[datetime],
     *,
     as_of: datetime,
@@ -172,6 +173,7 @@ def _build_sector(
 ) -> SectorFeatureSnapshot:
     category_code, category_name, division_code, division_name = key
     expected_count = len(symbols)
+    active_count = expected_count
     returned_count = 0
     fresh_count = 0
     source_time_present_count = 0
@@ -187,9 +189,6 @@ def _build_sector(
     turnover_reasons = []
     usable_quotes: Dict[str, QuoteSnapshot] = {}
 
-    if expected_count <= 1:
-        row_reasons.append("insufficient_constituents")
-
     for symbol in symbols:
         rows = quotes_by_symbol.get(symbol, [])
         if not rows:
@@ -200,6 +199,9 @@ def _build_sector(
             row_reasons.append("duplicate_constituent_quote")
             continue
         item = rows[0]
+        if item.is_explicitly_non_trading:
+            active_count -= 1
+            continue
         if item.source_time is not None:
             source_time_present_count += 1
         if item.change_percent is not None:
@@ -209,10 +211,9 @@ def _build_sector(
         if item.turnover_amount_source is not None:
             turnover_present_count += 1
 
-        time_reasons = _source_time_reasons(
+        time_reasons = quote_item_time_reasons(
             item.source_time,
             as_of=as_of,
-            maximum_age_seconds=maximum_age_seconds,
             maximum_future_skew_seconds=maximum_future_skew_seconds,
         )
         if time_reasons:
@@ -240,7 +241,12 @@ def _build_sector(
         else:
             valid_turnover_count += 1
 
-    denominator = expected_count or 1
+    if expected_count <= 1:
+        row_reasons.append("insufficient_constituents")
+    elif active_count <= 1:
+        row_reasons.append("insufficient_trading_constituents")
+
+    denominator = active_count or 1
     field_coverage = {
         "source_time": source_time_present_count / denominator,
         "change_percent": change_present_count / denominator,
@@ -249,16 +255,16 @@ def _build_sector(
     }
     if returned_count < expected_count:
         row_reasons.append("constituent_quote_coverage_incomplete")
-    if fresh_count < expected_count and not any(
+    if fresh_count < active_count and not any(
         reason.startswith("source_time_")
         for reason in row_reasons
     ):
         row_reasons.append("constituent_source_time_incomplete")
-    if valid_return_count < expected_count and not return_reasons:
+    if valid_return_count < active_count and not return_reasons:
         return_reasons.append("change_percent_incomplete")
-    if valid_market_cap_count < expected_count and not market_cap_reasons:
+    if valid_market_cap_count < active_count and not market_cap_reasons:
         market_cap_reasons.append("market_cap_incomplete")
-    if valid_turnover_count < expected_count and not turnover_reasons:
+    if valid_turnover_count < active_count and not turnover_reasons:
         turnover_reasons.append("turnover_amount_incomplete")
 
     equal_blocking = _dedupe_reasons([*row_reasons, *return_reasons])
@@ -278,9 +284,9 @@ def _build_sector(
     equal_return = None
     if equal_available:
         equal_return = sum(
-            usable_quotes[symbol].change_percent
-            for symbol in symbols
-        ) / expected_count
+            item.change_percent
+            for item in usable_quotes.values()
+        ) / active_count
 
     cap_weighted_return = None
     ex_top_return = None
@@ -288,12 +294,11 @@ def _build_sector(
     top_contribution = None
     if cap_available:
         total_market_cap = sum(
-            usable_quotes[symbol].market_cap_source
-            for symbol in symbols
+            item.market_cap_source
+            for item in usable_quotes.values()
         )
         contributions = []
-        for symbol in symbols:
-            item = usable_quotes[symbol]
+        for symbol, item in usable_quotes.items():
             weight = item.market_cap_source / total_market_cap
             contributions.append((
                 symbol,
@@ -330,7 +335,7 @@ def _build_sector(
             flat += 1
     unavailable = expected_count - advancers - decliners - flat
     valid_breadth_count = advancers + decliners + flat
-    breadth_available = equal_available and valid_breadth_count == expected_count
+    breadth_available = equal_available and valid_breadth_count == active_count
     up_ratio = (
         advancers / valid_breadth_count
         if breadth_available and valid_breadth_count
@@ -340,8 +345,8 @@ def _build_sector(
     turnover_value = None
     if turnover_available:
         turnover_value = sum(
-            usable_quotes[symbol].turnover_amount_source
-            for symbol in symbols
+            item.turnover_amount_source
+            for item in usable_quotes.values()
         )
 
     completeness_reasons = _dedupe_reasons([
@@ -532,7 +537,7 @@ def build_sector_features(
         batch_reasons.append("quote_expected_count_unknown")
     elif quote_batch.meta.expected_count != expected_quote_count:
         batch_reasons.append("quote_expected_count_mismatch")
-    batch_reasons.extend(_source_time_reasons(
+    batch_reasons.extend(_batch_source_time_reasons(
         quote_batch.meta.source_time,
         as_of=classification.meta.as_of,
         maximum_age_seconds=maximum_age_seconds,

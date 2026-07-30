@@ -26,6 +26,7 @@ class RadarConfigTests(unittest.TestCase):
         self.assertFalse(settings.sector_shadow_enabled)
         self.assertFalse(settings.market_shadow_enabled)
         self.assertFalse(settings.etf_stage5_enabled)
+        self.assertFalse(settings.leader_stage6_enabled)
         self.assertEqual(settings.stock_scan_interval_seconds, 180)
         self.assertEqual(settings.etf_scan_interval_seconds, 300)
         self.assertEqual(settings.sector_scan_interval_seconds, 180)
@@ -43,6 +44,7 @@ class RadarConfigTests(unittest.TestCase):
             "RADAR_SECTOR_SHADOW_ENABLED": "yes",
             "RADAR_MARKET_SHADOW_ENABLED": "on",
             "RADAR_ETF_STAGE5_ENABLED": "true",
+            "RADAR_LEADER_STAGE6_ENABLED": "true",
             "RADAR_SCAN_INTERVAL_SECONDS": "240",
             "RADAR_ETF_SCAN_INTERVAL_SECONDS": "360",
             "RADAR_SECTOR_SCAN_INTERVAL_SECONDS": "420",
@@ -55,6 +57,7 @@ class RadarConfigTests(unittest.TestCase):
         self.assertTrue(settings.sector_shadow_enabled)
         self.assertTrue(settings.market_shadow_enabled)
         self.assertTrue(settings.etf_stage5_enabled)
+        self.assertTrue(settings.leader_stage6_enabled)
         self.assertEqual(settings.stock_scan_interval_seconds, 240)
         self.assertEqual(settings.etf_scan_interval_seconds, 360)
         self.assertEqual(settings.sector_scan_interval_seconds, 420)
@@ -89,15 +92,35 @@ class RadarContractTests(unittest.TestCase):
             turnoverRatePercent=None,
             volumeRatio=None,
             marketCapSource=0,
+            upperLimitPriceSource=0,
+            lowerLimitPriceSource=0,
         )
 
         self.assertEqual(quote.price, 0.0)
         self.assertEqual(quote.change_percent, 0.0)
         self.assertEqual(quote.turnover_amount_source, 0.0)
+        self.assertEqual(quote.upper_limit_price_source, 0.0)
+        self.assertEqual(quote.lower_limit_price_source, 0.0)
         self.assertEqual(
             quote.missing_fields(),
             ("turnover_rate_percent", "volume_ratio"),
         )
+
+    def test_optional_limit_prices_reject_negative_or_non_finite_values(self):
+        timestamp = datetime(2026, 7, 17, 10, 0, tzinfo=SHANGHAI_TZ)
+        for field_name, value in (
+            ("upperLimitPriceSource", -1),
+            ("lowerLimitPriceSource", float("inf")),
+        ):
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(ValidationError):
+                    QuoteSnapshot(
+                        symbol="000001",
+                        name="平安银行",
+                        sourceTime=timestamp,
+                        fetchedAt=timestamp,
+                        **{field_name: value},
+                    )
 
     def test_naive_timestamps_are_rejected(self):
         with self.assertRaises(ValidationError):

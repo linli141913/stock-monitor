@@ -46,7 +46,9 @@ function getBackgroundTaskStatus(payload: unknown): ComponentStatus {
     return String((task as { status?: unknown }).status || 'unknown');
   });
 
-  if (statuses.includes('failed')) return 'degraded';
+  if (statuses.some((status) => status === 'failed' || status === 'degraded')) {
+    return 'degraded';
+  }
   if (statuses.some((status) => status === 'healthy' || status === 'running')) {
     return 'healthy';
   }
@@ -112,23 +114,25 @@ export async function GET() {
     }), 503);
   }
 
-  const backendStatus = backendHealth && typeof backendHealth === 'object'
-    ? String((backendHealth as { status?: unknown }).status || 'unknown')
-    : 'unknown';
-  const fastapi: ComponentStatus = backendStatus === 'healthy'
-    ? 'healthy'
-    : backendStatus === 'degraded'
-      ? 'degraded'
-      : 'unknown';
-  const backgroundTasks = getBackgroundTaskStatus(backendHealth);
-  const healthy = fastapi === 'healthy' && backgroundTasks === 'healthy';
+  if (!backendHealth || typeof backendHealth !== 'object') {
+    return healthResponse(buildPayload('degraded', {
+      vercel: 'healthy',
+      tunnel: 'healthy',
+      fastapi: 'degraded',
+      backgroundTasks: 'unknown',
+    }), 503);
+  }
 
-  return healthResponse(buildPayload(healthy ? 'healthy' : 'degraded', {
+  const fastapi: ComponentStatus = 'healthy';
+  const backgroundTasks = getBackgroundTaskStatus(backendHealth);
+  const status = backgroundTasks === 'healthy' ? 'healthy' : 'degraded';
+
+  return healthResponse(buildPayload(status, {
     vercel: 'healthy',
     tunnel: 'healthy',
     fastapi,
     backgroundTasks,
-  }), healthy ? 200 : 503);
+  }), 200);
 }
 
 export const dynamic = 'force-dynamic';

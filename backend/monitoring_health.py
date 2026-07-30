@@ -1,5 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
+from hashlib import sha256
+import re
 from threading import Lock
 from typing import Any, Dict, Iterable, Optional, Set
 
@@ -11,6 +13,7 @@ import market_calendar
 _LOCK = Lock()
 _TASKS: Dict[str, Dict[str, Any]] = {}
 _WATCHLIST_SYNC: Dict[str, Any] = {}
+_REASON_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_:-]{1,120}$")
 
 
 def _now_iso() -> str:
@@ -75,12 +78,87 @@ def record_task_success(task_name: str, item_count: Optional[int] = None) -> Non
             "lastOutcome": "succeeded",
             "lastSuccessAt": _now_iso(),
             "lastError": None,
+            "lastFailureReason": None,
             "itemCount": item_count,
             "consecutiveFailures": 0,
+            "consecutiveDegradations": 0,
+            "lastDegradationReasons": [],
         }
 
 
-def record_task_failure(task_name: str, error: Exception) -> None:
+def _safe_reason_codes(reasons: Iterable[str]) -> list[str]:
+    safe_codes = []
+    for reason in reasons:
+        code = str(reason or "").strip()
+        if (
+            code
+            and _REASON_CODE_PATTERN.fullmatch(code)
+            and code not in safe_codes
+        ):
+            safe_codes.append(code)
+        if len(safe_codes) >= 20:
+            break
+    return safe_codes or ["unspecified"]
+
+
+def record_task_degraded(
+    task_name: str,
+    reasons: Iterable[str],
+    item_count: Optional[int] = None,
+) -> None:
+    reason_codes = _safe_reason_codes(reasons)
+    alert_event = None
+    with _LOCK:
+        current = _TASKS.get(task_name, {})
+        previous_degradations = int(
+            current.get("consecutiveDegradations") or 0
+        )
+        consecutive_degradations = previous_degradations + 1
+        _TASKS[task_name] = {
+            **current,
+            "status": "degraded",
+            "lastOutcome": "degraded",
+            "lastDegradedAt": _now_iso(),
+            "lastError": None,
+            "lastFailureReason": None,
+            "itemCount": item_count,
+            "lastDegradationReasons": reason_codes,
+            "consecutiveDegradations": consecutive_degradations,
+            "consecutiveFailures": 0,
+        }
+        if consecutive_degradations == 2:
+            reason_key = sha256(
+                "|".join(sorted(reason_codes)).encode("utf-8")
+            ).hexdigest()[:12]
+            displayed_reasons = ", ".join(reason_codes[:5])
+            if len(reason_codes) > 5:
+                displayed_reasons += f" 等{len(reason_codes)}项"
+            alert_event = _system_event(
+                "source_degradation",
+                f"{task_name}:{reason_key}",
+                f"数据源持续降级：{task_name}",
+                (
+                    f"{task_name} 已连续两个周期数据质量降级；原因代码："
+                    f"{displayed_reasons}。"
+                    "系统没有把旧数据冒充为本周期结果。"
+                ),
+            )
+    if alert_event is not None:
+        _save_system_alert(alert_event)
+
+
+def record_task_failure(
+    task_name: str,
+    error: Exception,
+    *,
+    reason_code: Optional[str] = None,
+    item_count: Optional[int] = None,
+) -> None:
+    safe_reason = (
+        _safe_reason_codes([reason_code])[0]
+        if reason_code is not None
+        else None
+    )
     alert_event = None
     with _LOCK:
         current = _TASKS.get(task_name, {})
@@ -95,8 +173,12 @@ def record_task_failure(task_name: str, error: Exception) -> None:
             "lastOutcome": "failed",
             "lastFailedAt": _now_iso(),
             "lastError": type(error).__name__,
+            "lastFailureReason": safe_reason,
+            "itemCount": item_count,
             "consecutiveFailures": consecutive_failures,
             "failureEpisode": failure_episode,
+            "consecutiveDegradations": 0,
+            "lastDegradationReasons": [],
         }
         if consecutive_failures == 2:
             alert_event = _system_event(
@@ -105,7 +187,13 @@ def record_task_failure(task_name: str, error: Exception) -> None:
                 f"数据源连续失败：{task_name}",
                 (
                     f"{task_name} 已连续两个周期失败，最近错误类型为"
-                    f" {type(error).__name__}。系统没有把旧数据冒充为本周期结果。"
+                    f" {type(error).__name__}"
+                    + (
+                        f"，原因代码为 {safe_reason}"
+                        if safe_reason is not None
+                        else ""
+                    )
+                    + "。系统没有把旧数据冒充为本周期结果。"
                 ),
             )
     if alert_event is not None:
@@ -120,7 +208,7 @@ def record_task_skipped(task_name: str, reason: str) -> None:
         previous_status = current.get("status")
         status = (
             previous_status
-            if previous_status in {"healthy", "failed"}
+            if previous_status in {"healthy", "degraded", "failed"}
             else "skipped"
         )
         _TASKS[task_name] = {

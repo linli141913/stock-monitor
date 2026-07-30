@@ -235,6 +235,59 @@ export interface RadarEtfModule {
   reasonCodes: string[];
 }
 
+export interface RadarLeaderSnapshot {
+  radarRunId: string;
+  asOf: string;
+  createdAt: string;
+  ruleVersion: string;
+}
+
+export interface RadarLeaderSummary {
+  eligibleCount: number;
+  preliminaryCount: number;
+  candidateCount: number;
+  confirmedCount: number;
+  removedCount: number;
+  overflowCounts: Record<string, number>;
+  coverage: number;
+  formalUsableCount: number;
+  ruleVersion: string | null;
+  formalStateEnabled: false;
+  reasonCodes: string[];
+}
+
+export interface RadarLeaderItem {
+  symbol: string;
+  name: string;
+  industryCode: string | null;
+  industryName: string | null;
+  state: 'preliminary' | 'candidate' | 'confirmed';
+  score: number;
+  businessExposureStatus: string;
+  dataStatus: string;
+  firstRejectionReason: string | null;
+  reasons: string[];
+  evidence: Record<string, unknown>;
+  invalidation: Record<string, unknown>;
+  stateAgePeriods: number;
+  formalUsable: false;
+}
+
+export interface RadarLeaderModule {
+  state: RadarModuleState;
+  quality: RadarModuleQuality;
+  usingLastSuccess: boolean;
+  lastAttempt: RadarLastAttempt | null;
+  lastSuccess: RadarLeaderSnapshot | null;
+  freshness: RadarFreshness;
+  sources: RadarSourceStatus[];
+  summary: RadarLeaderSummary;
+  preliminary: RadarLeaderItem[];
+  candidates: RadarLeaderItem[];
+  confirmed: RadarLeaderItem[];
+  reasonCodes: string[];
+}
+
 export interface RadarMarketSession {
   code: string;
   label: string;
@@ -253,7 +306,7 @@ export interface RadarOverviewResponse {
     market: RadarMarketModule;
     sectors: RadarSectorModule;
     etf: RadarEtfModule;
-    leaders: RadarDeferredModule;
+    leaders: RadarDeferredModule | RadarLeaderModule;
     history: RadarDeferredModule;
   };
 }
@@ -272,4 +325,12 @@ export interface RadarEtfsResponse {
   mode: 'shadow' | 'disabled';
   marketSession: RadarMarketSession;
   module: RadarEtfModule;
+}
+
+export interface RadarLeadersResponse {
+  schemaVersion: 'radar-leaders-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  marketSession: RadarMarketSession;
+  module: RadarLeaderModule;
 }

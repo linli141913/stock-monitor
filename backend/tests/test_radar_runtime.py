@@ -24,6 +24,7 @@ from radar.contracts import (
 from radar.etf_repository import EtfRepository
 from radar.migrations import (
     STAGE5_RADAR_MIGRATIONS,
+    STAGE6_RADAR_MIGRATIONS,
     apply_pending_migrations,
 )
 from radar.repository import RadarRepository
@@ -34,11 +35,17 @@ from radar.runtime import (
     RADAR_REGISTRY_JOB_ID,
     RADAR_SECTOR_FEATURES_JOB_ID,
     RADAR_STOCK_QUOTES_JOB_ID,
+    HealthTrackedJob,
+    LOGGER as RUNTIME_LOGGER,
     RadarRuntime,
     register_production_shadow_jobs,
 )
 from radar.run_lock import CrossProcessFileLock
-from radar.scheduler import ScheduleRegistrationState, ScheduledRunState
+from radar.scheduler import (
+    ScheduleRegistrationState,
+    ScheduledRunOutcome,
+    ScheduledRunState,
+)
 from radar.scoped_runner import RadarTaskScope
 from radar.shadow_runner import ShadowRunExecutionError, ShadowSources
 from radar.sources.market_indices import MARKET_INDEX_IDENTITIES
@@ -88,6 +95,40 @@ class RadarRuntimeTests(unittest.TestCase):
             quotes=self.quote_fetcher,
         )
         monitoring_health.reset_runtime_health()
+
+    def test_health_tracked_job_logs_structured_degraded_outcome(self):
+        tracked = HealthTrackedJob(
+            "radarMarketFeatures",
+            Mock(return_value=ScheduledRunOutcome(
+                state=ScheduledRunState.COMPLETED,
+                radar_run_id="radar-market-test",
+                result_status="degraded",
+                item_count=17,
+                gate_passed=False,
+                gate_reasons=("source_time_stale",),
+                duration_seconds=1.234,
+            )),
+        )
+
+        with self.assertLogs("radar.runtime", level="WARNING") as logs:
+            tracked()
+
+        message = "\n".join(logs.output)
+        self.assertIn("task=radarMarketFeatures", message)
+        self.assertIn("state=completed", message)
+        self.assertIn("status=degraded", message)
+        self.assertIn("gate_passed=false", message)
+        self.assertIn("gate_reasons=source_time_stale", message)
+        self.assertIn("item_count=17", message)
+        self.assertIn("duration_ms=1234", message)
+
+    def test_runtime_outcome_logger_keeps_info_results_visible(self):
+        self.assertTrue(RUNTIME_LOGGER.isEnabledFor(20))
+        self.assertFalse(RUNTIME_LOGGER.propagate)
+        self.assertTrue(any(
+            handler.level <= 20
+            for handler in RUNTIME_LOGGER.handlers
+        ))
 
     def tearDown(self):
         monitoring_health.reset_runtime_health()
@@ -322,6 +363,15 @@ class RadarRuntimeTests(unittest.TestCase):
             market_shadow_enabled=True,
         )
 
+    def leader_stage6_settings(self):
+        return RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            sector_shadow_enabled=True,
+            market_shadow_enabled=True,
+            leader_stage6_enabled=True,
+        )
+
     def seed_universes(self, as_of=None):
         as_of = as_of or (TRADE_AS_OF - timedelta(days=1))
         with sqlite3.connect(self.database_path) as connection:
@@ -543,6 +593,82 @@ class RadarRuntimeTests(unittest.TestCase):
                 4,
             )
 
+    def test_stage6_reuses_market_quote_batch_and_writes_shadow_snapshot(self):
+        with sqlite3.connect(self.database_path) as connection:
+            apply_pending_migrations(
+                connection,
+                migrations=STAGE6_RADAR_MIGRATIONS,
+            )
+        self.seed_universes()
+        self.seed_industry_classification()
+        runtime = self.runtime(settings=self.leader_stage6_settings())
+
+        sector_outcome = runtime.build_sector_job()()
+        market_outcome = runtime.build_market_job()()
+
+        self.assertEqual(sector_outcome.state, ScheduledRunState.COMPLETED)
+        self.assertEqual(market_outcome.state, ScheduledRunState.COMPLETED)
+        self.assertEqual(self.market_quote_fetcher.call_count, 1)
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) "
+                    "FROM radar_leader_candidate_snapshots"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) "
+                    "FROM radar_leader_candidate_entries"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT SUM(formal_usable) "
+                    "FROM radar_leader_candidate_entries"
+                ).fetchone()[0],
+                0,
+            )
+        leader_health = monitoring_health.get_task_states()[
+            "radarLeaderStage6"
+        ]
+        self.assertEqual(leader_health["status"], "healthy")
+        self.assertEqual(leader_health["itemCount"], 1)
+
+    def test_stage6_storage_failure_does_not_change_market_task_result(self):
+        self.seed_universes()
+        runtime = self.runtime(settings=self.leader_stage6_settings())
+
+        with self.assertLogs(
+            "radar.market_shadow_runner",
+            level="ERROR",
+        ):
+            outcome = runtime.build_market_job()()
+
+        self.assertEqual(outcome.state, ScheduledRunState.COMPLETED)
+        self.assertTrue(outcome.gate_passed)
+        self.assertEqual(
+            monitoring_health.get_task_states()[
+                "radarMarketFeatures"
+            ]["status"],
+            "healthy",
+        )
+        self.assertEqual(
+            monitoring_health.get_task_states()[
+                "radarLeaderStage6"
+            ]["status"],
+            "failed",
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM market_environment_snapshots"
+                ).fetchone()[0],
+                1,
+            )
+
     def test_market_job_uses_independent_cross_process_lock(self):
         runtime = self.runtime(settings=self.market_settings())
         runtime.execute_market = Mock(return_value=Mock(
@@ -569,7 +695,7 @@ class RadarRuntimeTests(unittest.TestCase):
         self.assertEqual(locked.state, ScheduledRunState.LOCKED)
         self.assertEqual(runtime.execute_market.call_count, 1)
 
-    def test_sector_gate_rejection_is_tracked_as_failed_without_snapshot(self):
+    def test_sector_gate_rejection_is_tracked_as_degraded_without_snapshot(self):
         self.seed_universes()
         runtime = self.runtime(settings=self.sector_settings())
 
@@ -580,7 +706,13 @@ class RadarRuntimeTests(unittest.TestCase):
         self.assertFalse(outcome.gate_passed)
         self.quote_fetcher.assert_not_called()
         state = monitoring_health.get_task_states()["radarSectorFeatures"]
-        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(
+            state["lastDegradationReasons"],
+            ["classification_release_missing"],
+        )
+        self.assertEqual(state["consecutiveDegradations"], 1)
+        self.assertEqual(state["consecutiveFailures"], 0)
         with sqlite3.connect(self.database_path) as connection:
             self.assertEqual(
                 connection.execute(

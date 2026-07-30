@@ -1529,6 +1529,183 @@ STAGE5_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
     ETF_STORAGE_MIGRATION,
 )
 
+
+LEADER_STORAGE_MIGRATION = Migration(
+    version=5,
+    name="leader_state_storage",
+    statements=(
+        """
+        CREATE TABLE radar_leader_candidate_snapshots (
+            radar_run_id TEXT PRIMARY KEY,
+            as_of TEXT NOT NULL CHECK (julianday(as_of) IS NOT NULL),
+            rule_version TEXT NOT NULL CHECK (trim(rule_version) <> ''),
+            rule_version_id TEXT,
+            eligible_count INTEGER NOT NULL CHECK (eligible_count >= 0),
+            preliminary_count INTEGER NOT NULL CHECK (preliminary_count >= 0),
+            candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+            confirmed_count INTEGER NOT NULL CHECK (confirmed_count >= 0),
+            removed_count INTEGER NOT NULL CHECK (removed_count >= 0),
+            coverage REAL NOT NULL CHECK (coverage BETWEEN 0 AND 1),
+            quality TEXT NOT NULL CHECK (trim(quality) <> ''),
+            reason_counts_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (
+                    CASE WHEN json_valid(reason_counts_json)
+                        THEN json_type(reason_counts_json) = 'object'
+                        ELSE 0
+                    END
+                ),
+            formal_usable INTEGER NOT NULL DEFAULT 0 CHECK (
+                formal_usable IN (0, 1)
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_runs(radar_run_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY (rule_version_id)
+                REFERENCES radar_rule_versions(rule_version_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_candidate_snapshot_as_of
+        ON radar_leader_candidate_snapshots (as_of, radar_run_id)
+        """,
+        """
+        CREATE TABLE radar_leader_candidate_entries (
+            radar_run_id TEXT NOT NULL,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            name TEXT NOT NULL CHECK (trim(name) <> ''),
+            industry_code TEXT,
+            industry_name TEXT,
+            state TEXT NOT NULL CHECK (
+                state IN ('out', 'preliminary', 'candidate', 'confirmed')
+            ),
+            score REAL NOT NULL CHECK (score BETWEEN 0 AND 100),
+            business_exposure_status TEXT NOT NULL CHECK (
+                business_exposure_status IN (
+                    'verified', 'unconfirmed', 'missing', 'disproved'
+                )
+            ),
+            data_status TEXT NOT NULL CHECK (
+                data_status IN ('healthy', 'missing', 'stale', 'source_failed')
+            ),
+            first_rejection_reason TEXT,
+            reasons_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (
+                    CASE WHEN json_valid(reasons_json)
+                        THEN json_type(reasons_json) = 'array'
+                        ELSE 0
+                    END
+                ),
+            evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (
+                    CASE WHEN json_valid(evidence_json)
+                        THEN json_type(evidence_json) = 'object'
+                        ELSE 0
+                    END
+                ),
+            invalidation_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (
+                    CASE WHEN json_valid(invalidation_json)
+                        THEN json_type(invalidation_json) = 'object'
+                        ELSE 0
+                    END
+                ),
+            state_age_periods INTEGER NOT NULL DEFAULT 0 CHECK (
+                state_age_periods >= 0
+            ),
+            formal_usable INTEGER NOT NULL DEFAULT 0 CHECK (
+                formal_usable IN (0, 1)
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            PRIMARY KEY (radar_run_id, symbol),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_leader_candidate_snapshots(radar_run_id)
+                ON DELETE CASCADE,
+            CHECK (formal_usable = 0 OR state IN ('candidate', 'confirmed'))
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_candidate_entry_state
+        ON radar_leader_candidate_entries (state, radar_run_id)
+        """,
+        """
+        CREATE TABLE radar_leader_state_history (
+            transition_id TEXT PRIMARY KEY CHECK (trim(transition_id) <> ''),
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            radar_run_id TEXT NOT NULL,
+            as_of TEXT NOT NULL CHECK (julianday(as_of) IS NOT NULL),
+            from_state TEXT NOT NULL CHECK (
+                from_state IN ('out', 'preliminary', 'candidate', 'confirmed')
+            ),
+            to_state TEXT NOT NULL CHECK (
+                to_state IN ('out', 'preliminary', 'candidate', 'confirmed')
+            ),
+            action TEXT NOT NULL CHECK (
+                action IN (
+                    'blocked', 'hold', 'enter', 'upgrade',
+                    'downgrade', 'remove'
+                )
+            ),
+            rule_version TEXT NOT NULL CHECK (trim(rule_version) <> ''),
+            rule_version_id TEXT,
+            reasons_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (
+                    CASE WHEN json_valid(reasons_json)
+                        THEN json_type(reasons_json) = 'array'
+                        ELSE 0
+                    END
+                ),
+            first_rejection_reason TEXT,
+            state_age_periods INTEGER NOT NULL CHECK (state_age_periods >= 0),
+            cooldown_until TEXT CHECK (
+                cooldown_until IS NULL OR julianday(cooldown_until) IS NOT NULL
+            ),
+            formal_usable INTEGER NOT NULL DEFAULT 0 CHECK (
+                formal_usable IN (0, 1)
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_runs(radar_run_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY (rule_version_id)
+                REFERENCES radar_rule_versions(rule_version_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_state_history_symbol_as_of
+        ON radar_leader_state_history (symbol, as_of, created_at)
+        """,
+        """
+        CREATE INDEX idx_leader_state_history_run
+        ON radar_leader_state_history (radar_run_id, as_of)
+        """,
+    ),
+)
+
+
+STAGE6_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
+    *STAGE5_RADAR_MIGRATIONS,
+    LEADER_STORAGE_MIGRATION,
+)
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_V1 = frozenset({
     ("table", "radar_schema_migrations"),
     ("table", "radar_rule_versions"),
@@ -1599,11 +1776,22 @@ REQUIRED_RADAR_SCHEMA_OBJECTS_V4 = frozenset({
     ("trigger", "trg_etf_methodology_interval_update"),
 })
 
+REQUIRED_RADAR_SCHEMA_OBJECTS_V5 = frozenset({
+    ("table", "radar_leader_candidate_snapshots"),
+    ("table", "radar_leader_candidate_entries"),
+    ("table", "radar_leader_state_history"),
+    ("index", "idx_leader_candidate_snapshot_as_of"),
+    ("index", "idx_leader_candidate_entry_state"),
+    ("index", "idx_leader_state_history_symbol_as_of"),
+    ("index", "idx_leader_state_history_run"),
+})
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_BY_VERSION = {
     1: REQUIRED_RADAR_SCHEMA_OBJECTS_V1,
     2: REQUIRED_RADAR_SCHEMA_OBJECTS_V2,
     3: REQUIRED_RADAR_SCHEMA_OBJECTS_V3,
     4: REQUIRED_RADAR_SCHEMA_OBJECTS_V4,
+    5: REQUIRED_RADAR_SCHEMA_OBJECTS_V5,
 }
 
 REQUIRED_RADAR_SCHEMA_OBJECTS = frozenset().union(
@@ -1710,7 +1898,7 @@ def validate_applied_migrations(
         applied_rows,
         require_all=True,
         known_migrations=(
-            STAGE5_RADAR_MIGRATIONS
+            STAGE6_RADAR_MIGRATIONS
             if ordered == RADAR_MIGRATIONS
             else ordered
         ),

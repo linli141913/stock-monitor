@@ -13,7 +13,11 @@ from radar.contracts import (
     SourceStatus,
     UnitVerificationStatus,
 )
-from radar.source_health import SourceHealthPolicy, evaluate_source_health
+from radar.source_health import (
+    SourceHealthPolicy,
+    evaluate_source_health,
+    quote_item_time_reasons,
+)
 from radar.sources.market_indices import MARKET_INDEX_IDENTITIES
 
 
@@ -222,6 +226,7 @@ def build_market_features(
         "unavailable": 0,
     }
     turnover_values = []
+    non_trading_count = 0
     valid_change_count = 0
     valid_source_time_count = 0
     valid_turnover_count = 0
@@ -232,7 +237,14 @@ def build_market_features(
             breadth_counts["unavailable"] += 1
             continue
         item = rows[0]
-        time_reasons = _source_time_reasons(item.source_time, as_of=as_of)
+        if item.is_explicitly_non_trading:
+            non_trading_count += 1
+            breadth_counts["unavailable"] += 1
+            continue
+        time_reasons = quote_item_time_reasons(
+            item.source_time,
+            as_of=as_of,
+        )
         if time_reasons:
             item_time_reasons.extend(time_reasons)
             breadth_counts["unavailable"] += 1
@@ -253,7 +265,8 @@ def build_market_features(
             breadth_counts["flat"] += 1
 
     expected_stock_count = len(stocks)
-    denominator = expected_stock_count or 1
+    active_stock_count = expected_stock_count - non_trading_count
+    denominator = active_stock_count or 1
     base_reasons = list(cross_source_reasons)
     base_reasons.extend(item_time_reasons)
     if duplicate_symbols:
@@ -278,6 +291,8 @@ def build_market_features(
         if expected_stock_count
         else 0.0
     )
+    if active_stock_count == 0:
+        breadth_reasons.append("active_stock_universe_empty")
     if row_coverage < minimum_row_coverage:
         breadth_reasons.append("row_coverage_below_threshold")
     for field_name, coverage in breadth_coverage.items():
@@ -311,6 +326,8 @@ def build_market_features(
     ))
     if row_coverage < minimum_row_coverage:
         turnover_reasons.append("row_coverage_below_threshold")
+    if active_stock_count == 0:
+        turnover_reasons.append("active_stock_universe_empty")
     for field_name, coverage in turnover_coverage.items():
         if coverage < minimum_required_field_coverage:
             turnover_reasons.append(

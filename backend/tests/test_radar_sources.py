@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from radar.contracts import QuoteTradingStatus, UnitVerificationStatus
 from radar.sources.etf_registry import EtfRegistryProviders, fetch_etf_registry
 from radar.sources.security_master import (
     SecurityMasterProviders,
@@ -22,22 +23,39 @@ def tencent_line(
     code,
     name="测试证券",
     price="10.00",
+    previous_close="9.90",
+    open_price="9.95",
     change_percent="1.20",
+    high_price="10.20",
+    low_price="9.80",
     source_time="20260717100000",
     turnover_amount="12345.60",
+    packed_amount=None,
     turnover_rate="2.30",
     market_cap="456.70",
+    upper_limit_price="10.89",
+    lower_limit_price="8.91",
     volume_ratio="1.50",
+    trading_status="",
 ):
     fields = [""] * 50
     fields[1] = name
     fields[2] = code
     fields[3] = price
+    fields[4] = previous_close
+    fields[5] = open_price
     fields[30] = source_time
     fields[32] = change_percent
+    fields[33] = high_price
+    fields[34] = low_price
+    if packed_amount is not None:
+        fields[35] = f"{price}/0/{packed_amount}"
     fields[37] = turnover_amount
     fields[38] = turnover_rate
+    fields[40] = trading_status
     fields[45] = market_cap
+    fields[47] = upper_limit_price
+    fields[48] = lower_limit_price
     fields[49] = volume_ratio
     return f'v_test_{code}="{"~".join(fields)}";'
 
@@ -144,6 +162,157 @@ class SecurityMasterSourceTests(unittest.TestCase):
 
 
 class TencentQuoteSourceTests(unittest.TestCase):
+    def test_transient_request_failure_retries_same_batch_once(self):
+        def responder(_url, call_number):
+            if call_number == 1:
+                return TimeoutError("request timed out")
+            return tencent_line("000001")
+
+        session = FakeSession(responder)
+        batch = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertTrue(session.calls[0]["url"].startswith("https://"))
+        self.assertEqual(batch.meta.returned_count, 1)
+        self.assertNotIn(
+            "batch_request_failed",
+            {issue.code for issue in batch.meta.issues},
+        )
+        self.assertNotIn(
+            "batch_retry_failed",
+            {issue.code for issue in batch.meta.issues},
+        )
+
+    def test_incomplete_quote_batch_is_retried_once(self):
+        def responder(_url, call_number):
+            if call_number == 1:
+                return tencent_line("000001")
+            return tencent_line("000001") + tencent_line("000002")
+
+        session = FakeSession(responder)
+        batch = fetch_tencent_quotes(
+            ["000001", "000002"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(batch.meta.returned_count, 2)
+        self.assertNotIn(
+            "missing_symbols",
+            {issue.code for issue in batch.meta.issues},
+        )
+
+    def test_same_response_preserves_ohlc_without_extra_request(self):
+        session = FakeSession(lambda _url, _call: tencent_line("000001"))
+
+        batch = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+
+        quote = batch.items[0]
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(quote.previous_close, 9.90)
+        self.assertEqual(quote.open_price, 9.95)
+        self.assertEqual(quote.high_price, 10.20)
+        self.assertEqual(quote.low_price, 9.80)
+        self.assertEqual(quote.upper_limit_price_source, 10.89)
+        self.assertEqual(quote.lower_limit_price_source, 8.91)
+        self.assertNotIn("previous_close", quote.REQUIRED_FIELDS)
+        self.assertNotIn(
+            "upper_limit_price_source",
+            quote.REQUIRED_FIELDS,
+        )
+        self.assertNotIn(
+            "lower_limit_price_source",
+            quote.REQUIRED_FIELDS,
+        )
+
+    def test_same_response_preserves_explicit_non_trading_status(self):
+        for raw_status, expected in (
+            ("S", QuoteTradingStatus.SUSPENDED),
+            ("D", QuoteTradingStatus.DELISTED),
+            ("U", QuoteTradingStatus.UNLISTED),
+            ("", None),
+        ):
+            with self.subTest(raw_status=raw_status):
+                session = FakeSession(
+                    lambda _url, _call, status=raw_status: tencent_line(
+                        "000001",
+                        trading_status=status,
+                    )
+                )
+
+                quote = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=session,
+                    clock=lambda: FETCHED_AT,
+                ).items[0]
+
+                self.assertEqual(quote.trading_status, expected)
+
+    def test_ohlc_preserves_true_zero_and_rejects_invalid_values(self):
+        cases = (
+            ("0", 0.0),
+            ("", None),
+            ("nan", None),
+            ("inf", None),
+            ("-1", None),
+        )
+        for raw_value, expected in cases:
+            with self.subTest(raw_value=raw_value):
+                session = FakeSession(
+                    lambda _url, _call, value=raw_value: tencent_line(
+                        "000001",
+                        previous_close=value,
+                        open_price=value,
+                        high_price=value,
+                        low_price=value,
+                        upper_limit_price=value,
+                        lower_limit_price=value,
+                    )
+                )
+
+                quote = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=session,
+                    clock=lambda: FETCHED_AT,
+                ).items[0]
+
+                self.assertEqual(quote.previous_close, expected)
+                self.assertEqual(quote.open_price, expected)
+                self.assertEqual(quote.high_price, expected)
+                self.assertEqual(quote.low_price, expected)
+                self.assertEqual(
+                    quote.upper_limit_price_source,
+                    expected,
+                )
+                self.assertEqual(
+                    quote.lower_limit_price_source,
+                    expected,
+                )
+
     def test_quotes_are_batched_at_100_and_preserve_true_zero(self):
         symbols = [f"{number:06d}" for number in range(1, 102)]
 
@@ -158,6 +327,7 @@ class TencentQuoteSourceTests(unittest.TestCase):
                         price="0",
                         change_percent="0",
                         turnover_amount="0",
+                        packed_amount="0",
                         turnover_rate="0",
                         market_cap="0",
                         volume_ratio="0",
@@ -187,8 +357,77 @@ class TencentQuoteSourceTests(unittest.TestCase):
         self.assertEqual(batch.meta.required_field_coverage["price"], 1.0)
         first = {item.symbol: item for item in batch.items}["000001"]
         self.assertEqual(first.price, 0.0)
+        self.assertEqual(first.turnover_amount_cny, 0.0)
+        self.assertEqual(
+            first.turnover_amount_unit_status,
+            UnitVerificationStatus.VERIFIED,
+        )
         self.assertEqual(first.missing_fields(), ())
         self.assertFalse(session.trust_env)
+
+    def test_turnover_amount_unit_is_verified_by_same_response_amount(self):
+        session = FakeSession(lambda _url, _call: tencent_line(
+            "000001",
+            turnover_amount="12345.60",
+            packed_amount="123456789",
+        ))
+
+        batch = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+
+        quote = batch.items[0]
+        self.assertEqual(quote.turnover_amount_source, 12345.6)
+        self.assertEqual(quote.turnover_amount_cny, 123456789.0)
+        self.assertEqual(
+            quote.turnover_amount_unit_status,
+            UnitVerificationStatus.VERIFIED,
+        )
+
+    def test_unverifiable_turnover_amount_keeps_cny_missing(self):
+        cases = (
+            {
+                "turnover_amount": "100",
+                "packed_amount": None,
+            },
+            {
+                "turnover_amount": "100",
+                "packed_amount": "1",
+            },
+            {
+                "turnover_amount": "-1",
+                "packed_amount": "-10000",
+            },
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                session = FakeSession(
+                    lambda _url, _call, values=case: tencent_line(
+                        "000001",
+                        **values,
+                    )
+                )
+
+                batch = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=session,
+                    clock=lambda: FETCHED_AT,
+                )
+
+                quote = batch.items[0]
+                self.assertIsNone(quote.turnover_amount_cny)
+                self.assertEqual(
+                    quote.turnover_amount_unit_status,
+                    UnitVerificationStatus.UNVERIFIED,
+                )
 
     def test_existing_market_prefix_rules_cover_shenzhen_shanghai_bse_and_etf(self):
         captured_queries = []

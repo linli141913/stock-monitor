@@ -313,6 +313,8 @@ def get_monitoring_health():
     task_statuses = {task.get("status") for task in tasks.values()}
     if "failed" in task_statuses:
         status = "degraded"
+    elif "degraded" in task_statuses:
+        status = "degraded"
     elif task_statuses & {"healthy", "running"}:
         status = "healthy"
     else:

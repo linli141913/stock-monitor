@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import MarketContextPanel from '@/components/radar/MarketContextPanel';
+import LeaderObservationPanel from '@/components/radar/LeaderObservationPanel';
 import ModuleStatePanel from '@/components/radar/ModuleStatePanel';
 import RadarDataGatePanel from '@/components/radar/RadarDataGatePanel';
 import RadarStatusStrip from '@/components/radar/RadarStatusStrip';
@@ -16,6 +17,8 @@ import EtfObservationPanel from '@/components/radar/EtfObservationPanel';
 import SectorObservationPanel from '@/components/radar/SectorObservationPanel';
 import type {
   RadarEtfsResponse,
+  RadarLeaderModule,
+  RadarLeadersResponse,
   RadarOverviewResponse,
   RadarSectorsResponse,
 } from '@/types/radar';
@@ -65,15 +68,18 @@ export default function RadarPage() {
   const [overview, setOverview] = useState<RadarOverviewResponse | null>(null);
   const [sectors, setSectors] = useState<RadarSectorsResponse | null>(null);
   const [etfs, setEtfs] = useState<RadarEtfsResponse | null>(null);
+  const [leaders, setLeaders] = useState<RadarLeadersResponse | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const [sectorsRefreshError, setSectorsRefreshError] = useState('');
   const [etfsRefreshError, setEtfsRefreshError] = useState('');
+  const [leadersRefreshError, setLeadersRefreshError] = useState('');
   const [renderedAt, setRenderedAt] = useState<string | null>(null);
   const overviewInFlight = useRef(false);
   const sectorsInFlight = useRef(false);
   const etfsInFlight = useRef(false);
+  const leadersInFlight = useRef(false);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (overviewInFlight.current) return;
@@ -153,6 +159,31 @@ export default function RadarPage() {
     }
   }, []);
 
+  const loadLeaders = useCallback(async () => {
+    if (leadersInFlight.current) return;
+    leadersInFlight.current = true;
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/leaders?_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('三级龙头快照暂不可用');
+      const payload = await response.json() as RadarLeadersResponse;
+      if (payload.schemaVersion !== 'radar-leaders-v1') {
+        throw new Error('三级龙头数据契约不匹配');
+      }
+      setLeaders(payload);
+      setRenderedAt(new Date().toISOString());
+      setLeadersRefreshError('');
+    } catch (error) {
+      setLeadersRefreshError(
+        error instanceof Error ? error.message : '三级龙头快照暂不可用',
+      );
+    } finally {
+      leadersInFlight.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadOverview(false), 0);
     const timer = window.setInterval(() => {
@@ -188,10 +219,23 @@ export default function RadarPage() {
     };
   }, [activeTab, loadEtfs]);
 
+  useEffect(() => {
+    if (activeTab !== 'leaders') return;
+    const initialTimer = window.setTimeout(() => void loadLeaders(), 0);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadLeaders();
+    }, 180_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [activeTab, loadLeaders]);
+
   const refreshNow = async () => {
     await loadOverview(false);
     if (activeTab === 'sectors') await loadSectors();
     if (activeTab === 'etf') await loadEtfs();
+    if (activeTab === 'leaders') await loadLeaders();
   };
 
   const showTab = (tab: RadarTab) => {
@@ -222,10 +266,20 @@ export default function RadarPage() {
   const market = overview.modules.market;
   const sectorModule = overview.modules.sectors;
   const etfModule = overview.modules.etf;
+  const overviewLeaderModule = 'summary' in overview.modules.leaders
+    ? overview.modules.leaders
+    : null;
+  const leaderModule: RadarLeaderModule | null = leaders?.module
+    || overviewLeaderModule;
   const dataHealthy = overview.mode === 'shadow'
     && market.state === 'available'
     && sectorModule.state === 'available';
-  const anomalyCount = [market.state, sectorModule.state].filter(
+  const anomalyCount = [
+    market.state,
+    sectorModule.state,
+    etfModule.state,
+    overview.modules.leaders.state,
+  ].filter(
     (state) => state === 'failed' || state === 'stale' || state === 'not_ready',
   ).length;
 
@@ -235,7 +289,7 @@ export default function RadarPage() {
         <div>
           <span className={styles.eyebrow}>MAINLINE RADAR / VERIFIED SHADOW DATA</span>
           <h1>主线雷达</h1>
-          <p>阶段4先展示市场与行业真实聚合；ETF与龙头将在后续阶段接入。</p>
+          <p>市场、行业、ETF与三级龙头按各自门槛展示真实影子快照。</p>
         </div>
         <div className={styles.heroActions}>
           <span className={styles.shadowBadge}>
@@ -279,7 +333,7 @@ export default function RadarPage() {
           <span><b>{sectorModule.summary.totalCount}</b> 行业快照</span>
           <span><b className={styles.greenNumber}>{sectorModule.summary.usableCount}</b> 影子可用</span>
           <span><b>{etfModule.summary.productCount}</b> ETF产品</span>
-          <span><b>—</b> 龙头未启用</span>
+          <span><b>{leaderModule?.summary.eligibleCount ?? '—'}</b> 龙头合资格</span>
           <span className={anomalyCount ? styles.anomalyStat : ''}><b>{anomalyCount}</b> 模块异常</span>
         </div>
       </section>
@@ -319,9 +373,15 @@ export default function RadarPage() {
             <ModuleStatePanel
               state={overview.modules.leaders.state}
               title="龙头梯队"
-              description="三层状态位置已预留；阶段6完成确定性状态机后按真实状态展示。"
-              stage={overview.modules.leaders.enabledStage}
-              badges={['预备龙头 —', '候选龙头 —', '已确认龙头 —']}
+              description="总览只显示确定性状态机摘要，完整证据与失效条件进入龙头梯队页查看。"
+              stage={'enabledStage' in overview.modules.leaders
+                ? overview.modules.leaders.enabledStage
+                : undefined}
+              badges={leaderModule ? [
+                `预备龙头 ${leaderModule.summary.preliminaryCount}`,
+                `候选龙头 ${leaderModule.summary.candidateCount}`,
+                `已确认龙头 ${leaderModule.summary.confirmedCount}`,
+              ] : ['预备龙头 —', '候选龙头 —', '已确认龙头 —']}
             />
           </div>
         </div>
@@ -370,13 +430,30 @@ export default function RadarPage() {
       )}
 
       {activeTab === 'leaders' && (
-        <ModuleStatePanel
-          state="not_enabled"
-          title="龙头梯队"
-          description="阶段6冻结硬门槛、评分和状态机后，再生成预备、候选与已确认状态。"
-          stage={6}
-          badges={['预备龙头 —', '候选龙头 —', '已确认龙头 —']}
-        />
+        <>
+          {leadersRefreshError && (
+            <div className={styles.refreshError}>
+              {leadersRefreshError}。当前保留上一轮成功页面内容。
+            </div>
+          )}
+          {leaderModule ? (
+            <LeaderObservationPanel
+              module={leaderModule}
+              formatTime={formatTime}
+              renderedAt={renderedAt}
+            />
+          ) : (
+            <ModuleStatePanel
+              state={overview.modules.leaders.state}
+              title="龙头梯队"
+              description="正在读取阶段6只读快照，不触发状态机重算。"
+              stage={'enabledStage' in overview.modules.leaders
+                ? overview.modules.leaders.enabledStage
+                : undefined}
+              badges={['预备龙头 —', '候选龙头 —', '已确认龙头 —']}
+            />
+          )}
+        </>
       )}
 
       {activeTab === 'history' && (
@@ -390,9 +467,12 @@ export default function RadarPage() {
       )}
 
       <footer className={styles.radarFooter}>
-        <span>V2 · 阶段4真实数据骨架</span>
+        <span>V5 · 阶段6影子状态</span>
         <p>规则聚合仅用于分析与监测，不构成交易建议。</p>
-        <span>{stateLabel(market.state)} · {stateLabel(sectorModule.state)} · {stateLabel(etfModule.state)}</span>
+        <span>
+          {stateLabel(market.state)} · {stateLabel(sectorModule.state)} ·{' '}
+          {stateLabel(etfModule.state)} · {stateLabel(overview.modules.leaders.state)}
+        </span>
       </footer>
     </div>
   );

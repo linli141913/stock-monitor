@@ -6,12 +6,15 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
+from httpx import Request as HttpxRequest
+from openai import APIConnectionError
 
 import ai_analysis
 import alert_repository
@@ -829,6 +832,171 @@ class NewsIntegrityTests(unittest.TestCase):
 class AiIntegrityTests(unittest.TestCase):
     def setUp(self):
         ai_analysis._AI_SUCCESS_CACHE = {}
+
+    def test_llm_request_timeout_remains_sixty_seconds(self):
+        self.assertEqual(ai_analysis.AI_REQUEST_TIMEOUT_SECONDS, 60.0)
+
+    @patch.object(ai_analysis.time, "sleep")
+    def test_transient_llm_retry_waits_five_seconds_by_default(self, mock_sleep):
+        attempts = 0
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise APIConnectionError(
+                    request=HttpxRequest("POST", "https://llm.example/v1/chat")
+                )
+            return {"status": "ok"}
+
+        result = ai_analysis._call_llm_with_retry(operation)
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(attempts, 2)
+        mock_sleep.assert_called_once_with(5.0)
+
+    @patch("builtins.print")
+    def test_llm_retry_diagnostics_redact_error_messages(self, mock_print):
+        attempts = 0
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            try:
+                raise RuntimeError("secret-provider-detail")
+            except RuntimeError as cause:
+                raise APIConnectionError(
+                    request=HttpxRequest("POST", "https://llm.example/v1/chat")
+                ) from cause
+
+        with self.assertRaises(APIConnectionError):
+            ai_analysis._call_llm_with_retry(
+                operation,
+                retry_delay_seconds=0,
+            )
+
+        messages = "\n".join(
+            str(call.args[0])
+            for call in mock_print.call_args_list
+            if call.args
+        )
+        self.assertEqual(attempts, 2)
+        self.assertIn("attempt=1/2", messages)
+        self.assertIn("attempt=2/2", messages)
+        self.assertIn("error_type=APIConnectionError", messages)
+        self.assertIn("cause_type=RuntimeError", messages)
+        self.assertNotIn("secret-provider-detail", messages)
+        self.assertNotIn("llm.example", messages)
+
+    def test_transient_llm_connection_error_is_retried_once(self):
+        retry_call = getattr(ai_analysis, "_call_llm_with_retry", None)
+        self.assertIsNotNone(retry_call, "AI 瞬时错误重试尚未实现")
+        attempts = 0
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise APIConnectionError(
+                    request=HttpxRequest("POST", "https://llm.example/v1/chat")
+                )
+            return {"status": "ok"}
+
+        result = retry_call(operation, retry_delay_seconds=0)
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(attempts, 2)
+
+    def test_non_transient_llm_error_is_not_retried(self):
+        retry_call = getattr(ai_analysis, "_call_llm_with_retry", None)
+        self.assertIsNotNone(retry_call, "AI 瞬时错误重试尚未实现")
+        attempts = 0
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            raise ValueError("invalid model output")
+
+        with self.assertRaises(ValueError):
+            retry_call(operation, retry_delay_seconds=0)
+
+        self.assertEqual(attempts, 1)
+
+    def test_invalid_llm_output_is_retried_once(self):
+        retry_call = getattr(
+            ai_analysis,
+            "_call_validated_llm_with_retry",
+            None,
+        )
+        self.assertIsNotNone(retry_call, "AI 无效输出受控重试尚未实现")
+        attempts = 0
+        valid_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "plainEnglishSummary": "第二次返回了有效解释。",
+                                "sourceIds": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                )
+            ]
+        )
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content="{invalid-json")
+                        )
+                    ]
+                )
+            return valid_response
+
+        response, validated = retry_call(
+            operation,
+            allowed_source_ids=set(),
+            retry_delay_seconds=0,
+        )
+
+        self.assertIs(response, valid_response)
+        self.assertEqual(validated["plainEnglishSummary"], "第二次返回了有效解释。")
+        self.assertEqual(attempts, 2)
+
+    def test_invalid_llm_output_stops_after_single_retry(self):
+        retry_call = getattr(
+            ai_analysis,
+            "_call_validated_llm_with_retry",
+            None,
+        )
+        self.assertIsNotNone(retry_call, "AI 无效输出受控重试尚未实现")
+        attempts = 0
+
+        def operation():
+            nonlocal attempts
+            attempts += 1
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="{invalid-json")
+                    )
+                ]
+            )
+
+        with self.assertRaises(json.JSONDecodeError):
+            retry_call(
+                operation,
+                allowed_source_ids=set(),
+                retry_delay_seconds=0,
+            )
+
+        self.assertEqual(attempts, 2)
 
     def test_successful_ai_result_is_reused_for_twenty_minutes_only(self):
         payload = {"stockCode": "000725", "plainEnglishSummary": "已完成分析"}
@@ -1697,7 +1865,8 @@ class AiIntegrityTests(unittest.TestCase):
     def test_model_call_has_timeout_retry_and_output_limits(self):
         source = __import__("inspect").getsource(ai_analysis.get_ai_attribution)
 
-        self.assertIn("timeout=60", source)
+        self.assertEqual(ai_analysis.AI_REQUEST_TIMEOUT_SECONDS, 60.0)
+        self.assertIn("timeout=AI_REQUEST_TIMEOUT_SECONDS", source)
         self.assertIn("max_retries=0", source)
         self.assertIn("max_tokens=1800", source)
 
@@ -2480,6 +2649,78 @@ class SchedulerResponsivenessTests(unittest.TestCase):
         self.assertEqual(mock_analyze.call_count, 1)
         self.assertIsNotNone(saved)
         self.assertEqual(saved["full_json"]["analysisStatus"], "failed")
+
+    @patch.object(
+        main.database,
+        "get_watchlist",
+        return_value=[
+            {"stockCode": "000725"},
+            {"stockCode": "000519"},
+        ],
+    )
+    @patch.object(
+        main,
+        "get_ai_attribution",
+        side_effect=[
+            {
+                "analysisStatus": "failed",
+                "failureReason": "llm_connection_failed",
+            },
+            {"analysisStatus": "success"},
+        ],
+    )
+    def test_partially_failed_ai_round_is_degraded(
+        self,
+        _mock_analyze,
+        _mock_get_watchlist,
+    ):
+        monitoring_health.reset_runtime_health()
+
+        result = main.run_ai_analysis_round_sync("2026-07-29:10:30")
+        state = monitoring_health.get_task_states()["aiAnalysis"]
+
+        self.assertEqual(result, "completed_with_errors")
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(
+            state["lastDegradationReasons"],
+            ["llm_connection_failed"],
+        )
+        self.assertEqual(state["itemCount"], 1)
+        self.assertEqual(state["consecutiveFailures"], 0)
+
+    @patch.object(
+        main.database,
+        "get_watchlist",
+        return_value=[
+            {"stockCode": "000725"},
+            {"stockCode": "000519"},
+        ],
+    )
+    @patch.object(
+        main,
+        "get_ai_attribution",
+        return_value={
+            "analysisStatus": "failed",
+            "failureReason": "llm_connection_failed",
+        },
+    )
+    def test_fully_failed_ai_round_keeps_failure_reason(
+        self,
+        _mock_analyze,
+        _mock_get_watchlist,
+    ):
+        monitoring_health.reset_runtime_health()
+
+        result = main.run_ai_analysis_round_sync("2026-07-29:11:30")
+        state = monitoring_health.get_task_states()["aiAnalysis"]
+
+        self.assertEqual(result, "completed_with_errors")
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(
+            state.get("lastFailureReason"),
+            "llm_connection_failed",
+        )
+        self.assertEqual(state["itemCount"], 0)
 
     def test_ai_round_skips_when_previous_round_is_still_running(self):
         self.assertTrue(main._AI_ANALYSIS_LOCK.acquire(blocking=False))

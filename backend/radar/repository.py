@@ -1249,6 +1249,19 @@ class RadarRepository:
         ).fetchone()
         if release_row is None:
             return ()
+        return self._list_industry_classification_records_for_release(
+            str(release_row[0]),
+            classification_system=classification_system,
+            release_period=release_period,
+        )
+
+    def _list_industry_classification_records_for_release(
+        self,
+        industry_release_id: str,
+        *,
+        classification_system: str,
+        release_period: str,
+    ) -> Tuple[IndustryClassificationRecord, ...]:
         rows = self._connection.execute(
             "SELECT source_symbol, source_name, security_identity, "
             "identity_status, category_code, category_name, division_code, "
@@ -1256,7 +1269,7 @@ class RadarRepository:
             "manufacturing_subclass_name, record_status, issue_codes_json, "
             "source_fields_json FROM industry_classification_records "
             "WHERE industry_release_id=? ORDER BY source_symbol",
-            (release_row[0],),
+            (industry_release_id,),
         ).fetchall()
         return tuple(IndustryClassificationRecord(
             classificationSystem=classification_system,
@@ -1275,6 +1288,29 @@ class RadarRepository:
             issueCodes=_load_json(row[11], "行业记录问题代码", list),
             sourceFields=_load_json(row[12], "行业记录原始字段", dict),
         ) for row in rows)
+
+    def list_industry_classification_records_by_release_id(
+        self,
+        industry_release_id: str,
+    ) -> Tuple[IndustryClassificationRecord, ...]:
+        """按已冻结行业版本ID读取映射，不猜测分类期或跨版本拼接。"""
+        self._require_industry_storage()
+        industry_release_id = str(industry_release_id or "").strip()
+        if not industry_release_id:
+            raise ValueError("industry_release_id不能为空")
+        release = self._connection.execute(
+            "SELECT classification_system, release_period "
+            "FROM industry_classification_releases "
+            "WHERE industry_release_id=?",
+            (industry_release_id,),
+        ).fetchone()
+        if release is None:
+            return ()
+        return self._list_industry_classification_records_for_release(
+            industry_release_id,
+            classification_system=str(release[0]),
+            release_period=str(release[1]),
+        )
 
     def record_sector_feature_batch(
         self,
@@ -1562,6 +1598,23 @@ class RadarRepository:
         row = self._connection.execute(
             "SELECT radar_run_id FROM sector_feature_snapshots "
             "ORDER BY as_of DESC, radar_run_id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return ()
+        return self.list_sector_feature_rows(str(row[0]))
+
+    def list_latest_sector_feature_rows_at_or_before(
+        self,
+        as_of: datetime,
+    ) -> Tuple[Dict[str, Any], ...]:
+        """读取不晚于冻结时点的最近完整行业批次，拒绝未来数据。"""
+        self._require_industry_storage()
+        as_of_text = _datetime_text(as_of, "as_of")
+        row = self._connection.execute(
+            "SELECT radar_run_id FROM sector_feature_snapshots "
+            "WHERE as_of <= ? "
+            "ORDER BY as_of DESC, radar_run_id DESC LIMIT 1",
+            (as_of_text,),
         ).fetchone()
         if row is None:
             return ()

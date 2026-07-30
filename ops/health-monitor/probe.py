@@ -16,12 +16,49 @@ REQUIRED_COMPONENTS = (
     "fastapi",
     "backgroundTasks",
 )
+AVAILABILITY_COMPONENTS = (
+    "vercel",
+    "tunnel",
+    "fastapi",
+)
 MAX_RESPONSE_BYTES = 64 * 1024
+PUBLIC_HEALTH_STATUSES = {
+    "healthy",
+    "degraded",
+    "unavailable",
+    "unknown",
+}
 
 
 class ProbeResult(NamedTuple):
     ok: bool
     reason: str
+
+
+def _safe_public_status(value: Any) -> str:
+    status = str(value or "unknown")
+    return status if status in PUBLIC_HEALTH_STATUSES else "unknown"
+
+
+def _http_unhealthy_reason(status_code: int, body: bytes) -> str:
+    parts = [f"http_unhealthy:http={status_code}"]
+    if len(body) > MAX_RESPONSE_BYTES:
+        return ",".join(parts)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, JSONDecodeError):
+        return ",".join(parts)
+    if not isinstance(payload, Mapping):
+        return ",".join(parts)
+
+    parts.append(f"status={_safe_public_status(payload.get('status'))}")
+    components = payload.get("components")
+    if isinstance(components, Mapping):
+        for component in REQUIRED_COMPONENTS:
+            parts.append(
+                f"{component}={_safe_public_status(components.get(component))}"
+            )
+    return ",".join(parts)
 
 
 def evaluate_payload(payload: Any) -> ProbeResult:
@@ -34,10 +71,21 @@ def evaluate_payload(payload: Any) -> ProbeResult:
         return ProbeResult(False, "invalid_contract")
     if any(component not in components for component in REQUIRED_COMPONENTS):
         return ProbeResult(False, "invalid_contract")
-    if payload.get("status") != "healthy":
+    if payload.get("status") not in {"healthy", "degraded"}:
         return ProbeResult(False, "health_not_healthy")
-    if any(components.get(component) != "healthy" for component in REQUIRED_COMPONENTS):
+    if any(
+        components.get(component) != "healthy"
+        for component in AVAILABILITY_COMPONENTS
+    ):
         return ProbeResult(False, "component_not_healthy")
+    background_status = components.get("backgroundTasks")
+    if background_status not in {"healthy", "degraded", "unknown"}:
+        return ProbeResult(False, "invalid_contract")
+    if background_status != "healthy":
+        return ProbeResult(
+            True,
+            f"available_with_background_{background_status}",
+        )
     return ProbeResult(True, "healthy")
 
 
@@ -52,11 +100,21 @@ def probe_once(url: str, timeout_seconds: int) -> ProbeResult:
     )
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
-            if response.status != 200:
-                return ProbeResult(False, "http_unhealthy")
             body = response.read(MAX_RESPONSE_BYTES + 1)
-    except HTTPError:
-        return ProbeResult(False, "http_unhealthy")
+            if response.status != 200:
+                return ProbeResult(
+                    False,
+                    _http_unhealthy_reason(response.status, body),
+                )
+    except HTTPError as exc:
+        try:
+            body = exc.read(MAX_RESPONSE_BYTES + 1)
+        except OSError:
+            body = b""
+        return ProbeResult(
+            False,
+            _http_unhealthy_reason(exc.code, body),
+        )
     except (TimeoutError, URLError, OSError):
         return ProbeResult(False, "network_unavailable")
 

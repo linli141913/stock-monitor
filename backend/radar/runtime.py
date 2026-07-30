@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -28,6 +29,10 @@ from radar.market_shadow_runner import (
     build_default_market_index_fetcher,
     build_default_market_quote_fetcher,
 )
+from radar.leader_input_gate import LeaderInputGatePolicy
+from radar.leader_repository import LeaderRepository
+from radar.leader_runtime_inputs import build_leader_runtime_evidence
+from radar.leader_shadow_runner import LeaderShadowRunner
 from radar.repository import RadarRepository, RadarRepositoryError
 from radar.scheduler import (
     ScheduleRegistration,
@@ -55,6 +60,13 @@ from radar.shadow_runner import ShadowSources, build_default_shadow_sources
 
 UTC = timezone.utc
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
+_RUNTIME_LOG_HANDLER = logging.StreamHandler()
+_RUNTIME_LOG_HANDLER.setLevel(logging.INFO)
+_RUNTIME_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
+LOGGER.addHandler(_RUNTIME_LOG_HANDLER)
+LOGGER.propagate = False
 PathLike = Union[str, Path]
 ConnectionFactory = Callable[[Path, bool], sqlite3.Connection]
 MarketStatusProvider = Callable[[str, Optional[datetime]], tuple]
@@ -110,10 +122,7 @@ RUN_ID_PREFIXES = dict(JOB_IDS)
 RADAR_SECTOR_TASK_NAME = "radarSectorFeatures"
 RADAR_MARKET_TASK_NAME = "radarMarketFeatures"
 RADAR_ETF_PRODUCT_MASTER_TASK_NAME = "radarEtfProductMaster"
-
-
-class RadarSourceDegradedError(RuntimeError):
-    """任务完成但来源健康未达到影子准入门槛。"""
+RADAR_LEADER_STAGE6_TASK_NAME = "radarLeaderStage6"
 
 
 def _utc_now() -> datetime:
@@ -154,7 +163,44 @@ class HealthTrackedJob:
             outcome = self.scheduled_job()
         except Exception as exc:
             monitoring_health.record_task_failure(self.task_name, exc)
+            LOGGER.error(
+                "radar_task_outcome task=%s state=failed "
+                "error_type=%s",
+                self.task_name,
+                type(exc).__name__,
+            )
             raise
+
+        gate_passed = (
+            str(outcome.gate_passed).lower()
+            if outcome.gate_passed is not None
+            else "unknown"
+        )
+        gate_reasons = ",".join(outcome.gate_reasons) or "none"
+        log_method = LOGGER.info
+        if (
+            outcome.state == ScheduledRunState.COMPLETED
+            and outcome.result_status != "succeeded"
+            and outcome.gate_passed is not True
+        ):
+            log_method = LOGGER.warning
+        log_method(
+            "radar_task_outcome task=%s run_id=%s state=%s status=%s "
+            "gate_passed=%s gate_reasons=%s item_count=%s "
+            "duration_ms=%d",
+            self.task_name,
+            outcome.radar_run_id or "none",
+            outcome.state.value,
+            outcome.result_status or "none",
+            gate_passed,
+            gate_reasons,
+            (
+                str(outcome.item_count)
+                if outcome.item_count is not None
+                else "none"
+            ),
+            round(outcome.duration_seconds * 1000),
+        )
 
         if outcome.state == ScheduledRunState.COMPLETED:
             if (
@@ -166,11 +212,10 @@ class HealthTrackedJob:
                     item_count=outcome.item_count,
                 )
             else:
-                monitoring_health.record_task_failure(
+                monitoring_health.record_task_degraded(
                     self.task_name,
-                    RadarSourceDegradedError(
-                        f"雷达来源状态为{outcome.result_status or 'unknown'}"
-                    ),
+                    outcome.gate_reasons,
+                    item_count=outcome.item_count,
                 )
         else:
             monitoring_health.record_task_skipped(
@@ -247,6 +292,7 @@ class RadarRuntime:
             self.etf_product_master_fetcher = fetch_etf_product_master
         self._sector_run_lock = threading.Lock()
         self._market_run_lock = threading.Lock()
+        self._leader_stage6_run_lock = threading.Lock()
         self.clock = clock
         self.market_status_provider = market_status_provider
         self.connection_factory = connection_factory
@@ -408,6 +454,109 @@ class RadarRuntime:
     ):
         with self._connection(read_only=False) as connection:
             repository = RadarRepository(connection, clock=self.clock)
+            leader_stage6_processor = None
+            if self.settings.leader_stage6_enabled:
+                def process_leader_stage6(
+                    current_run_id,
+                    current_as_of,
+                    quote_batch,
+                    quote_health,
+                ):
+                    monitoring_health.record_task_started(
+                        RADAR_LEADER_STAGE6_TASK_NAME
+                    )
+                    try:
+                        leader_repository = LeaderRepository(
+                            connection,
+                            clock=self.clock,
+                        )
+                        sector_rows = (
+                            repository
+                            .list_latest_sector_feature_rows_at_or_before(
+                                current_as_of
+                            )
+                        )
+                        release_ids = {
+                            str(row["industryReleaseId"])
+                            for row in sector_rows
+                        }
+                        industry_records = ()
+                        if len(release_ids) == 1:
+                            industry_records = (
+                                repository
+                                .list_industry_classification_records_by_release_id(
+                                    next(iter(release_ids))
+                                )
+                            )
+                        previous_states = (
+                            leader_repository
+                            .get_latest_state_records_before(current_as_of)
+                        )
+                        assembly = build_leader_runtime_evidence(
+                            as_of=current_as_of,
+                            quote_batch=quote_batch,
+                            quote_health=quote_health,
+                            market_snapshot=(
+                                repository.get_market_feature_row(
+                                    current_run_id
+                                )
+                            ),
+                            sector_rows=sector_rows,
+                            industry_records=industry_records,
+                            security_records=(
+                                repository.list_security_master_records(
+                                    current_as_of
+                                )
+                            ),
+                            previous_states=previous_states,
+                        )
+                        if assembly.status != "ready":
+                            reason = (
+                                assembly.gate_reasons[0]
+                                if assembly.gate_reasons
+                                else "leader_runtime_input_not_ready"
+                            )
+                            monitoring_health.record_task_skipped(
+                                RADAR_LEADER_STAGE6_TASK_NAME,
+                                reason,
+                            )
+                            return assembly
+                        result = LeaderShadowRunner(
+                            leader_repository,
+                            clock=self.clock,
+                            run_lock=self._leader_stage6_run_lock,
+                        ).run_evidence_once(
+                            current_run_id,
+                            current_as_of,
+                            assembly.evidence_items,
+                            previous_states=previous_states,
+                            input_gate_policy=LeaderInputGatePolicy(
+                                maximum_source_age_seconds=(
+                                    self.settings
+                                    .maximum_quote_age_seconds
+                                ),
+                                minimum_row_coverage=(
+                                    self.settings.minimum_row_coverage
+                                ),
+                                minimum_required_field_coverage=(
+                                    self.settings
+                                    .minimum_required_field_coverage
+                                ),
+                            ),
+                        )
+                        monitoring_health.record_task_success(
+                            RADAR_LEADER_STAGE6_TASK_NAME,
+                            item_count=result.eligible_count,
+                        )
+                        return result
+                    except Exception as exc:
+                        monitoring_health.record_task_failure(
+                            RADAR_LEADER_STAGE6_TASK_NAME,
+                            exc,
+                        )
+                        raise
+
+                leader_stage6_processor = process_leader_stage6
             runner = MarketShadowRunner(
                 repository,
                 index_fetcher=self.market_index_fetcher,
@@ -425,6 +574,7 @@ class RadarRuntime:
                 ),
                 clock=self.clock,
                 run_lock=self._market_run_lock,
+                leader_stage6_processor=leader_stage6_processor,
             )
             return runner.run_once(radar_run_id, as_of)
 

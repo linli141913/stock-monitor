@@ -15,7 +15,8 @@ from radar.contracts import (
 
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
-TENCENT_QUOTE_URL = "http://qt.gtimg.cn/q={query}"
+TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q={query}"
+TENCENT_REQUEST_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,18 @@ def _field_coverage(items):
     }
 
 
+def _returned_source_symbols(response_text: str) -> set[str]:
+    returned = set()
+    for line in response_text.split(";"):
+        if "=" not in line:
+            continue
+        assignment = line.split("=", 1)[0].strip()
+        returned.add(
+            assignment[2:] if assignment.startswith("v_") else assignment
+        )
+    return returned
+
+
 def fetch_market_indices(
     radar_run_id: str,
     batch_id: str,
@@ -120,22 +133,47 @@ def fetch_market_indices(
     issues = []
     items_by_source_symbol = {}
 
-    try:
-        response = active_session.get(
-            TENCENT_QUOTE_URL.format(query=query),
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=timeout_seconds,
-        )
-        response.encoding = "gbk"
-        response.raise_for_status()
-        fetched_at = clock()
-    except Exception as exc:
+    response = None
+    response_identity_count = -1
+    last_error = None
+    for _attempt in range(TENCENT_REQUEST_ATTEMPTS):
+        try:
+            candidate = active_session.get(
+                TENCENT_QUOTE_URL.format(query=query),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout_seconds,
+            )
+            candidate.encoding = "gbk"
+            candidate.raise_for_status()
+            last_error = None
+            returned_source_symbols = _returned_source_symbols(candidate.text)
+            identity_count = len(
+                returned_source_symbols & set(identities_by_source_symbol)
+            )
+            if identity_count >= response_identity_count:
+                response = candidate
+                response_identity_count = identity_count
+                fetched_at = clock()
+            if identity_count == len(identities_by_source_symbol):
+                break
+        except Exception as exc:
+            last_error = exc
+
+    if response is None:
         issues.append(SourceIssue(
             code="source_request_failed",
             source="tencent_finance_indices",
-            message=f"腾讯市场指数请求失败：{type(exc).__name__}",
+            message=(
+                "腾讯市场指数请求失败："
+                f"{type(last_error).__name__ if last_error else 'UnknownError'}"
+            ),
         ))
-        response = None
+    elif last_error is not None:
+        issues.append(SourceIssue(
+            code="source_retry_failed",
+            source="tencent_finance_indices",
+            message=f"腾讯市场指数重试失败：{type(last_error).__name__}",
+        ))
 
     if response is not None:
         for line in response.text.split(";"):

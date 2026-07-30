@@ -33,7 +33,11 @@ from radar.repository import (
     RepositoryConflictError,
 )
 from radar.sector_features import build_sector_features
-from radar.source_health import SourceHealthPolicy, evaluate_source_health
+from radar.source_health import (
+    SourceHealthPolicy,
+    evaluate_source_health,
+    quote_item_time_reasons,
+)
 from radar.sources.tencent_quotes import fetch_tencent_quotes
 
 
@@ -642,18 +646,20 @@ class SectorShadowRunner:
             reasons.append("quote_symbol_set_mismatch")
 
         for item in quote_batch.items:
-            if item.source_time is None:
-                reasons.append("quote_item_source_time_missing")
+            if item.is_explicitly_non_trading:
                 continue
-            signed_age = (
-                features.as_of - _aware_utc(
-                    item.source_time,
-                    "行情source_time",
-                )
-            ).total_seconds()
-            if signed_age > self._policy.maximum_quote_age_seconds:
+            time_reasons = quote_item_time_reasons(
+                item.source_time,
+                as_of=features.as_of,
+                maximum_future_skew_seconds=(
+                    self._policy.maximum_future_skew_seconds
+                ),
+            )
+            if "source_time_missing" in time_reasons:
+                reasons.append("quote_item_source_time_missing")
+            if "source_time_stale" in time_reasons:
                 reasons.append("quote_item_source_time_stale")
-            if signed_age < -self._policy.maximum_future_skew_seconds:
+            if "source_time_in_future" in time_reasons:
                 reasons.append("quote_item_source_time_in_future")
 
         if features.duplicate_quote_symbols:
@@ -693,17 +699,23 @@ class SectorShadowRunner:
         missing_count = 0
         stale_count = 0
         future_count = 0
+        non_trading_count = 0
         for item in quote_batch.items:
-            if item.source_time is None:
-                missing_count += 1
+            if item.is_explicitly_non_trading:
+                non_trading_count += 1
                 continue
-            signed_age = (
-                quote_batch.meta.as_of
-                - _aware_utc(item.source_time, "行情source_time")
-            ).total_seconds()
-            if signed_age > self._policy.maximum_quote_age_seconds:
+            time_reasons = quote_item_time_reasons(
+                item.source_time,
+                as_of=quote_batch.meta.as_of,
+                maximum_future_skew_seconds=(
+                    self._policy.maximum_future_skew_seconds
+                ),
+            )
+            if "source_time_missing" in time_reasons:
+                missing_count += 1
+            if "source_time_stale" in time_reasons:
                 stale_count += 1
-            if signed_age < -self._policy.maximum_future_skew_seconds:
+            if "source_time_in_future" in time_reasons:
                 future_count += 1
 
         sectors = tuple(features.sectors) if features is not None else ()
@@ -733,6 +745,7 @@ class SectorShadowRunner:
                 "missingCount": missing_count,
                 "staleCount": stale_count,
                 "futureCount": future_count,
+                "nonTradingCount": non_trading_count,
             },
             "incompleteEligibleSectorReasonCounts": dict(sorted(
                 incomplete_reason_counts.items()

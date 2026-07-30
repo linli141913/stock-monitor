@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from radar.contracts import (
+    QuoteTradingStatus,
     QuoteSnapshot,
     RadarBatchMeta,
     SourceBatch,
@@ -67,6 +68,7 @@ def quote(
     change_percent=1.0,
     turnover_amount=100.0,
     source_time=AS_OF,
+    trading_status=None,
 ):
     return QuoteSnapshot(
         symbol=symbol,
@@ -79,6 +81,7 @@ def quote(
         turnoverRatePercent=1.0,
         volumeRatio=1.0,
         marketCapSource=100.0,
+        tradingStatus=trading_status,
     )
 
 
@@ -138,6 +141,41 @@ def index_batch(*, source_time=AS_OF):
 
 
 class MarketIndexSourceTests(unittest.TestCase):
+    def test_incomplete_index_response_is_retried_once(self):
+        complete_rows = [
+            tencent_index_line(
+                identity.source_symbol,
+                identity.symbol,
+                name=identity.name,
+            )
+            for identity in MARKET_INDEX_IDENTITIES
+        ]
+        attempts = 0
+
+        def responder(_url):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return "".join(complete_rows[:-1])
+            return "".join(complete_rows)
+
+        session = FakeSession(responder)
+        batch = fetch_market_indices(
+            radar_run_id="run-market-1",
+            batch_id="indices-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertTrue(session.calls[0]["url"].startswith("https://"))
+        self.assertEqual(batch.meta.returned_count, 4)
+        self.assertNotIn(
+            "missing_indices",
+            {issue.code for issue in batch.meta.issues},
+        )
+
     def test_four_index_identities_use_explicit_exchange_symbols(self):
         captured = []
 
@@ -373,7 +411,7 @@ class MarketFeatureTests(unittest.TestCase):
         self.assertFalse(result.index_completeness.is_complete)
         self.assertIn("source_time_stale", result.index_completeness.reasons)
 
-    def test_one_stale_stock_is_excluded_from_breadth_and_turnover(self):
+    def test_one_previous_day_stock_is_excluded_from_breadth_and_turnover(self):
         result = build_market_features(
             index_batch(),
             quote_batch([
@@ -381,7 +419,7 @@ class MarketFeatureTests(unittest.TestCase):
                     "000001",
                     change_percent=2.0,
                     turnover_amount=100.0,
-                    source_time=AS_OF - timedelta(seconds=91),
+                    source_time=AS_OF - timedelta(days=1),
                 ),
                 quote(
                     "000002",
@@ -399,6 +437,63 @@ class MarketFeatureTests(unittest.TestCase):
         self.assertEqual(result.breadth.unavailable, 1)
         self.assertEqual(result.turnover.raw_value, 200.0)
         self.assertIn("source_time_stale", result.breadth.completeness.reasons)
+
+    def test_same_day_infrequent_trade_does_not_degrade_fresh_batch(self):
+        result = build_market_features(
+            index_batch(),
+            quote_batch([
+                quote(
+                    "000001",
+                    change_percent=2.0,
+                    turnover_amount=100.0,
+                    source_time=AS_OF - timedelta(hours=4),
+                ),
+                quote(
+                    "000002",
+                    change_percent=-1.0,
+                    turnover_amount=200.0,
+                ),
+            ]),
+            stock_symbols=["000001", "000002"],
+            etf_symbols=[],
+        )
+
+        self.assertEqual(result.breadth.advancers, 1)
+        self.assertEqual(result.breadth.decliners, 1)
+        self.assertEqual(result.turnover.raw_value, 300.0)
+        self.assertTrue(result.breadth.completeness.is_complete)
+        self.assertTrue(result.turnover.completeness.is_complete)
+
+    def test_confirmed_non_trading_stock_does_not_degrade_active_universe(self):
+        result = build_market_features(
+            index_batch(),
+            quote_batch([
+                quote(
+                    "000001",
+                    change_percent=0.0,
+                    turnover_amount=0.0,
+                    source_time=AS_OF - timedelta(hours=4),
+                    trading_status=QuoteTradingStatus.SUSPENDED,
+                ),
+                quote(
+                    "000002",
+                    change_percent=1.0,
+                    turnover_amount=200.0,
+                ),
+            ]),
+            stock_symbols=["000001", "000002"],
+            etf_symbols=[],
+        )
+
+        self.assertEqual(result.breadth.advancers, 1)
+        self.assertEqual(result.breadth.unavailable, 1)
+        self.assertEqual(result.turnover.raw_value, 200.0)
+        self.assertTrue(result.breadth.completeness.is_complete)
+        self.assertTrue(result.turnover.completeness.is_complete)
+        self.assertNotIn(
+            "source_time_stale",
+            result.breadth.completeness.reasons,
+        )
 
     def test_stock_and_etf_universe_overlap_is_rejected(self):
         with self.assertRaises(ValueError):

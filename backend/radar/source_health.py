@@ -1,12 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from radar.contracts import (
     RadarBatchMeta,
     SourceHealthResult,
     SourceStatus,
 )
+
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,30 @@ class SourceHealthPolicy:
             raise ValueError("maximum_age_seconds必须大于0或为空")
         if self.maximum_future_skew_seconds < 0:
             raise ValueError("maximum_future_skew_seconds不得小于0")
+
+
+def quote_item_time_reasons(
+    source_time: Optional[datetime],
+    *,
+    as_of: datetime,
+    maximum_future_skew_seconds: int = 5,
+) -> Tuple[str, ...]:
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of必须包含时区")
+    if source_time is None:
+        return ("source_time_missing",)
+    if source_time.tzinfo is None or source_time.utcoffset() is None:
+        raise ValueError("source_time必须包含时区")
+
+    signed_age_seconds = (as_of - source_time).total_seconds()
+    if signed_age_seconds < -maximum_future_skew_seconds:
+        return ("source_time_in_future",)
+    if (
+        source_time.astimezone(SHANGHAI_TZ).date()
+        != as_of.astimezone(SHANGHAI_TZ).date()
+    ):
+        return ("source_time_stale",)
+    return ()
 
 
 def evaluate_source_health(

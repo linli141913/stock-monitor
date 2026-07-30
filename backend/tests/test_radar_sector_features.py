@@ -11,6 +11,7 @@ from radar.contracts import (
     IndustryHistoryStatus,
     IndustryIdentityStatus,
     IndustryRecordStatus,
+    QuoteTradingStatus,
     QuoteSnapshot,
     RadarBatchMeta,
     SourceBatch,
@@ -138,6 +139,7 @@ def quote(
     turnover_amount=100.0,
     market_cap=100.0,
     source_time=AS_OF,
+    trading_status=None,
 ):
     return QuoteSnapshot(
         symbol=symbol,
@@ -150,6 +152,7 @@ def quote(
         turnoverRatePercent=1.0,
         volumeRatio=1.0,
         marketCapSource=market_cap,
+        tradingStatus=trading_status,
     )
 
 
@@ -360,7 +363,7 @@ class SectorFeatureTests(unittest.TestCase):
     def test_stale_and_future_constituents_are_rejected_individually(self):
         records = [industry_record("000001"), industry_record("000002")]
         for source_time, reason in (
-            (AS_OF - timedelta(seconds=91), "source_time_stale"),
+            (AS_OF - timedelta(days=1), "source_time_stale"),
             (AS_OF + timedelta(seconds=6), "source_time_in_future"),
         ):
             with self.subTest(reason=reason):
@@ -372,6 +375,66 @@ class SectorFeatureTests(unittest.TestCase):
                 sector = result.sectors[0]
                 self.assertFalse(sector.returns.equal_return.available)
                 self.assertIn(reason, sector.reasons)
+
+    def test_same_day_infrequent_trade_remains_usable(self):
+        records = [industry_record("000001"), industry_record("000002")]
+        result = self.build(records, [
+            quote(
+                "000001",
+                change_percent=2.0,
+                turnover_amount=100.0,
+                source_time=AS_OF - timedelta(hours=4),
+            ),
+            quote(
+                "000002",
+                change_percent=-2.0,
+                turnover_amount=200.0,
+            ),
+        ])
+
+        sector = result.sectors[0]
+        self.assertEqual(sector.returns.equal_return.raw_value, 0.0)
+        self.assertEqual(sector.turnover.raw_value, 300.0)
+        self.assertTrue(sector.completeness.is_complete)
+        self.assertTrue(sector.shadow_usable)
+
+    def test_confirmed_non_trading_constituent_is_explicitly_excluded(self):
+        records = [
+            industry_record("000001"),
+            industry_record("000002"),
+            industry_record("000003"),
+        ]
+        result = self.build(records, [
+            quote(
+                "000001",
+                change_percent=0.0,
+                turnover_amount=0.0,
+                source_time=AS_OF - timedelta(hours=4),
+                trading_status=QuoteTradingStatus.SUSPENDED,
+            ),
+            quote(
+                "000002",
+                change_percent=2.0,
+                turnover_amount=200.0,
+                market_cap=200.0,
+            ),
+            quote(
+                "000003",
+                change_percent=-2.0,
+                turnover_amount=100.0,
+                market_cap=100.0,
+            ),
+        ])
+
+        sector = result.sectors[0]
+        self.assertEqual(sector.returns.equal_return.raw_value, 0.0)
+        self.assertEqual(sector.breadth.advancers, 1)
+        self.assertEqual(sector.breadth.decliners, 1)
+        self.assertEqual(sector.breadth.unavailable, 1)
+        self.assertEqual(sector.turnover.raw_value, 300.0)
+        self.assertTrue(sector.completeness.is_complete)
+        self.assertTrue(sector.shadow_usable)
+        self.assertNotIn("source_time_stale", sector.reasons)
 
     def test_missing_or_zero_market_cap_only_blocks_cap_weighted_metrics(self):
         records = [industry_record("000001"), industry_record("000002")]

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -346,11 +346,79 @@ class RadarEtfModule(RadarApiModel):
     reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
 
 
+class RadarLeaderSnapshot(RadarApiModel):
+    radar_run_id: str = Field(alias="radarRunId")
+    as_of: datetime = Field(alias="asOf")
+    created_at: datetime = Field(alias="createdAt")
+    rule_version: str = Field(alias="ruleVersion")
+
+
+class RadarLeaderSummary(RadarApiModel):
+    eligible_count: int = Field(alias="eligibleCount", ge=0)
+    preliminary_count: int = Field(alias="preliminaryCount", ge=0)
+    candidate_count: int = Field(alias="candidateCount", ge=0)
+    confirmed_count: int = Field(alias="confirmedCount", ge=0)
+    removed_count: int = Field(alias="removedCount", ge=0)
+    overflow_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        alias="overflowCounts",
+    )
+    coverage: float = Field(ge=0, le=1)
+    formal_usable_count: int = Field(alias="formalUsableCount", ge=0)
+    rule_version: Optional[str] = Field(default=None, alias="ruleVersion")
+    formal_state_enabled: Literal[False] = Field(
+        default=False,
+        alias="formalStateEnabled",
+    )
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
+class RadarLeaderItem(RadarApiModel):
+    symbol: str
+    name: str
+    industry_code: Optional[str] = Field(default=None, alias="industryCode")
+    industry_name: Optional[str] = Field(default=None, alias="industryName")
+    state: Literal["preliminary", "candidate", "confirmed"]
+    score: float = Field(ge=0, le=100)
+    business_exposure_status: str = Field(alias="businessExposureStatus")
+    data_status: str = Field(alias="dataStatus")
+    first_rejection_reason: Optional[str] = Field(
+        default=None,
+        alias="firstRejectionReason",
+    )
+    reasons: List[str] = Field(default_factory=list)
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    invalidation: Dict[str, Any] = Field(default_factory=dict)
+    state_age_periods: int = Field(alias="stateAgePeriods", ge=0)
+    formal_usable: Literal[False] = Field(alias="formalUsable")
+
+
+class RadarLeaderModule(RadarApiModel):
+    state: RadarModuleState
+    quality: RadarModuleQuality
+    using_last_success: bool = Field(alias="usingLastSuccess")
+    last_attempt: Optional[RadarLastAttempt] = Field(
+        default=None,
+        alias="lastAttempt",
+    )
+    last_success: Optional[RadarLeaderSnapshot] = Field(
+        default=None,
+        alias="lastSuccess",
+    )
+    freshness: RadarFreshness
+    sources: List[RadarSourceStatus] = Field(default_factory=list)
+    summary: RadarLeaderSummary
+    preliminary: List[RadarLeaderItem] = Field(default_factory=list)
+    candidates: List[RadarLeaderItem] = Field(default_factory=list)
+    confirmed: List[RadarLeaderItem] = Field(default_factory=list)
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
 class RadarModuleCollection(RadarApiModel):
     market: RadarMarketModule
     sectors: RadarSectorModule
     etf: RadarEtfModule
-    leaders: RadarDeferredModule
+    leaders: Union[RadarDeferredModule, RadarLeaderModule]
     history: RadarDeferredModule
 
 
@@ -389,3 +457,14 @@ class RadarEtfsResponse(RadarApiModel):
     mode: Literal["shadow", "disabled"]
     market_session: RadarMarketSession = Field(alias="marketSession")
     module: RadarEtfModule
+
+
+class RadarLeadersResponse(RadarApiModel):
+    schema_version: Literal["radar-leaders-v1"] = Field(
+        default="radar-leaders-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    mode: Literal["shadow", "disabled"]
+    market_session: RadarMarketSession = Field(alias="marketSession")
+    module: RadarLeaderModule

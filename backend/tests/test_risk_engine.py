@@ -451,7 +451,7 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(result["movingAverageRisk"]["status"], "triggered")
         self.assertEqual(result["movingAverageRisk"]["periods"], ["MA5"])
 
-    def test_eastmoney_fund_history_uses_direct_http_and_parses_fields(self):
+    def test_eastmoney_fund_history_uses_https_and_parses_fields(self):
         self.assertTrue(hasattr(main, "fetch_eastmoney_fund_history"))
         response = MagicMock()
         response.json.return_value = {
@@ -471,13 +471,46 @@ class LinkageRiskTests(unittest.TestCase):
         request_url = session.get.call_args.args[0]
         self.assertEqual(
             request_url,
-            "http://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
         )
+        request_headers = session.get.call_args.kwargs["headers"]
+        self.assertEqual(
+            request_headers.get("Accept"),
+            "application/json,text/plain,*/*",
+        )
+        self.assertEqual(
+            request_headers.get("Referer"),
+            "https://quote.eastmoney.com/",
+        )
+        self.assertIn("Mozilla/5.0", request_headers.get("User-Agent", ""))
+        self.assertIn("Chrome/", request_headers.get("User-Agent", ""))
         self.assertEqual(rows, [{
             "trade_date": "2026-07-15",
             "fund_close": 9.7,
             "fund_flow": -123.0,
         }])
+
+    def test_eastmoney_fund_history_retries_one_transient_disconnect(self):
+        response = MagicMock()
+        response.json.return_value = {
+            "data": {
+                "klines": [
+                    "2026-07-15,-123,1,2,3,4,5,6,7,8,9,9.70,-4.90,0,0",
+                ],
+            },
+        }
+        session = MagicMock()
+        session.get.side_effect = [
+            main.requests.ConnectionError("remote disconnected"),
+            response,
+        ]
+
+        with patch.object(main.requests, "Session", return_value=session):
+            rows = main.fetch_eastmoney_fund_history("000725")
+
+        self.assertEqual(session.get.call_count, 2)
+        self.assertEqual(rows[0]["trade_date"], "2026-07-15")
+        self.assertEqual(rows[0]["fund_flow"], -123.0)
 
     def test_verified_history_keeps_kline_when_fund_fetch_fails(self):
         kline_payload = {

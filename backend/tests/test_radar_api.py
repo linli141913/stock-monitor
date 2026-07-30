@@ -288,6 +288,14 @@ class RadarReadServiceTests(unittest.TestCase):
             payload["modules"]["etf"]["reasonCodes"],
             ["stage_not_enabled"],
         )
+        self.assertEqual(
+            payload["modules"]["leaders"]["state"],
+            "not_enabled",
+        )
+        self.assertEqual(
+            payload["modules"]["leaders"]["enabledStage"],
+            6,
+        )
 
     def test_trading_snapshot_older_than_two_cycles_plus_grace_is_stale(self):
         repository = FakeRepository(
@@ -610,6 +618,8 @@ class RadarReadOnlyConnectionTests(unittest.TestCase):
         self.assertEqual(routes["/api/radar/overview"], {"GET"})
         self.assertEqual(routes["/api/radar/sectors"], {"GET"})
         self.assertEqual(routes["/api/radar/etfs"], {"GET"})
+        self.assertIn("/api/radar/leaders", routes)
+        self.assertEqual(routes["/api/radar/leaders"], {"GET"})
 
     def test_connection_is_query_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:

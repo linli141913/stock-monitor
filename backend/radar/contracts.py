@@ -21,6 +21,12 @@ class UnitVerificationStatus(str, Enum):
     UNVERIFIED = "unverified"
 
 
+class QuoteTradingStatus(str, Enum):
+    SUSPENDED = "suspended"
+    DELISTED = "delisted"
+    UNLISTED = "unlisted"
+
+
 class MarketIndexKey(str, Enum):
     SSE_COMPOSITE = "sse_composite"
     SZSE_COMPONENT = "szse_component"
@@ -464,11 +470,60 @@ class QuoteSnapshot(ContractModel):
     name: str
     source_time: Optional[datetime] = Field(default=None, alias="sourceTime")
     fetched_at: datetime = Field(alias="fetchedAt")
+    trading_status: Optional[QuoteTradingStatus] = Field(
+        default=None,
+        alias="tradingStatus",
+    )
     price: Optional[float] = None
+    previous_close: Optional[float] = Field(
+        default=None,
+        alias="previousClose",
+        ge=0,
+        allow_inf_nan=False,
+    )
+    open_price: Optional[float] = Field(
+        default=None,
+        alias="openPrice",
+        ge=0,
+        allow_inf_nan=False,
+    )
+    high_price: Optional[float] = Field(
+        default=None,
+        alias="highPrice",
+        ge=0,
+        allow_inf_nan=False,
+    )
+    low_price: Optional[float] = Field(
+        default=None,
+        alias="lowPrice",
+        ge=0,
+        allow_inf_nan=False,
+    )
+    upper_limit_price_source: Optional[float] = Field(
+        default=None,
+        alias="upperLimitPriceSource",
+        ge=0,
+        allow_inf_nan=False,
+    )
+    lower_limit_price_source: Optional[float] = Field(
+        default=None,
+        alias="lowerLimitPriceSource",
+        ge=0,
+        allow_inf_nan=False,
+    )
     change_percent: Optional[float] = Field(default=None, alias="changePercent")
     turnover_amount_source: Optional[float] = Field(
         default=None,
         alias="turnoverAmountSource",
+    )
+    turnover_amount_cny: Optional[float] = Field(
+        default=None,
+        alias="turnoverAmountCny",
+        ge=0,
+    )
+    turnover_amount_unit_status: UnitVerificationStatus = Field(
+        default=UnitVerificationStatus.UNVERIFIED,
+        alias="turnoverAmountUnitStatus",
     )
     turnover_rate_percent: Optional[float] = Field(
         default=None,
@@ -481,12 +536,32 @@ class QuoteSnapshot(ContractModel):
     )
     source: str = "tencent_finance"
 
+    @property
+    def is_explicitly_non_trading(self) -> bool:
+        return self.trading_status is not None
+
     @field_validator("source_time", "fetched_at")
     @classmethod
     def require_aware_datetime(cls, value):
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("时间字段必须包含时区")
         return value
+
+    @model_validator(mode="after")
+    def validate_turnover_amount_unit(self):
+        if (
+            self.turnover_amount_unit_status
+            == UnitVerificationStatus.VERIFIED
+            and self.turnover_amount_cny is None
+        ):
+            raise ValueError("成交额单位已验证时必须提供人民币元值")
+        if (
+            self.turnover_amount_unit_status
+            == UnitVerificationStatus.UNVERIFIED
+            and self.turnover_amount_cny is not None
+        ):
+            raise ValueError("成交额单位未验证时人民币元值必须缺失")
+        return self
 
     def missing_fields(self) -> Tuple[str, ...]:
         return tuple(

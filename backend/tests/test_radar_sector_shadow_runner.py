@@ -9,6 +9,7 @@ from radar.contracts import (
     IndustryClassificationRecord,
     IndustryClassificationRelease,
     IndustryClassificationSnapshot,
+    QuoteTradingStatus,
     QuoteSnapshot,
     RadarBatchMeta,
     SecurityMasterRecord,
@@ -165,7 +166,14 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         self.repository.record_industry_classification(snapshot)
 
     @staticmethod
-    def quote(symbol, *, source_time, change_percent=0.0, market_cap=100.0):
+    def quote(
+        symbol,
+        *,
+        source_time,
+        change_percent=0.0,
+        market_cap=100.0,
+        trading_status=None,
+    ):
         return QuoteSnapshot(
             symbol=symbol,
             name=symbol,
@@ -177,6 +185,7 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
             turnoverRatePercent=0.0,
             volumeRatio=0.0,
             marketCapSource=market_cap,
+            tradingStatus=trading_status,
         )
 
     def quote_batch(
@@ -188,6 +197,8 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         *,
         source_time=None,
         market_cap_missing=False,
+        non_trading_symbol=None,
+        same_day_old_symbol=None,
         wrong_run_id=False,
     ):
         self.quote_calls.append((tuple(symbols), radar_run_id, batch_id, as_of))
@@ -195,8 +206,20 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         items = [
             self.quote(
                 symbol,
-                source_time=source_time,
+                source_time=(
+                    as_of - timedelta(hours=4)
+                    if symbol in (
+                        non_trading_symbol,
+                        same_day_old_symbol,
+                    )
+                    else source_time
+                ),
                 market_cap=(None if market_cap_missing and index == 0 else 100.0),
+                trading_status=(
+                    QuoteTradingStatus.SUSPENDED
+                    if symbol == non_trading_symbol
+                    else None
+                ),
             )
             for index, symbol in enumerate(symbols)
         ]
@@ -301,33 +324,94 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         self.assertFalse(diagnostics["gatePassed"])
         self.assertEqual(
             diagnostics["gateReasons"],
-            [
-                "quote_health:source_time_stale",
-                "quote_item_source_time_stale",
-                "eligible_sector_features_incomplete",
-            ],
+            ["quote_health:source_time_stale"],
         )
         self.assertEqual(
             diagnostics["quoteItemTimeSummary"],
             {
                 "missingCount": 0,
-                "staleCount": 2,
+                "staleCount": 0,
                 "futureCount": 0,
+                "nonTradingCount": 0,
             },
         )
         self.assertEqual(diagnostics["stockCount"], 2)
         self.assertEqual(diagnostics["quoteCount"], 2)
         self.assertEqual(diagnostics["sectorCount"], 1)
         self.assertEqual(diagnostics["eligibleSectorCount"], 1)
-        self.assertEqual(diagnostics["shadowUsableSectorCount"], 0)
+        self.assertEqual(diagnostics["shadowUsableSectorCount"], 1)
         self.assertEqual(
-            diagnostics["incompleteEligibleSectorReasonCounts"][
-                "source_time_stale"
-            ],
-            1,
+            diagnostics["incompleteEligibleSectorReasonCounts"],
+            {},
         )
         self.assertNotIn("000001", json.dumps(diagnostics))
         self.assertNotIn("000002", json.dumps(diagnostics))
+
+    def test_confirmed_non_trading_quote_does_not_reject_sector_gate(self):
+        third = self.security_record("000003", "测试证券")
+        self.repository.sync_security_master(SourceBatch(
+            meta=RadarBatchMeta(
+                radarRunId="master-run-3",
+                batchId="master-batch-3",
+                source="official_exchange_security_master",
+                asOf=MASTER_AS_OF,
+                fetchedAt=MASTER_AS_OF,
+                expectedCount=1,
+                returnedCount=1,
+                rowCoverage=1.0,
+                requiredFieldCoverage={"symbol": 1.0, "name": 1.0},
+                issues=[],
+            ),
+            items=[third],
+        ))
+        self.seed_classification(records=[
+            self.classification_record("000001", "平安银行"),
+            self.classification_record("000002", "万科A"),
+            self.classification_record("000003", "测试证券"),
+        ])
+        fetcher = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            non_trading_symbol="000001",
+        )
+
+        result = self.runner(fetcher).run_once("non-trading-run", AS_OF)
+
+        self.assertTrue(result.gate_passed)
+        self.assertEqual(result.persisted_sector_count, 1)
+        diagnostics = json.loads(self.connection.execute(
+            "SELECT issues_json FROM radar_source_status "
+            "WHERE radar_run_id='non-trading-run'"
+        ).fetchone()[0])["diagnostics"]
+        self.assertEqual(
+            diagnostics["quoteItemTimeSummary"],
+            {
+                "missingCount": 0,
+                "staleCount": 0,
+                "futureCount": 0,
+                "nonTradingCount": 1,
+            },
+        )
+
+    def test_same_day_infrequent_trade_does_not_reject_sector_gate(self):
+        self.seed_classification()
+        fetcher = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            same_day_old_symbol="000001",
+        )
+
+        result = self.runner(fetcher).run_once(
+            "same-day-old-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        self.assertEqual(result.persisted_sector_count, 1)
 
     def test_single_constituent_sector_is_saved_but_does_not_block_eligible_sector(self):
         third = self.security_record("000003", "测试证券")

@@ -11,9 +11,15 @@ import time
 from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
+from typing import Any, Callable, Dict, Optional
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 import database
 import news_api
@@ -36,8 +42,22 @@ load_dotenv()
 router = APIRouter(prefix="/api/stock", tags=["AI Attribution"])
 
 AI_SUCCESS_TTL_SECONDS = 20 * 60
+AI_REQUEST_TIMEOUT_SECONDS = 60.0
+AI_TRANSIENT_RETRY_DELAY_SECONDS = 5.0
+AI_MAX_REQUEST_ATTEMPTS = 2
 _AI_SUCCESS_CACHE = {}
 _AI_SUCCESS_CACHE_LOCK = threading.Lock()
+_TRANSIENT_LLM_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
+_LLM_OUTPUT_ERRORS = (
+    json.JSONDecodeError,
+    ValueError,
+)
+_RETRYABLE_LLM_ERRORS = _TRANSIENT_LLM_ERRORS + _LLM_OUTPUT_ERRORS
 
 
 def _is_single_attempt_trigger(trigger: str) -> bool:
@@ -144,6 +164,9 @@ class AiAttributionResponse(BaseModel):
     reuseMessage: Optional[str] = None
     checkedDimensions: Optional[int] = None
     marketView: Optional[Dict[str, Any]] = None
+    failureReason: Optional[str] = None
+    errorType: Optional[str] = None
+    retryAttempted: bool = False
 
 def _format_dynamics_item(item: dict, source_counts: dict) -> Optional[dict]:
     if not news_api.is_source_published_today(item):
@@ -375,6 +398,9 @@ def _failed_result(
     fingerprint: Optional[str] = None,
     completeness: Optional[dict] = None,
     market_view: Optional[dict] = None,
+    failure_reason: Optional[str] = None,
+    error_type: Optional[str] = None,
+    retry_attempted: bool = False,
 ) -> dict:
     return {
         "stockName": quote_data.get("name", symbol),
@@ -398,8 +424,105 @@ def _failed_result(
         "promptVersion": PROMPT_VERSION,
         "analysisStatus": "failed",
         "marketView": market_view,
+        "failureReason": failure_reason,
+        "errorType": error_type,
+        "retryAttempted": retry_attempted,
         **_analysis_metadata(quote_data),
     }
+
+
+def _is_transient_llm_error(error: Exception) -> bool:
+    return isinstance(error, _TRANSIENT_LLM_ERRORS)
+
+
+def _is_retryable_llm_error(error: Exception) -> bool:
+    return isinstance(error, _RETRYABLE_LLM_ERRORS)
+
+
+def _llm_failure_reason(error: Exception) -> str:
+    if isinstance(error, APITimeoutError):
+        return "llm_timeout"
+    if isinstance(error, RateLimitError):
+        return "llm_rate_limited"
+    if isinstance(error, InternalServerError):
+        return "llm_server_error"
+    if isinstance(error, APIConnectionError):
+        return "llm_connection_failed"
+    if isinstance(error, (json.JSONDecodeError, ValueError)):
+        return "llm_output_invalid"
+    return "llm_call_failed"
+
+
+def _llm_error_cause_type(error: Exception) -> str:
+    cause = error.__cause__
+    return type(cause).__name__ if cause is not None else "none"
+
+
+def _log_llm_attempt_failure(
+    error: Exception,
+    *,
+    attempt: int,
+    retry_scheduled: bool,
+    retry_delay_seconds: float,
+) -> None:
+    print(
+        "AI request attempt failed: "
+        f"attempt={attempt}/{AI_MAX_REQUEST_ATTEMPTS} "
+        f"error_type={type(error).__name__} "
+        f"cause_type={_llm_error_cause_type(error)} "
+        f"retry_scheduled={str(retry_scheduled).lower()} "
+        f"retry_delay_seconds={retry_delay_seconds if retry_scheduled else 0}"
+    )
+
+
+def _call_llm_with_retry(
+    operation: Callable[[], Any],
+    *,
+    retry_delay_seconds: float = AI_TRANSIENT_RETRY_DELAY_SECONDS,
+    retry_errors=_TRANSIENT_LLM_ERRORS,
+) -> Any:
+    try:
+        return operation()
+    except retry_errors as exc:
+        _log_llm_attempt_failure(
+            exc,
+            attempt=1,
+            retry_scheduled=True,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+        if retry_delay_seconds > 0:
+            time.sleep(retry_delay_seconds)
+    try:
+        result = operation()
+    except retry_errors as exc:
+        _log_llm_attempt_failure(
+            exc,
+            attempt=2,
+            retry_scheduled=False,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+        raise
+    print("AI request retry succeeded: attempts=2")
+    return result
+
+
+def _call_validated_llm_with_retry(
+    operation: Callable[[], Any],
+    *,
+    allowed_source_ids: set,
+    retry_delay_seconds: float = AI_TRANSIENT_RETRY_DELAY_SECONDS,
+) -> tuple[Any, dict]:
+    def request_and_validate() -> tuple[Any, dict]:
+        response = operation()
+        content = response.choices[0].message.content
+        payload = json.loads(content)
+        return response, validate_ai_payload(payload, allowed_source_ids)
+
+    return _call_llm_with_retry(
+        request_and_validate,
+        retry_delay_seconds=retry_delay_seconds,
+        retry_errors=_RETRYABLE_LLM_ERRORS,
+    )
 
 
 def _usage_dict(response: Any) -> dict:
@@ -518,6 +641,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             fingerprint=evidence_fingerprint,
             completeness=completeness,
             market_view=market_view,
+            failure_reason="llm_not_configured",
         )
         _save_failed_single_attempt(symbol, trigger, failed_result)
         return failed_result
@@ -527,7 +651,7 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         client = OpenAI(
             api_key=api_key,
             base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
-            timeout=60,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
             max_retries=0,
         )
         model_name = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
@@ -570,23 +694,23 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             "sourceIds": ["S1"]
         }}
         """
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是严格受证据目录约束的事件解释 API，只返回 JSON。",
-                },
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            response_format={"type": "json_object"},
-            max_tokens=1800,
-        )
-        content_res = response.choices[0].message.content
-        ai_res = validate_ai_payload(
-            json.loads(content_res),
-            {item["sourceId"] for item in evidence_snapshot["sources"]},
+        response, ai_res = _call_validated_llm_with_retry(
+            lambda: client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是严格受证据目录约束的事件解释 API，只返回 JSON。",
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"},
+                max_tokens=1800,
+            ),
+            allowed_source_ids={
+                item["sourceId"] for item in evidence_snapshot["sources"]
+            },
         )
         duration_ms = int((time.monotonic() - started_at) * 1000)
         plain_english = ai_res["plainEnglishSummary"]
@@ -635,7 +759,14 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
         return final_dict
 
     except Exception as exc:
-        print(f"AI explanation failed: {type(exc).__name__}")
+        retry_attempted = _is_retryable_llm_error(exc)
+        failure_reason = _llm_failure_reason(exc)
+        print(
+            "AI explanation failed: "
+            f"{type(exc).__name__} reason={failure_reason} "
+            f"cause_type={_llm_error_cause_type(exc)} "
+            f"retry_attempted={str(retry_attempted).lower()}"
+        )
         failed_result = _failed_result(
             symbol,
             quote_data,
@@ -645,6 +776,9 @@ def get_ai_attribution(symbol: str, trigger: str = "manual"):
             fingerprint=evidence_fingerprint,
             completeness=completeness,
             market_view=market_view,
+            failure_reason=failure_reason,
+            error_type=type(exc).__name__,
+            retry_attempted=retry_attempted,
         )
         _save_failed_single_attempt(symbol, trigger, failed_result)
         return failed_result

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ from radar.sources.tencent_quotes import fetch_tencent_quotes
 
 
 UTC = timezone.utc
+LOGGER = logging.getLogger(__name__)
 
 
 class MarketShadowRunError(RuntimeError):
@@ -74,6 +76,10 @@ IndexFetcher = Callable[
 QuoteFetcher = Callable[
     [Sequence[str], str, str, datetime],
     SourceBatch[QuoteSnapshot],
+]
+LeaderStage6Processor = Callable[
+    [str, datetime, SourceBatch[QuoteSnapshot], SourceHealthResult],
+    object,
 ]
 
 
@@ -126,6 +132,8 @@ class MarketShadowRunResult:
     returned_etf_count: int
     persisted_environment_count: int
     persisted_index_count: int
+    leader_stage6_status: Optional[str] = None
+    leader_stage6_reasons: Tuple[str, ...] = ()
 
     @property
     def item_count(self) -> int:
@@ -209,6 +217,7 @@ class MarketShadowRunner:
         policy: MarketShadowPolicy = MarketShadowPolicy(),
         clock: Callable[[], datetime] = _utc_now,
         run_lock=None,
+        leader_stage6_processor: Optional[LeaderStage6Processor] = None,
     ):
         self._repository = repository
         self._index_fetcher = index_fetcher
@@ -216,6 +225,7 @@ class MarketShadowRunner:
         self._policy = policy
         self._clock = clock
         self._run_lock = run_lock or threading.Lock()
+        self._leader_stage6_processor = leader_stage6_processor
 
     def run_once(
         self,
@@ -410,6 +420,41 @@ class MarketShadowRunner:
                 returned_etf_count=returned_etf_count,
                 error_code="market_features_shadow_unit_unverified",
             )
+            leader_stage6_status = None
+            leader_stage6_reasons = ()
+            if self._leader_stage6_processor is not None:
+                try:
+                    leader_result = self._leader_stage6_processor(
+                        radar_run_id,
+                        as_of,
+                        quote_batch,
+                        quote_health,
+                    )
+                    leader_stage6_status = getattr(
+                        leader_result,
+                        "status",
+                        "unknown",
+                    )
+                    leader_stage6_reasons = tuple(
+                        getattr(leader_result, "gate_reasons", ())
+                    )
+                    LOGGER.info(
+                        "阶段6龙头影子处理完成：run_id=%s status=%s "
+                        "gate_reasons=%s",
+                        radar_run_id,
+                        leader_stage6_status,
+                        ",".join(leader_stage6_reasons) or "none",
+                    )
+                except Exception as exc:
+                    leader_stage6_status = "failed"
+                    leader_stage6_reasons = (
+                        f"leader_stage6_internal_error:{type(exc).__name__}",
+                    )
+                    LOGGER.error(
+                        "阶段6龙头影子处理失败但不影响既有市场任务："
+                        "run_id=%s",
+                        radar_run_id,
+                    )
             return MarketShadowRunResult(
                 radar_run_id=radar_run_id,
                 as_of=as_of,
@@ -424,6 +469,8 @@ class MarketShadowRunner:
                 returned_etf_count=returned_etf_count,
                 persisted_environment_count=int(write_result.inserted > 0),
                 persisted_index_count=max(0, write_result.inserted - 1),
+                leader_stage6_status=leader_stage6_status,
+                leader_stage6_reasons=leader_stage6_reasons,
             )
         except (MarketShadowRunAlreadyExistsError, MarketShadowRunInProgressError):
             raise

@@ -667,6 +667,32 @@ class AlertsApiTests(unittest.TestCase):
         self.assertEqual(data["email"]["status"], "not_configured")
         self.assertEqual(data["watchlistCount"], 1)
 
+    @patch.dict(os.environ, {}, clear=True)
+    def test_monitoring_health_reports_data_degradation_without_http_failure(self):
+        monitoring_health.reset_runtime_health()
+        monitoring_health.record_task_success(
+            "officialAnnouncements",
+            item_count=2,
+        )
+        monitoring_health.record_task_degraded(
+            "radarMarketFeatures",
+            ["source_time_stale"],
+        )
+
+        response = self.client.get("/api/monitoring/health")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "degraded")
+        self.assertEqual(
+            data["tasks"]["radarMarketFeatures"]["status"],
+            "degraded",
+        )
+        self.assertEqual(
+            data["tasks"]["radarMarketFeatures"]["lastDegradationReasons"],
+            ["source_time_stale"],
+        )
+
     @patch.dict(os.environ, {"BACKEND_API_TOKEN": "test-token"}, clear=False)
     def test_stock_risk_endpoint_returns_truthful_missing_state(self):
         response = self.client.get(
@@ -1121,6 +1147,70 @@ class MonitoringHealthAlertTests(unittest.TestCase):
             monitoring_health.get_task_states()["generalNews"]["consecutiveFailures"],
             1,
         )
+
+    @patch.object(monitoring_health, "_save_system_alert", create=True)
+    def test_failure_alert_exposes_stable_reason_code(self, save_alert):
+        try:
+            monitoring_health.record_task_failure(
+                "aiAnalysis",
+                RuntimeError("first"),
+                reason_code="llm_connection_failed",
+            )
+            monitoring_health.record_task_failure(
+                "aiAnalysis",
+                RuntimeError("second"),
+                reason_code="llm_connection_failed",
+            )
+        except TypeError as exc:
+            self.fail(f"任务失败原因代码契约尚未实现: {exc}")
+
+        state = monitoring_health.get_task_states()["aiAnalysis"]
+        self.assertEqual(
+            state["lastFailureReason"],
+            "llm_connection_failed",
+        )
+        event = save_alert.call_args.args[0]
+        self.assertIn("llm_connection_failed", event["summary"])
+
+    @patch.object(monitoring_health, "_save_system_alert", create=True)
+    def test_degradation_alert_deduplicates_same_reason_but_keeps_new_cause(
+        self,
+        save_alert,
+    ):
+        for _ in range(2):
+            monitoring_health.record_task_degraded(
+                "radarMarketFeatures",
+                ["source_time_stale", "breadth_features_incomplete"],
+            )
+        monitoring_health.record_task_success("radarMarketFeatures", item_count=1)
+        for _ in range(2):
+            monitoring_health.record_task_degraded(
+                "radarMarketFeatures",
+                ["source_time_stale", "breadth_features_incomplete"],
+            )
+        monitoring_health.record_task_success("radarMarketFeatures", item_count=1)
+        for _ in range(2):
+            monitoring_health.record_task_degraded(
+                "radarMarketFeatures",
+                ["source_returned_no_rows"],
+            )
+
+        self.assertEqual(save_alert.call_count, 3)
+        first_event = save_alert.call_args_list[0].args[0]
+        repeated_event = save_alert.call_args_list[1].args[0]
+        new_cause_event = save_alert.call_args_list[2].args[0]
+        self.assertEqual(
+            first_event["source_event_id"],
+            repeated_event["source_event_id"],
+        )
+        self.assertNotEqual(
+            first_event["source_event_id"],
+            new_cause_event["source_event_id"],
+        )
+        self.assertIn("数据源持续降级", first_event["title"])
+        self.assertIn("source_time_stale", first_event["summary"])
+        self.assertIn("source_returned_no_rows", new_cause_event["summary"])
+        self.assertNotIn("RadarSourceDegradedError", new_cause_event["summary"])
 
     @patch.object(monitoring_health, "_save_system_alert", create=True)
     @patch.object(monitoring_health, "alert_repository", create=True)

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from radar.contracts import (
     EtfRegistryRecord,
     IndexQuoteSnapshot,
+    QuoteTradingStatus,
     QuoteSnapshot,
     RadarBatchMeta,
     SecurityMasterRecord,
@@ -161,6 +162,8 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
         *,
         source_time=None,
         missing_turnover=False,
+        non_trading_symbol=None,
+        same_day_old_symbol=None,
     ):
         self.quote_calls.append((tuple(symbols), radar_run_id, batch_id, as_of))
         source_time = source_time or (as_of - timedelta(seconds=1))
@@ -168,8 +171,20 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
             QuoteSnapshot(
                 symbol=symbol,
                 name=symbol,
-                sourceTime=source_time,
+                sourceTime=(
+                    as_of - timedelta(hours=4)
+                    if symbol in (
+                        non_trading_symbol,
+                        same_day_old_symbol,
+                    )
+                    else source_time
+                ),
                 fetchedAt=as_of + timedelta(seconds=1),
+                tradingStatus=(
+                    QuoteTradingStatus.SUSPENDED
+                    if symbol == non_trading_symbol
+                    else None
+                ),
                 price=0.0,
                 changePercent=0.0,
                 turnoverAmountSource=(
@@ -255,6 +270,49 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
             "market_environment_snapshots",
             "market_index_feature_snapshots",
         })
+
+    def test_confirmed_non_trading_stock_does_not_reject_market_gate(self):
+        quotes = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            non_trading_symbol="000001",
+        )
+
+        result = self.runner(quote_fetcher=quotes).run_once(
+            "non-trading-market-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        row = self.repository.get_market_feature_row(
+            "non-trading-market-run"
+        )
+        self.assertEqual(row["breadth"]["flat"], 1)
+        self.assertEqual(row["breadth"]["unavailable"], 1)
+        self.assertEqual(row["turnover"]["contributingCount"], 1)
+
+    def test_same_day_infrequent_trade_does_not_reject_market_gate(self):
+        quotes = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            same_day_old_symbol="000001",
+        )
+
+        result = self.runner(quote_fetcher=quotes).run_once(
+            "same-day-old-market-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        row = self.repository.get_market_feature_row(
+            "same-day-old-market-run"
+        )
+        self.assertEqual(row["breadth"]["flat"], 2)
+        self.assertEqual(row["breadth"]["unavailable"], 0)
 
     def test_stale_or_incomplete_sources_do_not_write_market_snapshot(self):
         stale_indices = lambda run_id, batch_id, as_of: self.index_batch(

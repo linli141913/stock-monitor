@@ -128,6 +128,9 @@ def _record_ai_round_failure(symbol: str, trigger: str, error: Exception) -> Non
         "credibility": "错误",
         "riskNotice": "请检查后台日志。",
         "analysisStatus": "failed",
+        "failureReason": f"analysis_exception:{type(error).__name__}",
+        "errorType": type(error).__name__,
+        "retryAttempted": False,
     }
     if not database.complete_analysis_trigger(
         symbol,
@@ -324,8 +327,10 @@ def run_ai_analysis_round_sync(round_id: str) -> str:
 
     import monitoring_health
     monitoring_health.record_task_started("aiAnalysis")
-    had_errors = False
     processed_count = 0
+    success_count = 0
+    failed_count = 0
+    failure_reasons = []
     try:
         if _ai_round_is_completed(round_id):
             return "skipped_duplicate"
@@ -339,23 +344,46 @@ def run_ai_analysis_round_sync(round_id: str) -> str:
                 print(f"[{datetime.now()}] 开始自动分析 {symbol}，轮次 {round_id}...")
                 result = get_ai_attribution(symbol, trigger=trigger)
                 if isinstance(result, dict) and result.get("analysisStatus") == "failed":
-                    had_errors = True
-                    print(f"[{datetime.now()}] {symbol} 自动分析失败，本轮不重试。")
+                    failed_count += 1
+                    reason = str(
+                        result.get("failureReason") or "analysis_failed"
+                    ).strip()
+                    if reason and reason not in failure_reasons:
+                        failure_reasons.append(reason)
+                    print(f"[{datetime.now()}] {symbol} 自动分析失败，本轮已完成受控尝试。")
                 else:
+                    success_count += 1
                     print(f"[{datetime.now()}] {symbol} 自动分析完成。")
                 processed_count += 1
             except Exception as e:
-                had_errors = True
+                failed_count += 1
+                reason = f"analysis_exception:{type(e).__name__}"
+                if reason not in failure_reasons:
+                    failure_reasons.append(reason)
                 try:
                     _record_ai_round_failure(symbol, trigger, e)
                 except Exception as record_error:
                     print(f"[{datetime.now()}] {symbol} AI 失败记录写入失败: {record_error}")
-                print(f"[{datetime.now()}] {symbol} 自动分析失败，本轮不重试: {e}")
-        if had_errors:
-            monitoring_health.record_task_failure(
-                "aiAnalysis",
-                RuntimeError("one_or_more_analysis_tasks_failed"),
-            )
+                print(f"[{datetime.now()}] {symbol} 自动分析异常终止: {type(e).__name__}")
+                processed_count += 1
+        if failed_count:
+            if success_count:
+                monitoring_health.record_task_degraded(
+                    "aiAnalysis",
+                    failure_reasons,
+                    item_count=success_count,
+                )
+            else:
+                monitoring_health.record_task_failure(
+                    "aiAnalysis",
+                    RuntimeError("all_analysis_tasks_failed"),
+                    reason_code=(
+                        failure_reasons[0]
+                        if failure_reasons
+                        else "analysis_failed"
+                    ),
+                    item_count=0,
+                )
             return "completed_with_errors"
         monitoring_health.record_task_success(
             "aiAnalysis",
@@ -751,9 +779,8 @@ def fetch_eastmoney_fund_history(symbol: str) -> list[dict]:
         return []
     session = requests.Session()
     session.trust_env = False
-    response = session.get(
-        "http://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
-        params={
+    request_kwargs = {
+        "params": {
             "lmt": "0",
             "klt": "101",
             "secid": f"{market_id}.{symbol}",
@@ -761,11 +788,28 @@ def fetch_eastmoney_fund_history(symbol: str) -> list[dict]:
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
             "ut": "b2884a393a59ad64002292a3e90d46a5",
         },
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=8,
-    )
-    response.raise_for_status()
-    content = ((response.json().get("data") or {}).get("klines") or [])
+        "headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "application/json,text/plain,*/*",
+            "Referer": "https://quote.eastmoney.com/",
+        },
+        "timeout": 8,
+    }
+    for attempt in range(2):
+        try:
+            response = session.get(
+                "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+                **request_kwargs,
+            )
+            response.raise_for_status()
+            content = ((response.json().get("data") or {}).get("klines") or [])
+            break
+        except (requests.RequestException, ValueError):
+            if attempt == 1:
+                raise
     rows = []
     for item in content:
         fields = str(item).split(",")

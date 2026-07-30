@@ -1,6 +1,9 @@
 import importlib.util
 import unittest
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -110,18 +113,67 @@ class ExternalHealthMonitorTests(unittest.TestCase):
         }
         degraded = {
             **healthy,
+            "status": "degraded",
             "components": {**healthy["components"], "backgroundTasks": "degraded"},
+        }
+        unavailable = {
+            **degraded,
+            "status": "unavailable",
+            "components": {
+                **degraded["components"],
+                "fastapi": "unavailable",
+                "backgroundTasks": "unknown",
+            },
         }
 
         self.assertEqual(probe.evaluate_payload(healthy), probe.ProbeResult(True, "healthy"))
         self.assertEqual(
             probe.evaluate_payload(degraded),
-            probe.ProbeResult(False, "component_not_healthy"),
+            probe.ProbeResult(True, "available_with_background_degraded"),
+        )
+        self.assertEqual(
+            probe.evaluate_payload(unavailable),
+            probe.ProbeResult(False, "health_not_healthy"),
         )
         self.assertEqual(
             probe.evaluate_payload({"status": "healthy"}),
             probe.ProbeResult(False, "invalid_contract"),
         )
+
+    def test_probe_reports_sanitized_component_details_for_http_error(self):
+        probe = load_probe_module()
+        body = (
+            b'{"status":"unavailable","components":{'
+            b'"vercel":"healthy","tunnel":"healthy",'
+            b'"fastapi":"unavailable","backgroundTasks":"unknown"},'
+            b'"checkedAt":"2026-07-28T05:38:00Z",'
+            b'"secret":"must-not-appear"}'
+        )
+        error = HTTPError(
+            "https://example.invalid/api/health",
+            503,
+            "Service Unavailable",
+            hdrs=None,
+            fp=BytesIO(body),
+        )
+
+        with patch.object(probe, "urlopen", side_effect=error):
+            result = probe.probe_once(
+                "https://example.invalid/api/health",
+                timeout_seconds=15,
+            )
+
+        self.assertEqual(
+            result,
+            probe.ProbeResult(
+                False,
+                "http_unhealthy:http=503,status=unavailable,"
+                "vercel=healthy,tunnel=healthy,fastapi=unavailable,"
+                "backgroundTasks=unknown",
+            ),
+        )
+        self.assertNotIn("must-not-appear", result.reason)
+        self.assertNotIn("example.invalid", result.reason)
 
     def test_workflow_runs_outside_mac_and_deduplicates_failure_issue(self):
         self.assertTrue(WORKFLOW.is_file())
