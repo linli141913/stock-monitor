@@ -34,6 +34,19 @@ from radar.leader_research_features import (
     ResearchFeatureStatus,
     build_leader_research_market_context,
 )
+from radar.leader_risk_candidate_projection import (
+    LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID,
+    LeaderRiskCandidateProjection,
+)
+from radar.leader_risk_document_facts import (
+    RiskDocumentRelationKind,
+)
+from radar.leader_risk_evidence_bundle import (
+    FormalRiskGateGap,
+)
+from radar.leader_risk_invalidation_features import (
+    RiskOfficialStatus,
+)
 from radar.leader_scoring import LeaderMetricStatus
 from radar.leader_state_machine import BusinessExposureStatus
 from radar.leader_tradability_features import (
@@ -603,6 +616,8 @@ class LeaderRuntimeInputsTests(unittest.TestCase):
         history_inputs_by_symbol=None,
         business_catalyst_inputs_by_symbol=None,
         tradability_inputs_by_symbol=None,
+        risk_candidate_projections_by_symbol=None,
+        research_readiness_audits_by_symbol=None,
     ):
         return build_leader_runtime_evidence(
             as_of=AS_OF,
@@ -635,7 +650,60 @@ class LeaderRuntimeInputsTests(unittest.TestCase):
             tradability_inputs_by_symbol=(
                 tradability_inputs_by_symbol
             ),
+            risk_candidate_projections_by_symbol=(
+                risk_candidate_projections_by_symbol
+            ),
+            research_readiness_audits_by_symbol=(
+                research_readiness_audits_by_symbol
+            ),
         )
+
+    @staticmethod
+    def risk_candidate_projection(
+        *,
+        symbol="000001",
+        as_of=AS_OF,
+        **changes,
+    ):
+        value = LeaderRiskCandidateProjection(
+            symbol=symbol,
+            issuer_identity="cninfo-org:000001",
+            as_of=as_of,
+            bundle_ids=("risk-bundle-1", "risk-bundle-2"),
+            current_bundle_id="risk-bundle-2",
+            current_bundle_built_at=AS_OF - timedelta(minutes=1),
+            document_source_contract_id=(
+                "cninfo-risk-document-v1:document-2"
+            ),
+            document_id="document-2",
+            content_contract_id="risk-document-content-v1",
+            content_sha256="d" * 64,
+            content_fetched_at=AS_OF - timedelta(minutes=5),
+            deterministic_fact_ids=("fact-1",),
+            manual_fact_ids=("fact-2",),
+            merged_fact_ids=("fact-1", "fact-2"),
+            active_artifact_id="artifact-2",
+            active_artifact_version="v2",
+            artifact_contract_version="artifact-contract-v1",
+            replay_version="replay-v2",
+            relation_id="relation-2",
+            review_id="review-2",
+            mapping_version="mapping-v1",
+            relation_kind=RiskDocumentRelationKind.RESOLVES,
+            target_event_id="risk-event-1",
+            target_event_version="v1",
+            target_document_id="document-1",
+            replacement_event_version=None,
+            basis_fact_ids=("fact-1", "fact-2"),
+            manual_basis_fact_ids=("fact-2",),
+            target_event_official_status=RiskOfficialStatus.ACTIVE,
+            target_event_published_at=AS_OF - timedelta(days=30),
+            formal_gate_gaps=(
+                FormalRiskGateGap.D1_RESOLUTION_EVIDENCE_MISSING,
+            ),
+            version_diffs=(),
+        )
+        return replace(value, **changes)
 
     def test_future_market_snapshot_is_rejected_before_candidate_build(self):
         result = self.build(
@@ -1034,6 +1102,612 @@ class LeaderRuntimeInputsTests(unittest.TestCase):
                     "source_unverified",
                 )
                 self.assertIn(expected_reason, research["reasons"])
+
+    def test_runtime_marks_missing_risk_projection_without_side_effects(self):
+        result = self.build_full_research()
+
+        self.assertEqual(
+            [item.symbol for item in result.evidence_items],
+            ["000001", "000002", "000003", "000004", "000005"],
+        )
+        for item in result.evidence_items:
+            risk = item.evidence["researchFeatures"][
+                "riskCandidateProjection"
+            ]
+            self.assertEqual(risk["status"], "missing")
+            self.assertEqual(
+                risk["reasons"],
+                ["risk_candidate_projection_missing"],
+            )
+            self.assertIsNone(risk["projection"])
+            self.assertFalse(risk["scoreReady"])
+            self.assertIsNone(risk["researchScore"])
+            self.assertFalse(risk["riskFilterPassed"])
+            self.assertFalse(risk["formalGateReady"])
+            self.assertFalse(risk["formalUsable"])
+            self.assertFalse(risk["appliedToD3"])
+            self.assertFalse(risk["appliedToD1"])
+            self.assertFalse(item.gates.risk_filter_passed)
+            self.assertIn(
+                "risk_evidence",
+                item.invalidation["missingPrerequisites"],
+            )
+
+    def test_ready_risk_projection_is_isolated_research_evidence(self):
+        result = self.build_full_research(
+            risk_candidate_projections_by_symbol={
+                "000001": self.risk_candidate_projection(),
+            },
+        )
+
+        first = result.evidence_items[0]
+        first_risk = first.evidence["researchFeatures"][
+            "riskCandidateProjection"
+        ]
+        second_risk = result.evidence_items[1].evidence[
+            "researchFeatures"
+        ]["riskCandidateProjection"]
+
+        self.assertEqual(
+            first.evidence["runtimeInputVersion"],
+            "radar-leader-runtime-input-v3",
+        )
+        self.assertEqual(first_risk["status"], "ready")
+        self.assertEqual(first_risk["reasons"], [])
+        self.assertEqual(
+            first_risk["projection"]["projectionContractId"],
+            LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID,
+        )
+        self.assertEqual(
+            first_risk["projection"]["candidate"]["symbol"],
+            "000001",
+        )
+        self.assertFalse(first_risk["riskFilterPassed"])
+        self.assertFalse(first_risk["formalGateReady"])
+        self.assertFalse(first_risk["formalUsable"])
+        self.assertFalse(first_risk["appliedToD3"])
+        self.assertFalse(first_risk["appliedToD1"])
+        self.assertFalse(first.gates.risk_filter_passed)
+        self.assertIn(
+            "risk_evidence",
+            first.invalidation["missingPrerequisites"],
+        )
+        self.assertEqual(second_risk["status"], "missing")
+        self.assertIsNone(second_risk["projection"])
+
+    def test_e3_read_only_projection_map_is_consumed_by_runtime(self):
+        from radar.leader_risk_candidate_projection_batch import (
+            LeaderRiskCandidateProjectionBatchEntry,
+            LeaderRiskCandidateProjectionBatchInput,
+            LeaderRiskCandidateProjectionBatchStatus,
+            build_leader_risk_candidate_projection_batch,
+        )
+        from tests.test_radar_leader_risk_candidate_projection import (
+            make_bundle,
+            make_input,
+            make_second_bundle,
+        )
+
+        issuer_identity = "cninfo-org:runtime-000001"
+        shared_changes = {
+            "symbol": "000001",
+            "issuer_identity": issuer_identity,
+            "content_fetched_at": AS_OF - timedelta(hours=1),
+        }
+        projection_input = make_input(
+            make_bundle(
+                built_at=AS_OF - timedelta(minutes=2),
+                **shared_changes,
+            ),
+            make_second_bundle(
+                built_at=AS_OF - timedelta(minutes=1),
+                **shared_changes,
+            ),
+            as_of=AS_OF,
+            symbol="000001",
+            issuer_identity=issuer_identity,
+        )
+        batch = build_leader_risk_candidate_projection_batch(
+            LeaderRiskCandidateProjectionBatchInput(
+                as_of=AS_OF,
+                entries=(
+                    LeaderRiskCandidateProjectionBatchEntry(
+                        symbol="000001",
+                        projection_input=projection_input,
+                    ),
+                ),
+            )
+        )
+
+        result = self.build_full_research(
+            risk_candidate_projections_by_symbol=(
+                batch.projections_by_symbol
+            ),
+        )
+        risk = result.evidence_items[0].evidence[
+            "researchFeatures"
+        ]["riskCandidateProjection"]
+
+        self.assertEqual(
+            batch.status,
+            LeaderRiskCandidateProjectionBatchStatus.READY,
+        )
+        self.assertEqual(risk["status"], "ready")
+        self.assertEqual(
+            risk["projection"]["candidate"]["symbol"],
+            "000001",
+        )
+        self.assertFalse(risk["riskFilterPassed"])
+        self.assertFalse(
+            result.evidence_items[0].gates.risk_filter_passed
+        )
+        self.assertIn(
+            "risk_evidence",
+            result.evidence_items[0].invalidation[
+                "missingPrerequisites"
+            ],
+        )
+
+    def test_risk_projection_identity_and_batch_must_match_candidate(self):
+        cases = (
+            (
+                self.risk_candidate_projection(symbol="000002"),
+                "risk_candidate_projection_identity_mismatch",
+            ),
+            (
+                self.risk_candidate_projection(
+                    as_of=AS_OF - timedelta(minutes=1)
+                ),
+                "risk_candidate_projection_as_of_mismatch",
+            ),
+            (
+                self.risk_candidate_projection(
+                    as_of=AS_OF.replace(tzinfo=None)
+                ),
+                "risk_candidate_projection_as_of_mismatch",
+            ),
+        )
+        for projection, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                result = self.build_full_research(
+                    risk_candidate_projections_by_symbol={
+                        "000001": projection,
+                    },
+                )
+
+                risk = result.evidence_items[0].evidence[
+                    "researchFeatures"
+                ]["riskCandidateProjection"]
+
+                self.assertEqual(risk["status"], "source_unverified")
+                self.assertEqual(risk["reasons"], [expected_reason])
+                self.assertIsNone(risk["projection"])
+                self.assertFalse(
+                    result.evidence_items[0].gates.risk_filter_passed
+                )
+
+    def test_risk_projection_contract_and_formal_flags_are_defensive(self):
+        cases = (
+            (
+                self.risk_candidate_projection(
+                    projection_contract_id="forged-contract"
+                ),
+                "risk_candidate_projection_contract_unverified",
+            ),
+            (
+                self.risk_candidate_projection(
+                    audit_contract_id="forged-audit-contract"
+                ),
+                "risk_candidate_projection_contract_unverified",
+            ),
+            (
+                self.risk_candidate_projection(
+                    bundle_contract_id="forged-bundle-contract"
+                ),
+                "risk_candidate_projection_contract_unverified",
+            ),
+            (
+                self.risk_candidate_projection(formal_usable=True),
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+            (
+                self.risk_candidate_projection(
+                    risk_filter_passed=True
+                ),
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+            (
+                self.risk_candidate_projection(
+                    formal_gate_ready=True
+                ),
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+            (
+                self.risk_candidate_projection(applied_to_d3=True),
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+            (
+                self.risk_candidate_projection(applied_to_d1=True),
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+        )
+        for projection, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                result = self.build_full_research(
+                    risk_candidate_projections_by_symbol={
+                        "000001": projection,
+                    },
+                )
+
+                risk = result.evidence_items[0].evidence[
+                    "researchFeatures"
+                ]["riskCandidateProjection"]
+
+                self.assertEqual(risk["status"], "source_unverified")
+                self.assertEqual(risk["reasons"], [expected_reason])
+                self.assertIsNone(risk["projection"])
+                self.assertFalse(risk["riskFilterPassed"])
+                self.assertFalse(risk["formalUsable"])
+                self.assertFalse(
+                    result.evidence_items[0].gates.risk_filter_passed
+                )
+
+    @staticmethod
+    def research_readiness_audit_input(
+        *,
+        symbol="000001",
+        as_of=AS_OF,
+        partial=False,
+    ):
+        from tests.test_radar_leader_research_readiness_audit import (
+            audit_input,
+            cross_sectional_features,
+            risk_item,
+            risk_projection,
+        )
+
+        return audit_input(
+            symbol=symbol,
+            as_of=as_of,
+            cross_sectional_features=(
+                cross_sectional_features(
+                    industry_status=ResearchFeatureStatus.STALE,
+                )
+                if partial
+                else cross_sectional_features()
+            ),
+            risk_projection_item=risk_item(
+                symbol=symbol,
+                projection=risk_projection(
+                    symbol=symbol,
+                    as_of=as_of,
+                ),
+            ),
+        )
+
+    @classmethod
+    def research_readiness_audit(
+        cls,
+        *,
+        symbol="000001",
+        as_of=AS_OF,
+        partial=False,
+    ):
+        from radar.leader_research_readiness_audit import (
+            build_leader_research_readiness_audit,
+        )
+
+        return build_leader_research_readiness_audit(
+            cls.research_readiness_audit_input(
+                symbol=symbol,
+                as_of=as_of,
+                partial=partial,
+            )
+        )
+
+    def test_missing_research_readiness_audit_is_explicit_and_formal_safe(self):
+        result = self.build_full_research()
+
+        for item in result.evidence_items:
+            readiness = item.evidence["researchFeatures"][
+                "researchReadinessAudit"
+            ]
+            self.assertEqual(readiness["status"], "missing")
+            self.assertEqual(
+                readiness["reasons"],
+                ["leader_research_readiness_audit_missing"],
+            )
+            self.assertIsNone(readiness["audit"])
+            self.assertFalse(readiness["scoreReady"])
+            self.assertIsNone(readiness["researchScore"])
+            self.assertFalse(readiness["formalScoreReady"])
+            self.assertFalse(readiness["formalGateReady"])
+            self.assertFalse(readiness["formalUsable"])
+            self.assertFalse(readiness["stateTransitionAllowed"])
+            self.assertFalse(item.gates.industry_gate_passed)
+            self.assertFalse(item.gates.stock_gate_passed)
+
+    def test_ready_and_partial_research_audits_attach_compressed_evidence(self):
+        result = self.build_full_research(
+            research_readiness_audits_by_symbol={
+                "000001": self.research_readiness_audit(),
+                "000002": self.research_readiness_audit(
+                    symbol="000002",
+                    partial=True,
+                ),
+            },
+        )
+
+        ready = result.evidence_items[0].evidence[
+            "researchFeatures"
+        ]["researchReadinessAudit"]
+        partial = result.evidence_items[1].evidence[
+            "researchFeatures"
+        ]["researchReadinessAudit"]
+
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(partial["status"], "partial")
+        self.assertEqual(
+            ready["audit"]["contractId"],
+            "radar-leader-research-readiness-audit-v1",
+        )
+        self.assertEqual(ready["audit"]["auditStatus"], "ready")
+        self.assertEqual(
+            partial["audit"]["completeness"]["missingItems"],
+            ["industry_strength"],
+        )
+        self.assertNotIn("items", ready["audit"])
+        self.assertNotIn("sources", ready["audit"])
+        self.assertFalse(ready["formalScoreReady"])
+        self.assertFalse(ready["formalGateReady"])
+        self.assertFalse(ready["formalUsable"])
+        self.assertFalse(ready["stateTransitionAllowed"])
+        self.assertFalse(result.evidence_items[0].gates.industry_gate_passed)
+
+    def test_f2_read_only_audit_map_is_consumed_by_runtime(self):
+        from radar.leader_research_readiness_audit_batch import (
+            LeaderResearchReadinessAuditBatchEntry,
+            LeaderResearchReadinessAuditBatchInput,
+            LeaderResearchReadinessAuditBatchStatus,
+            build_leader_research_readiness_audit_batch,
+        )
+
+        batch = build_leader_research_readiness_audit_batch(
+            LeaderResearchReadinessAuditBatchInput(
+                as_of=AS_OF,
+                entries=(
+                    LeaderResearchReadinessAuditBatchEntry(
+                        symbol="000001",
+                        audit_input=(
+                            self.research_readiness_audit_input(
+                                symbol="000001",
+                                as_of=AS_OF,
+                            )
+                        ),
+                    ),
+                ),
+            )
+        )
+        with patch(
+            "radar.leader_research_readiness_audit."
+            "build_leader_research_readiness_audit",
+            side_effect=AssertionError("runtime must not rebuild F1"),
+        ), patch(
+            "radar.leader_research_readiness_audit_batch."
+            "build_leader_research_readiness_audit_batch",
+            side_effect=AssertionError("runtime must not rebuild F2"),
+        ):
+            result = self.build_full_research(
+                research_readiness_audits_by_symbol=(
+                    batch.audits_by_symbol
+                ),
+            )
+        readiness = result.evidence_items[0].evidence[
+            "researchFeatures"
+        ]["researchReadinessAudit"]
+
+        self.assertEqual(
+            batch.status,
+            LeaderResearchReadinessAuditBatchStatus.READY,
+        )
+        self.assertEqual(readiness["status"], "ready")
+        self.assertEqual(
+            readiness["audit"]["candidate"]["symbol"],
+            "000001",
+        )
+        self.assertFalse(
+            result.evidence_items[0].gates.industry_gate_passed
+        )
+
+    def test_research_readiness_identity_as_of_and_contract_are_defensive(self):
+        valid = self.research_readiness_audit()
+        blocked = self.research_readiness_audit()
+        blocked = replace(
+            blocked,
+            status=type(blocked.status).BLOCKED,
+            items=(),
+            evidence_available_count=0,
+            satisfied_count=0,
+            missing_items=(),
+            blocked_items=(),
+            first_veto_reason=(
+                "leader_research_audit_contract_unverified"
+            ),
+            first_research_blocker_reason=None,
+            ordered_blocker_codes=(
+                "leader_research_audit_contract_unverified",
+            ),
+        )
+        forged_item = replace(
+            valid.items[0],
+            status=ResearchFeatureStatus.STALE,
+        )
+        cases = (
+            (
+                replace(valid, symbol="000002"),
+                "leader_research_readiness_audit_identity_mismatch",
+            ),
+            (
+                replace(valid, as_of=AS_OF - timedelta(minutes=1)),
+                "leader_research_readiness_audit_as_of_mismatch",
+            ),
+            (
+                replace(valid, as_of=AS_OF.replace(tzinfo=None)),
+                "leader_research_readiness_audit_as_of_mismatch",
+            ),
+            (
+                replace(valid, contract_id="forged-contract"),
+                "leader_research_readiness_audit_contract_unverified",
+            ),
+            (
+                replace(valid, formal_score_ready=0),
+                "leader_research_readiness_audit_formal_flag_invalid",
+            ),
+            (
+                replace(valid, formal_gate_ready=True),
+                "leader_research_readiness_audit_formal_flag_invalid",
+            ),
+            (
+                replace(valid, formal_usable=True),
+                "leader_research_readiness_audit_formal_flag_invalid",
+            ),
+            (
+                replace(valid, state_transition_allowed=True),
+                "leader_research_readiness_audit_formal_flag_invalid",
+            ),
+            (
+                blocked,
+                "leader_research_readiness_audit_not_consumable",
+            ),
+            (
+                replace(
+                    valid,
+                    items=(forged_item, *valid.items[1:]),
+                ),
+                "leader_research_readiness_audit_result_unverified",
+            ),
+            (
+                replace(
+                    valid,
+                    first_veto_reason="secret upstream detail",
+                    ordered_blocker_codes=(
+                        "secret upstream detail",
+                    ),
+                ),
+                "leader_research_readiness_audit_result_unverified",
+            ),
+        )
+        for audit, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                result = self.build_full_research(
+                    research_readiness_audits_by_symbol={
+                        "000001": audit,
+                    },
+                )
+                readiness = result.evidence_items[0].evidence[
+                    "researchFeatures"
+                ]["researchReadinessAudit"]
+
+                self.assertEqual(
+                    readiness["status"],
+                    "source_unverified",
+                )
+                self.assertEqual(
+                    readiness["reasons"],
+                    [expected_reason],
+                )
+                self.assertIsNone(readiness["audit"])
+                self.assertFalse(readiness["formalScoreReady"])
+                self.assertFalse(readiness["formalGateReady"])
+                self.assertFalse(readiness["formalUsable"])
+                self.assertFalse(readiness["stateTransitionAllowed"])
+                self.assertNotIn(
+                    "secret upstream detail",
+                    str(readiness),
+                )
+
+        equivalent_timezone = replace(
+            valid,
+            as_of=AS_OF.astimezone(
+                timezone(timedelta(hours=8))
+            ),
+        )
+        equivalent_result = self.build_full_research(
+            research_readiness_audits_by_symbol={
+                "000001": equivalent_timezone,
+            },
+        )
+        self.assertEqual(
+            equivalent_result.evidence_items[0].evidence[
+                "researchFeatures"
+            ]["researchReadinessAudit"]["status"],
+            "ready",
+        )
+
+    def test_invalid_research_audit_mapping_degrades_without_crashing(self):
+        result = self.build_full_research(
+            research_readiness_audits_by_symbol=[
+                self.research_readiness_audit()
+            ],
+        )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(len(result.evidence_items), 5)
+        for item in result.evidence_items:
+            readiness = item.evidence["researchFeatures"][
+                "researchReadinessAudit"
+            ]
+            self.assertEqual(
+                readiness["status"],
+                "source_unverified",
+            )
+            self.assertEqual(
+                readiness["reasons"],
+                [
+                    "leader_research_readiness_"
+                    "audit_mapping_unverified"
+                ],
+            )
+            self.assertIsNone(readiness["audit"])
+            self.assertFalse(item.gates.industry_gate_passed)
+
+    def test_invalid_research_audit_is_isolated_to_matching_candidate(self):
+        result = self.build_full_research(
+            research_readiness_audits_by_symbol={
+                "000001": replace(
+                    self.research_readiness_audit(),
+                    formal_gate_ready=True,
+                ),
+                "000002": self.research_readiness_audit(
+                    symbol="000002",
+                ),
+            },
+        )
+
+        first = result.evidence_items[0].evidence[
+            "researchFeatures"
+        ]["researchReadinessAudit"]
+        second = result.evidence_items[1].evidence[
+            "researchFeatures"
+        ]["researchReadinessAudit"]
+        self.assertEqual(first["status"], "source_unverified")
+        self.assertEqual(
+            first["reasons"],
+            ["leader_research_readiness_audit_formal_flag_invalid"],
+        )
+        self.assertEqual(second["status"], "ready")
+        self.assertFalse(
+            result.evidence_items[0].gates.industry_gate_passed
+        )
+        self.assertFalse(
+            result.evidence_items[1].gates.industry_gate_passed
+        )
+        self.assertIn(
+            "formal_sector_state",
+            result.evidence_items[1].invalidation[
+                "missingPrerequisites"
+            ],
+        )
 
     def test_bse_quote_is_excluded_from_research_populations(self):
         result = self.build_full_research(include_bse=True)

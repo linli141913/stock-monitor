@@ -31,17 +31,25 @@ from radar.leader_risk_invalidation_features import RiskCategory
 CNINFO_QUERY_URL = (
     "https://www.cninfo.com.cn/new/hisAnnouncement/query"
 )
+CNINFO_ISSUER_SEARCH_URL = (
+    "https://www.cninfo.com.cn/new/information/topSearch/query"
+)
 CNINFO_STATIC_BASE_URL = "https://static.cninfo.com.cn/"
 CNINFO_SOURCE_CONTRACT_ID = (
     "radar-leader-risk-cninfo-discovery-v1"
 )
+CNINFO_ISSUER_SCOPE_CONTRACT_ID = (
+    "radar-leader-risk-cninfo-issuer-scope-v1"
+)
 REQUEST_TIMEOUT_SECONDS = 20.0
+MAXIMUM_CANDIDATE_SCOPE_COUNT = 30
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 UTC = timezone.utc
 SAFE_SOURCE_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9._:-]{1,160}$"
 )
 SECURITY_CODE_PATTERN = re.compile(r"^[0-9]{6}$")
+STAGE6_SECURITY_CODE_PATTERN = re.compile(r"^[036][0-9]{5}$")
 TITLE_TAG_PATTERN = re.compile(r"<[^>]*>")
 
 
@@ -49,6 +57,20 @@ class OfficialRiskSourceStatus(str, Enum):
     PARTIAL = "partial"
     SOURCE_UNVERIFIED = "source_unverified"
     SOURCE_FAILED = "source_failed"
+
+
+class CninfoIssuerResolutionStatus(str, Enum):
+    READY = "ready"
+    SOURCE_UNVERIFIED = "source_unverified"
+    SOURCE_FAILED = "source_failed"
+
+
+@dataclass(frozen=True)
+class CninfoRiskIssuerScope:
+    symbol: str
+    issuer_identity: str
+    resolved_at: datetime
+    source_contract_id: str = CNINFO_ISSUER_SCOPE_CONTRACT_ID
 
 
 @dataclass(frozen=True)
@@ -59,6 +81,25 @@ class CninfoRiskDiscoveryQuery:
     window_until: date
     page_number: int = 1
     page_size: int = 30
+    candidate_scopes: Tuple[CninfoRiskIssuerScope, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
+    candidate_plan_id: Optional[str] = None
+    shard_index: Optional[int] = None
+    shard_count: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CninfoIssuerResolutionResult:
+    status: CninfoIssuerResolutionStatus
+    symbol: str
+    fetched_at: Optional[datetime]
+    scope: Optional[CninfoRiskIssuerScope] = field(
+        default=None,
+        repr=False,
+    )
+    reasons: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,6 +128,7 @@ class OfficialRiskDiscoveryBatch:
     fetched_at: Optional[datetime]
     total_records: Optional[int] = None
     total_pages: Optional[int] = None
+    reported_total_pages: Optional[int] = None
     has_more: Optional[bool] = None
     documents: Tuple[OfficialRiskDocumentMetadata, ...] = ()
     coverage_complete: bool = False
@@ -224,7 +266,126 @@ def _query_reasons(
         or not 1 <= query.page_size <= 30
     ):
         reasons.append("cninfo_query_page_size_invalid")
+    scopes = query.candidate_scopes
+    if (
+        not isinstance(scopes, tuple)
+        or len(scopes) > MAXIMUM_CANDIDATE_SCOPE_COUNT
+        or any(
+            not isinstance(scope, CninfoRiskIssuerScope)
+            or scope.source_contract_id
+            != CNINFO_ISSUER_SCOPE_CONTRACT_ID
+            or not isinstance(scope.symbol, str)
+            or STAGE6_SECURITY_CODE_PATTERN.fullmatch(scope.symbol) is None
+            or not isinstance(scope.issuer_identity, str)
+            or not scope.issuer_identity.startswith("cninfo-org:")
+            or not _safe_source_id(
+                scope.issuer_identity.removeprefix("cninfo-org:")
+            )
+            or _aware_utc(scope.resolved_at) is None
+            for scope in scopes
+        )
+        or len({scope.symbol for scope in scopes}) != len(scopes)
+        or len({scope.issuer_identity for scope in scopes}) != len(scopes)
+    ):
+        reasons.append("cninfo_query_candidate_scope_unverified")
+    shard_metadata = (
+        query.candidate_plan_id,
+        query.shard_index,
+        query.shard_count,
+    )
+    if any(value is not None for value in shard_metadata) and (
+        not _safe_source_id(query.candidate_plan_id)
+        or not isinstance(query.shard_index, int)
+        or isinstance(query.shard_index, bool)
+        or query.shard_index < 0
+        or not isinstance(query.shard_count, int)
+        or isinstance(query.shard_count, bool)
+        or query.shard_count < 1
+        or query.shard_index >= query.shard_count
+        or not scopes
+    ):
+        reasons.append("cninfo_query_candidate_shard_unverified")
     return _dedupe(reasons)
+
+
+def _issuer_result(
+    *,
+    status: CninfoIssuerResolutionStatus,
+    symbol: Any,
+    fetched_at: Optional[datetime],
+    reasons: Sequence[str],
+    scope: Optional[CninfoRiskIssuerScope] = None,
+) -> CninfoIssuerResolutionResult:
+    return CninfoIssuerResolutionResult(
+        status=status,
+        symbol=(symbol if isinstance(symbol, str) else ""),
+        fetched_at=fetched_at,
+        scope=scope,
+        reasons=_dedupe(reasons),
+    )
+
+
+def parse_cninfo_issuer_search_payload(
+    symbol: Any,
+    payload: Any,
+    *,
+    fetched_at: datetime,
+) -> CninfoIssuerResolutionResult:
+    fetched_at_utc = _aware_utc(fetched_at)
+    if (
+        not isinstance(symbol, str)
+        or STAGE6_SECURITY_CODE_PATTERN.fullmatch(symbol) is None
+        or fetched_at_utc is None
+    ):
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_query_contract_unverified",),
+        )
+    rows = (
+        payload
+        if isinstance(payload, list)
+        else payload.get("data")
+        if isinstance(payload, Mapping)
+        else None
+    )
+    if not isinstance(rows, list):
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_response_contract_unverified",),
+        )
+    identities = {
+        row.get("orgId") or row.get("orgid")
+        for row in rows
+        if (
+            isinstance(row, Mapping)
+            and str(row.get("code", "")) == symbol
+            and _safe_source_id(row.get("orgId") or row.get("orgid"))
+        )
+    }
+    if len(identities) != 1:
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_identity_unverified",),
+        )
+    identity = next(iter(identities))
+    assert isinstance(identity, str)
+    return _issuer_result(
+        status=CninfoIssuerResolutionStatus.READY,
+        symbol=symbol,
+        fetched_at=fetched_at_utc,
+        reasons=(),
+        scope=CninfoRiskIssuerScope(
+            symbol=symbol,
+            issuer_identity=f"cninfo-org:{identity.strip()}",
+            resolved_at=fetched_at_utc,
+        ),
+    )
 
 
 def _result(
@@ -235,6 +396,7 @@ def _result(
     *,
     total_records: Optional[int] = None,
     total_pages: Optional[int] = None,
+    reported_total_pages: Optional[int] = None,
     has_more: Optional[bool] = None,
     documents: Sequence[OfficialRiskDocumentMetadata] = (),
 ) -> OfficialRiskDiscoveryBatch:
@@ -244,6 +406,7 @@ def _result(
         fetched_at=fetched_at,
         total_records=total_records,
         total_pages=total_pages,
+        reported_total_pages=reported_total_pages,
         has_more=has_more,
         documents=tuple(documents),
         reasons=_dedupe(reasons),
@@ -271,6 +434,14 @@ def _parse_document(
         or not _safe_source_id(announcement_id)
     ):
         reasons.append("cninfo_document_identity_unverified")
+    elif query.candidate_scopes and (
+        symbol.strip(),
+        f"cninfo-org:{org_id.strip()}",
+    ) not in {
+        (scope.symbol, scope.issuer_identity)
+        for scope in query.candidate_scopes
+    }:
+        reasons.append("cninfo_document_outside_candidate_scope")
 
     title = _clean_title(row.get("announcementTitle"))
     if title is None:
@@ -400,16 +571,23 @@ def parse_cninfo_risk_discovery_payload(
         )
 
     total_records = payload.get("totalRecordNum")
-    total_pages = payload.get("totalpages")
+    reported_total_pages = payload.get("totalpages")
     has_more = payload.get("hasMore")
     rows = payload.get("announcements")
+    if (
+        total_records == 0
+        and reported_total_pages == 0
+        and has_more is False
+        and rows is None
+    ):
+        rows = []
     if (
         not isinstance(total_records, int)
         or isinstance(total_records, bool)
         or total_records < 0
-        or not isinstance(total_pages, int)
-        or isinstance(total_pages, bool)
-        or total_pages < 0
+        or not isinstance(reported_total_pages, int)
+        or isinstance(reported_total_pages, bool)
+        or reported_total_pages < 0
         or not isinstance(rows, list)
     ):
         return _result(
@@ -425,13 +603,26 @@ def parse_cninfo_risk_discovery_payload(
             fetched_at_utc,
             ("cninfo_response_pagination_unverified",),
             total_records=total_records,
-            total_pages=total_pages,
+            total_pages=reported_total_pages,
+            reported_total_pages=reported_total_pages,
         )
 
     expected_pages = (
         (total_records + query.page_size - 1) // query.page_size
         if total_records
         else 0
+    )
+    vendor_floor_pages = (
+        total_records // query.page_size if total_records else 0
+    )
+    total_pages_recognized = reported_total_pages in {
+        expected_pages,
+        vendor_floor_pages,
+    }
+    total_pages = (
+        expected_pages
+        if total_pages_recognized
+        else reported_total_pages
     )
     expected_has_more = (
         query.page_number * query.page_size < total_records
@@ -452,7 +643,7 @@ def parse_cninfo_risk_discovery_payload(
         len(rows) != expected_page_records
     )
     pagination_inconsistent = (
-        total_pages != expected_pages
+        not total_pages_recognized
         or has_more != expected_has_more
     )
     pagination_invalid = (
@@ -472,6 +663,7 @@ def parse_cninfo_risk_discovery_payload(
             ("cninfo_response_pagination_unverified",),
             total_records=total_records,
             total_pages=total_pages,
+            reported_total_pages=reported_total_pages,
             has_more=has_more,
         )
     if page_out_of_range:
@@ -482,6 +674,7 @@ def parse_cninfo_risk_discovery_payload(
             ("cninfo_response_page_out_of_range",),
             total_records=total_records,
             total_pages=total_pages,
+            reported_total_pages=reported_total_pages,
             has_more=has_more,
         )
     if expected_page_records > 0 and not rows:
@@ -492,6 +685,7 @@ def parse_cninfo_risk_discovery_payload(
             ("cninfo_response_page_records_unverified",),
             total_records=total_records,
             total_pages=total_pages,
+            reported_total_pages=reported_total_pages,
             has_more=has_more,
         )
 
@@ -537,6 +731,13 @@ def parse_cninfo_risk_discovery_payload(
         base_reasons.append(
             "cninfo_association_semantics_unverified"
         )
+    if (
+        total_pages_recognized
+        and reported_total_pages != expected_pages
+    ):
+        base_reasons.append(
+            "cninfo_response_total_pages_normalized"
+        )
     if pagination_inconsistent:
         base_reasons.append(
             "cninfo_response_pagination_inconsistent"
@@ -557,6 +758,7 @@ def parse_cninfo_risk_discovery_payload(
         (*base_reasons, *reasons),
         total_records=total_records,
         total_pages=total_pages,
+        reported_total_pages=reported_total_pages,
         has_more=has_more,
         documents=documents,
     )
@@ -582,6 +784,78 @@ def _default_transport(
     if not isinstance(payload, Mapping):
         raise ValueError("巨潮响应不是对象")
     return payload
+
+
+def _default_issuer_transport(
+    url: str,
+    *,
+    data: Mapping[str, str],
+    headers: Mapping[str, str],
+    timeout: float,
+) -> Any:
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(
+            url,
+            data=data,
+            headers=headers,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def fetch_cninfo_issuer_scope(
+    symbol: Any,
+    *,
+    fetched_at: Optional[datetime] = None,
+    transport: Optional[Callable[..., Any]] = None,
+) -> CninfoIssuerResolutionResult:
+    """只读解析证券代码对应的巨潮发行人身份。"""
+
+    actual_fetched_at = fetched_at or datetime.now(UTC)
+    fetched_at_utc = _aware_utc(actual_fetched_at)
+    if (
+        not isinstance(symbol, str)
+        or STAGE6_SECURITY_CODE_PATTERN.fullmatch(symbol) is None
+        or fetched_at_utc is None
+    ):
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_query_contract_unverified",),
+        )
+    request = transport or _default_issuer_transport
+    try:
+        payload = request(
+            CNINFO_ISSUER_SEARCH_URL,
+            data={"keyWord": symbol, "maxNum": "10"},
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://www.cninfo.com.cn/",
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_FAILED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_source_request_failed",),
+        )
+    except (TypeError, ValueError):
+        return _issuer_result(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            symbol=symbol,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_response_contract_unverified",),
+        )
+    return parse_cninfo_issuer_search_payload(
+        symbol,
+        payload,
+        fetched_at=actual_fetched_at,
+    )
 
 
 def fetch_cninfo_risk_discovery(
@@ -610,12 +884,27 @@ def fetch_cninfo_risk_discovery(
             ),
         )
 
+    if any(
+        _aware_utc(scope.resolved_at) > fetched_at_utc
+        for scope in query.candidate_scopes
+    ):
+        return _result(
+            query,
+            OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+            fetched_at_utc,
+            ("cninfo_query_candidate_scope_time_unverified",),
+        )
+
     data = {
         "pageNum": str(query.page_number),
         "pageSize": str(query.page_size),
         "tabName": "fulltext",
         "column": "szse",
-        "stock": "",
+        "stock": ";".join(
+            f"{scope.symbol},"
+            f"{scope.issuer_identity.removeprefix('cninfo-org:')}"
+            for scope in query.candidate_scopes
+        ),
         "searchkey": query.search_key.strip(),
         "secid": "",
         "category": "",

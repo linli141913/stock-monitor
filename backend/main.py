@@ -94,6 +94,10 @@ _EXTENDED_RISK_CACHE: Dict[str, Dict[str, Any]] = {}
 _EXTENDED_RISK_CACHE_LOCK = threading.Lock()
 _VERIFIED_MARKET_HISTORY_CACHE: Dict[str, Dict[str, Any]] = {}
 _VERIFIED_MARKET_HISTORY_CACHE_LOCK = threading.Lock()
+_VERIFIED_MARKET_HISTORY_INFLIGHT: Dict[tuple[str, str], threading.Event] = {}
+_VERIFIED_MARKET_HISTORY_SUCCESS_TTL_SECONDS = 180
+_VERIFIED_MARKET_HISTORY_FAILURE_TTL_SECONDS = 900
+_VERIFIED_MARKET_HISTORY_WAIT_SECONDS = 30
 
 
 def build_ai_analysis_round_id(slot: str, now: Optional[datetime] = None) -> str:
@@ -860,23 +864,62 @@ def get_cached_verified_market_history(
     import time
 
     now_monotonic = time.monotonic()
+    inflight_key = (symbol, expected_trade_date)
     with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
         cached = _VERIFIED_MARKET_HISTORY_CACHE.get(symbol)
         if (
             cached
             and cached.get("expected_trade_date") == expected_trade_date
-            and now_monotonic - float(cached.get("cached_at") or 0) < 180
+            and now_monotonic - float(cached.get("cached_at") or 0)
+            < float(
+                cached.get("ttl_seconds")
+                or _VERIFIED_MARKET_HISTORY_SUCCESS_TTL_SECONDS
+            )
         ):
             return [dict(item) for item in cached.get("data") or []]
 
-    rows = get_verified_market_history(symbol, expected_trade_date)
-    with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
-        _VERIFIED_MARKET_HISTORY_CACHE[symbol] = {
-            "expected_trade_date": expected_trade_date,
-            "cached_at": now_monotonic,
-            "data": [dict(item) for item in rows],
-        }
-    return rows
+        refresh_event = _VERIFIED_MARKET_HISTORY_INFLIGHT.get(inflight_key)
+        if refresh_event is None:
+            refresh_event = threading.Event()
+            _VERIFIED_MARKET_HISTORY_INFLIGHT[inflight_key] = refresh_event
+            owns_refresh = True
+        else:
+            owns_refresh = False
+
+    if not owns_refresh:
+        if not refresh_event.wait(_VERIFIED_MARKET_HISTORY_WAIT_SECONDS):
+            return []
+        with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            cached = _VERIFIED_MARKET_HISTORY_CACHE.get(symbol)
+            if cached and cached.get("expected_trade_date") == expected_trade_date:
+                return [dict(item) for item in cached.get("data") or []]
+        return []
+
+    try:
+        rows = get_verified_market_history(symbol, expected_trade_date)
+        has_fund_history = any(
+            item.get("fund_flow") is not None
+            for item in rows
+        )
+        cache_ttl = (
+            _VERIFIED_MARKET_HISTORY_SUCCESS_TTL_SECONDS
+            if has_fund_history
+            else _VERIFIED_MARKET_HISTORY_FAILURE_TTL_SECONDS
+        )
+        with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            _VERIFIED_MARKET_HISTORY_CACHE[symbol] = {
+                "expected_trade_date": expected_trade_date,
+                "cached_at": now_monotonic,
+                "ttl_seconds": cache_ttl,
+                "data": [dict(item) for item in rows],
+            }
+        return rows
+    finally:
+        with _VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            active_event = _VERIFIED_MARKET_HISTORY_INFLIGHT.get(inflight_key)
+            if active_event is refresh_event:
+                _VERIFIED_MARKET_HISTORY_INFLIGHT.pop(inflight_key, None)
+                refresh_event.set()
 
 
 def get_constituent_quote_snapshot(symbols: list[str]) -> list[dict]:

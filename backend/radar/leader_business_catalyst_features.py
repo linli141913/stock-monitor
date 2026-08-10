@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
@@ -19,6 +20,9 @@ LEADER_BUSINESS_CATALYST_FEATURE_VERSION = (
     "radar-leader-business-catalyst-feature-v1"
 )
 UTC = timezone.utc
+STAGE6_SHENZHEN_SHANGHAI_SYMBOL_PATTERN = re.compile(
+    r"[036][0-9]{5}"
+)
 
 
 class BusinessCatalystRelation(str, Enum):
@@ -45,6 +49,17 @@ class BusinessEvidenceSourceKind(str, Enum):
     )
 
 
+TRUSTED_SOURCE_DOMAINS = {
+    BusinessEvidenceSourceKind.EXCHANGE_DISCLOSURE: (
+        "sse.com.cn",
+        "szse.cn",
+    ),
+    BusinessEvidenceSourceKind.DESIGNATED_DISCLOSURE_PLATFORM: (
+        "cninfo.com.cn",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class LeaderCatalystReference:
     catalyst_id: str
@@ -58,6 +73,8 @@ class LeaderCatalystReference:
     effective_from: datetime
     effective_until: Optional[datetime]
     summary: str
+    source_contract_id: Optional[str] = None
+    document_version: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,7 @@ class LeaderBusinessProof:
     effective_until: Optional[datetime]
     related_catalyst_ids: Tuple[str, ...]
     fact_summary: str
+    source_contract_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -122,8 +140,53 @@ def _required_text(value: Any) -> bool:
 
 
 def _https_url(value: str) -> bool:
-    parts = urlsplit(str(value or "").strip())
-    return parts.scheme == "https" and bool(parts.netloc)
+    try:
+        parts = urlsplit(str(value or "").strip())
+        port = parts.port
+    except (TypeError, ValueError):
+        return False
+    return all((
+        parts.scheme == "https",
+        bool(parts.hostname),
+        parts.username is None,
+        parts.password is None,
+        not parts.query,
+        not parts.fragment,
+        port is None or 0 < port < 65536,
+    ))
+
+
+def _normalized_domain(value: Any) -> Optional[str]:
+    domain = str(value or "").strip().lower().rstrip(".")
+    if (
+        not domain
+        or "/" in domain
+        or ":" in domain
+        or domain.startswith(".")
+        or ".." in domain
+    ):
+        return None
+    return domain
+
+
+def _source_url_domain_verified(
+    source_kind: BusinessEvidenceSourceKind,
+    source_url: str,
+) -> bool:
+    hostname = _normalized_domain(urlsplit(source_url).hostname)
+    if hostname is None:
+        return False
+    if source_kind == BusinessEvidenceSourceKind.COMPANY_DISCLOSURE:
+        return False
+    allowed_domains = TRUSTED_SOURCE_DOMAINS.get(
+        source_kind,
+        (),
+    )
+    return any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in allowed_domains
+        if domain is not None
+    )
 
 
 def _has_duplicates(values: Sequence[str]) -> bool:
@@ -141,8 +204,10 @@ def _compressed_references(
         "industryReleaseId": catalyst.industry_release_id,
         "sourceKind": catalyst.source_kind.value,
         "sourceName": catalyst.source_name,
+        "sourceContractId": catalyst.source_contract_id,
         "sourceUrl": catalyst.source_url,
         "documentId": catalyst.document_id,
+        "documentVersion": catalyst.document_version,
         "publishedAt": catalyst.published_at.isoformat(),
         "effectiveFrom": catalyst.effective_from.isoformat(),
         "effectiveUntil": _iso_optional(catalyst.effective_until),
@@ -154,6 +219,7 @@ def _compressed_references(
         "proofType": proof.proof_type.value,
         "sourceKind": proof.source_kind.value,
         "sourceName": proof.source_name,
+        "sourceContractId": proof.source_contract_id,
         "sourceUrl": proof.source_url,
         "documentId": proof.document_id,
         "publishedAt": proof.published_at.isoformat(),
@@ -262,6 +328,13 @@ def build_leader_business_catalyst_features(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
             ("business_identity_missing",),
         )
+    if STAGE6_SHENZHEN_SHANGHAI_SYMBOL_PATTERN.fullmatch(
+        input_value.symbol
+    ) is None:
+        return _invalid_result(
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            ("business_symbol_out_of_scope",),
+        )
     if (
         catalyst.industry_code != input_value.industry_code
         or catalyst.industry_release_id
@@ -281,6 +354,14 @@ def build_leader_business_catalyst_features(
         _required_text(catalyst.source_url),
         _required_text(catalyst.document_id),
         _required_text(catalyst.summary),
+        (
+            catalyst.source_contract_id is None
+            or _required_text(catalyst.source_contract_id)
+        ),
+        (
+            catalyst.document_version is None
+            or _required_text(catalyst.document_version)
+        ),
     )):
         return _invalid_result(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -300,6 +381,10 @@ def build_leader_business_catalyst_features(
             _required_text(proof.source_url),
             _required_text(proof.document_id),
             _required_text(proof.fact_summary),
+            (
+                proof.source_contract_id is None
+                or _required_text(proof.source_contract_id)
+            ),
         )):
             return _invalid_result(
                 ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -372,6 +457,23 @@ def build_leader_business_catalyst_features(
         return _invalid_result(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
             ("business_source_url_unverified",),
+        )
+    if (
+        not _source_url_domain_verified(
+            catalyst.source_kind,
+            catalyst.source_url,
+        )
+        or any(
+            not _source_url_domain_verified(
+                proof.source_kind,
+                proof.source_url,
+            )
+            for proof in proofs
+        )
+    ):
+        return _invalid_result(
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            ("business_source_domain_unverified",),
         )
 
     catalyst_published_at = _aware_utc(catalyst.published_at)

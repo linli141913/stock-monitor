@@ -1,5 +1,7 @@
 import importlib
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -511,6 +513,128 @@ class LinkageRiskTests(unittest.TestCase):
         self.assertEqual(session.get.call_count, 2)
         self.assertEqual(rows[0]["trade_date"], "2026-07-15")
         self.assertEqual(rows[0]["fund_flow"], -123.0)
+
+    def test_verified_history_cache_coalesces_concurrent_refreshes(self):
+        with main._VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            main._VERIFIED_MARKET_HISTORY_CACHE.clear()
+            inflight = getattr(
+                main,
+                "_VERIFIED_MARKET_HISTORY_INFLIGHT",
+                None,
+            )
+            if inflight is not None:
+                inflight.clear()
+        self.addCleanup(main._VERIFIED_MARKET_HISTORY_CACHE.clear)
+        fetch_started = threading.Event()
+        release_fetch = threading.Event()
+        rows = [{
+            "trade_date": "2026-07-15",
+            "fund_flow": -123.0,
+            "fund_close": 9.7,
+            "close": 9.7,
+        }]
+
+        def blocked_fetch(symbol, expected_trade_date):
+            fetch_started.set()
+            release_fetch.wait(timeout=2)
+            return rows
+
+        results = []
+        with patch.object(
+            main,
+            "get_verified_market_history",
+            side_effect=blocked_fetch,
+        ) as fetch:
+            first = threading.Thread(
+                target=lambda: results.append(
+                    main.get_cached_verified_market_history(
+                        "000725",
+                        "2026-07-15",
+                    )
+                )
+            )
+            second = threading.Thread(
+                target=lambda: results.append(
+                    main.get_cached_verified_market_history(
+                        "000725",
+                        "2026-07-15",
+                    )
+                )
+            )
+            first.start()
+            self.assertTrue(fetch_started.wait(timeout=1))
+            second.start()
+            time.sleep(0.05)
+            release_fetch.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(results, [rows, rows])
+
+    def test_failed_fund_history_uses_longer_cache_ttl(self):
+        with main._VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            main._VERIFIED_MARKET_HISTORY_CACHE.clear()
+        self.addCleanup(main._VERIFIED_MARKET_HISTORY_CACHE.clear)
+        incomplete_rows = [{
+            "trade_date": "2026-07-15",
+            "fund_flow": None,
+            "fund_close": None,
+            "close": 9.7,
+        }]
+
+        with patch.object(
+            main,
+            "get_verified_market_history",
+            return_value=incomplete_rows,
+        ) as fetch, patch(
+            "time.monotonic",
+            side_effect=(100.0, 400.0),
+        ):
+            first = main.get_cached_verified_market_history(
+                "000725",
+                "2026-07-15",
+            )
+            second = main.get_cached_verified_market_history(
+                "000725",
+                "2026-07-15",
+            )
+
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(first, incomplete_rows)
+        self.assertEqual(second, incomplete_rows)
+
+    def test_zero_fund_flow_keeps_success_cache_ttl(self):
+        with main._VERIFIED_MARKET_HISTORY_CACHE_LOCK:
+            main._VERIFIED_MARKET_HISTORY_CACHE.clear()
+        self.addCleanup(main._VERIFIED_MARKET_HISTORY_CACHE.clear)
+        zero_flow_rows = [{
+            "trade_date": "2026-07-15",
+            "fund_flow": 0.0,
+            "fund_close": 9.7,
+            "close": 9.7,
+        }]
+
+        with patch.object(
+            main,
+            "get_verified_market_history",
+            return_value=zero_flow_rows,
+        ) as fetch, patch(
+            "time.monotonic",
+            side_effect=(100.0, 400.0),
+        ):
+            main.get_cached_verified_market_history(
+                "000725",
+                "2026-07-15",
+            )
+            main.get_cached_verified_market_history(
+                "000725",
+                "2026-07-15",
+            )
+
+        self.assertEqual(fetch.call_count, 2)
 
     def test_verified_history_keeps_kline_when_fund_fetch_fails(self):
         kline_payload = {

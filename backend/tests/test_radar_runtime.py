@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import market_calendar
 import monitoring_health
@@ -28,6 +28,10 @@ from radar.migrations import (
     apply_pending_migrations,
 )
 from radar.repository import RadarRepository
+from radar.leader_research_runtime_provider import (
+    LeaderResearchRuntimeSourceContext,
+    build_verified_leader_research_provider_input,
+)
 from radar.runtime import (
     RADAR_ETF_QUOTES_JOB_ID,
     RADAR_ETF_PRODUCT_MASTER_JOB_ID,
@@ -322,6 +326,7 @@ class RadarRuntimeTests(unittest.TestCase):
         provider=None,
         connection_factory=None,
         settings=None,
+        leader_research_input_provider=None,
     ):
         kwargs = {}
         if connection_factory is not None:
@@ -338,6 +343,9 @@ class RadarRuntimeTests(unittest.TestCase):
             market_quote_fetcher=self.market_quote_fetcher,
             clock=lambda: now,
             market_status_provider=provider or market_provider(),
+            leader_research_input_provider=(
+                leader_research_input_provider
+            ),
             **kwargs,
         )
 
@@ -593,7 +601,97 @@ class RadarRuntimeTests(unittest.TestCase):
                 4,
             )
 
-    def test_stage6_reuses_market_quote_batch_and_writes_shadow_snapshot(self):
+    def test_stage6_default_missing_stops_before_stage6_storage(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        runtime = self.runtime(settings=self.leader_stage6_settings())
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        with patch(
+            "radar.leader_research_single_pass_orchestration."
+            "build_leader_runtime_evidence",
+            side_effect=AssertionError("missing input built assembly"),
+        ) as assembly_builder, patch(
+            "radar.leader_research_single_pass_orchestration."
+            "build_leader_research_readiness_runtime_batch",
+            side_effect=AssertionError("missing input entered F4"),
+        ) as readiness_builder:
+            market_result = runtime.execute_market(
+                "market-run",
+                TRADE_AS_OF,
+            )
+
+        self.assertEqual(market_result.status, "degraded")
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        self.assertIsInstance(market_result.leader_stage6_status, str)
+        self.assertIn(
+            "leader_research_single_pass_provider_missing",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertEqual(self.market_quote_fetcher.call_count, 1)
+        assembly_builder.assert_not_called()
+        readiness_builder.assert_not_called()
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM sqlite_master "
+                    "WHERE type = 'table' AND name LIKE "
+                    "'radar_leader_candidate_%'"
+                ).fetchone()[0],
+                0,
+            )
+        leader_health = monitoring_health.get_task_states()[
+            "radarLeaderStage6"
+        ]
+        self.assertEqual(leader_health["status"], "degraded")
+        self.assertEqual(leader_health["itemCount"], 0)
+        self.assertIn(
+            "leader_research_single_pass_provider_missing",
+            leader_health["lastDegradationReasons"],
+        )
+
+    def test_stage6_provider_failure_does_not_change_market_task_result(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        failing_provider = Mock(side_effect=RuntimeError("provider failed"))
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_research_input_provider=failing_provider,
+        )
+        runtime.build_sector_job()()
+
+        with self.assertLogs(
+            "radar.market_shadow_runner",
+            level="ERROR",
+        ):
+            outcome = runtime.build_market_job()()
+
+        self.assertEqual(outcome.state, ScheduledRunState.COMPLETED)
+        self.assertTrue(outcome.gate_passed)
+        failing_provider.assert_called_once()
+        self.assertEqual(
+            monitoring_health.get_task_states()[
+                "radarMarketFeatures"
+            ]["status"],
+            "healthy",
+        )
+        self.assertEqual(
+            monitoring_health.get_task_states()[
+                "radarLeaderStage6"
+            ]["status"],
+            "failed",
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM market_environment_snapshots"
+                ).fetchone()[0],
+                1,
+            )
+
+    def test_stage6_verified_provider_writes_analysis_only_snapshot(self):
+        from tests import test_radar_leader_runtime_inputs as leader_helpers
+
         with sqlite3.connect(self.database_path) as connection:
             apply_pending_migrations(
                 connection,
@@ -601,14 +699,56 @@ class RadarRuntimeTests(unittest.TestCase):
             )
         self.seed_universes()
         self.seed_industry_classification()
-        runtime = self.runtime(settings=self.leader_stage6_settings())
+        leader_inputs = leader_helpers.LeaderRuntimeInputsTests(
+            methodName=(
+                "test_future_market_snapshot_is_rejected_before_"
+                "candidate_build"
+            )
+        )
+        def verified_provider(context):
+            self.assertIsInstance(
+                context,
+                LeaderResearchRuntimeSourceContext,
+            )
+            plan = context.candidate_plan
+            return build_verified_leader_research_provider_input(
+                context,
+                provider_contract_id="fixture-research-provider-v1",
+                history_inputs_by_symbol={
+                    item.symbol: leader_inputs.history_input(item.symbol)
+                    for item in plan.items
+                },
+            )
 
-        sector_outcome = runtime.build_sector_job()()
-        market_outcome = runtime.build_market_job()()
+        provider = Mock(side_effect=verified_provider)
+        runtime = self.runtime(
+            now=leader_helpers.AS_OF,
+            settings=self.leader_stage6_settings(),
+            leader_research_input_provider=provider,
+        )
 
-        self.assertEqual(sector_outcome.state, ScheduledRunState.COMPLETED)
-        self.assertEqual(market_outcome.state, ScheduledRunState.COMPLETED)
+        runtime.execute_sector("sector-run", leader_helpers.AS_OF)
+        market_result = runtime.execute_market(
+            "market-run",
+            leader_helpers.AS_OF,
+        )
+
+        provider.assert_called_once()
+        provider_context = provider.call_args.args[0]
+        self.assertEqual(
+            provider_context.quote_batch_id,
+            provider_context.candidate_plan.quote_batch_id,
+        )
+        self.assertEqual(
+            tuple(provider_context.quotes_by_symbol),
+            tuple(
+                item.symbol
+                for item in provider_context.candidate_plan.items
+            ),
+        )
         self.assertEqual(self.market_quote_fetcher.call_count, 1)
+        self.assertEqual(market_result.leader_stage6_status, "partial")
+        self.assertIsInstance(market_result.leader_stage6_status, str)
         with sqlite3.connect(self.database_path) as connection:
             self.assertEqual(
                 connection.execute(
@@ -634,40 +774,25 @@ class RadarRuntimeTests(unittest.TestCase):
         leader_health = monitoring_health.get_task_states()[
             "radarLeaderStage6"
         ]
-        self.assertEqual(leader_health["status"], "healthy")
+        self.assertEqual(leader_health["status"], "degraded")
         self.assertEqual(leader_health["itemCount"], 1)
 
-    def test_stage6_storage_failure_does_not_change_market_task_result(self):
+    def test_stage6_disabled_never_calls_research_provider(self):
         self.seed_universes()
-        runtime = self.runtime(settings=self.leader_stage6_settings())
+        provider = Mock(side_effect=AssertionError("stage6 is disabled"))
+        runtime = self.runtime(
+            settings=self.market_settings(),
+            leader_research_input_provider=provider,
+        )
 
-        with self.assertLogs(
-            "radar.market_shadow_runner",
-            level="ERROR",
-        ):
-            outcome = runtime.build_market_job()()
+        outcome = runtime.build_market_job()()
 
         self.assertEqual(outcome.state, ScheduledRunState.COMPLETED)
-        self.assertTrue(outcome.gate_passed)
-        self.assertEqual(
-            monitoring_health.get_task_states()[
-                "radarMarketFeatures"
-            ]["status"],
-            "healthy",
+        provider.assert_not_called()
+        self.assertNotIn(
+            "radarLeaderStage6",
+            monitoring_health.get_task_states(),
         )
-        self.assertEqual(
-            monitoring_health.get_task_states()[
-                "radarLeaderStage6"
-            ]["status"],
-            "failed",
-        )
-        with sqlite3.connect(self.database_path) as connection:
-            self.assertEqual(
-                connection.execute(
-                    "SELECT COUNT(*) FROM market_environment_snapshots"
-                ).fetchone()[0],
-                1,
-            )
 
     def test_market_job_uses_independent_cross_process_lock(self):
         runtime = self.runtime(settings=self.market_settings())

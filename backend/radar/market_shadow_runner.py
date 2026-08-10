@@ -430,11 +430,16 @@ class MarketShadowRunner:
                         quote_batch,
                         quote_health,
                     )
-                    leader_stage6_status = getattr(
+                    raw_leader_stage6_status = getattr(
                         leader_result,
                         "status",
                         "unknown",
                     )
+                    leader_stage6_status = str(getattr(
+                        raw_leader_stage6_status,
+                        "value",
+                        raw_leader_stage6_status,
+                    ))
                     leader_stage6_reasons = tuple(
                         getattr(leader_result, "gate_reasons", ())
                     )

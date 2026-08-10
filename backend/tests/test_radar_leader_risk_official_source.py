@@ -6,10 +6,15 @@ import requests
 
 from radar.leader_risk_invalidation_features import RiskCategory
 from radar.sources.leader_risk_official import (
+    CNINFO_ISSUER_SEARCH_URL,
     CNINFO_QUERY_URL,
+    CninfoIssuerResolutionStatus,
+    CninfoRiskIssuerScope,
     CninfoRiskDiscoveryQuery,
     OfficialRiskSourceStatus,
+    fetch_cninfo_issuer_scope,
     fetch_cninfo_risk_discovery,
+    parse_cninfo_issuer_search_payload,
     parse_cninfo_risk_discovery_payload,
 )
 
@@ -34,6 +39,15 @@ def make_query(**changes):
         page_size=3,
     )
     return replace(query, **changes)
+
+
+def make_scope(**changes):
+    scope = CninfoRiskIssuerScope(
+        symbol="300081",
+        issuer_identity="cninfo-org:9900012108",
+        resolved_at=FETCHED_AT,
+    )
+    return replace(scope, **changes)
 
 
 def make_row(**changes):
@@ -71,6 +85,71 @@ def make_payload(*, rows=None, total=None):
 
 
 class LeaderRiskOfficialSourceTests(unittest.TestCase):
+    def test_exact_official_issuer_scope_is_resolved(self):
+        result = parse_cninfo_issuer_search_payload(
+            "300081",
+            [{"code": "300081", "orgId": "9900012108"}],
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(
+            result.status,
+            CninfoIssuerResolutionStatus.READY,
+        )
+        self.assertEqual(result.scope.symbol, "300081")
+        self.assertEqual(
+            result.scope.issuer_identity,
+            "cninfo-org:9900012108",
+        )
+
+    def test_issuer_scope_requires_one_exact_symbol_identity(self):
+        cases = (
+            [],
+            [{"code": "000725", "orgId": "9900012108"}],
+            [
+                {"code": "300081", "orgId": "9900012108"},
+                {"code": "300081", "orgId": "9900012109"},
+            ],
+        )
+        for payload in cases:
+            with self.subTest(payload_count=len(payload)):
+                result = parse_cninfo_issuer_search_payload(
+                    "300081",
+                    payload,
+                    fetched_at=FETCHED_AT,
+                )
+                self.assertEqual(
+                    result.status,
+                    CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertIsNone(result.scope)
+
+    def test_issuer_scope_fetch_is_bounded_and_sanitized(self):
+        captured = {}
+
+        def transport(url, *, data, headers, timeout):
+            captured.update({
+                "url": url,
+                "data": data,
+                "timeout": timeout,
+            })
+            return [{"code": "300081", "orgId": "9900012108"}]
+
+        result = fetch_cninfo_issuer_scope(
+            "300081",
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            CninfoIssuerResolutionStatus.READY,
+        )
+        self.assertEqual(captured["url"], CNINFO_ISSUER_SEARCH_URL)
+        self.assertEqual(captured["data"]["keyWord"], "300081")
+        self.assertEqual(captured["data"]["maxNum"], "10")
+        self.assertEqual(captured["timeout"], 20.0)
+
     def test_valid_cninfo_metadata_is_discovery_only(self):
         result = parse_cninfo_risk_discovery_payload(
             make_query(),
@@ -140,6 +219,24 @@ class LeaderRiskOfficialSourceTests(unittest.TestCase):
         self.assertEqual(result.total_records, 0)
         self.assertEqual(result.documents, ())
         self.assertFalse(result.coverage_complete)
+        self.assertIn("cninfo_discovery_empty", result.reasons)
+
+    def test_real_empty_null_announcements_is_normalized(self):
+        payload = make_payload(rows=[], total=0)
+        payload["announcements"] = None
+
+        result = parse_cninfo_risk_discovery_payload(
+            make_query(),
+            payload,
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.PARTIAL,
+        )
+        self.assertEqual(result.total_records, 0)
+        self.assertEqual(result.documents, ())
         self.assertIn("cninfo_discovery_empty", result.reasons)
 
     def test_association_field_never_becomes_a_formal_relation(self):
@@ -367,6 +464,116 @@ class LeaderRiskOfficialSourceTests(unittest.TestCase):
         )
         self.assertIn("Referer", captured["headers"])
 
+    def test_candidate_scope_is_sent_to_cninfo(self):
+        captured = {}
+
+        def transport(url, *, data, headers, timeout):
+            captured["stock"] = data["stock"]
+            return make_payload()
+
+        result = fetch_cninfo_risk_discovery(
+            make_query(candidate_scopes=(make_scope(),)),
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.PARTIAL,
+        )
+        self.assertEqual(captured["stock"], "300081,9900012108")
+
+    def test_candidate_scope_can_be_bound_to_frozen_plan_shard(self):
+        query = make_query(
+            candidate_scopes=(make_scope(),),
+            candidate_plan_id="candidate-plan:fixture",
+            shard_index=0,
+            shard_count=1,
+        )
+
+        result = fetch_cninfo_risk_discovery(
+            query,
+            fetched_at=FETCHED_AT,
+            transport=lambda *args, **kwargs: make_payload(),
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.PARTIAL,
+        )
+        self.assertEqual(
+            result.query.candidate_plan_id,
+            "candidate-plan:fixture",
+        )
+        self.assertEqual(result.query.shard_index, 0)
+        self.assertEqual(result.query.shard_count, 1)
+
+    def test_malformed_candidate_scope_fails_closed_without_request(self):
+        calls = []
+
+        def transport(*args, **kwargs):
+            calls.append((args, kwargs))
+            return make_payload()
+
+        for scope in (
+            make_scope(symbol=300081),
+            make_scope(issuer_identity=9900012108),
+        ):
+            with self.subTest(scope=scope):
+                result = fetch_cninfo_risk_discovery(
+                    make_query(candidate_scopes=(scope,)),
+                    fetched_at=FETCHED_AT,
+                    transport=transport,
+                )
+                self.assertEqual(
+                    result.status,
+                    OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+                )
+        self.assertEqual(calls, [])
+
+    def test_more_than_thirty_candidate_scopes_fail_before_request(self):
+        calls = []
+        scopes = tuple(
+            make_scope(
+                symbol=f"{300000 + index:06d}",
+                issuer_identity=f"fixture{index}",
+            )
+            for index in range(31)
+        )
+
+        result = fetch_cninfo_risk_discovery(
+            make_query(candidate_scopes=scopes),
+            fetched_at=FETCHED_AT,
+            transport=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertIn(
+            "cninfo_query_candidate_scope_unverified",
+            result.reasons,
+        )
+        self.assertEqual(calls, [])
+
+    def test_document_outside_candidate_scope_is_rejected(self):
+        result = parse_cninfo_risk_discovery_payload(
+            make_query(candidate_scopes=(make_scope(),)),
+            make_payload(rows=[make_row(secCode="000725")]),
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.documents, ())
+        self.assertIn(
+            "cninfo_document_outside_candidate_scope",
+            result.reasons,
+        )
+
     def test_transport_failure_is_explicit(self):
         def transport(*args, **kwargs):
             raise requests.ConnectionError("fixture unavailable")
@@ -425,12 +632,37 @@ class LeaderRiskOfficialSourceTests(unittest.TestCase):
             [document.document_id for document in result.documents],
             ["cninfo:1225443882"],
         )
+        self.assertEqual(result.reported_total_pages, 114)
+        self.assertEqual(result.total_pages, 115)
         self.assertIn(
+            "cninfo_response_total_pages_normalized",
+            result.reasons,
+        )
+        self.assertNotIn(
             "cninfo_response_pagination_inconsistent",
             result.reasons,
         )
         self.assertFalse(result.coverage_complete)
         self.assertFalse(result.formal_usable)
+
+    def test_vendor_floor_totalpages_accepts_the_real_last_page(self):
+        payload = make_payload(rows=[make_row()], total=343)
+        payload["totalpages"] = 114
+        payload["hasMore"] = False
+
+        result = parse_cninfo_risk_discovery_payload(
+            make_query(page_number=115),
+            payload,
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(
+            result.status,
+            OfficialRiskSourceStatus.PARTIAL,
+        )
+        self.assertEqual(result.reported_total_pages, 114)
+        self.assertEqual(result.total_pages, 115)
+        self.assertEqual(len(result.documents), 1)
 
     def test_short_page_preserves_documents_and_flags_inconsistency(self):
         payload = make_payload(total=5)

@@ -132,7 +132,6 @@ TRUSTED_COVERAGE_DOMAINS = (
     "csrc.gov.cn",
     "sse.com.cn",
     "szse.cn",
-    "bse.cn",
 )
 COVERAGE_CATEGORIES_BY_DOMAIN = {
     "cninfo.com.cn": frozenset(ALL_RISK_CATEGORIES),
@@ -142,19 +141,16 @@ COVERAGE_CATEGORIES_BY_DOMAIN = {
     }),
     "sse.com.cn": frozenset(ALL_RISK_CATEGORIES),
     "szse.cn": frozenset(ALL_RISK_CATEGORIES),
-    "bse.cn": frozenset(ALL_RISK_CATEGORIES),
 }
 TRUSTED_DOMAINS_BY_SOURCE_KIND = {
     RiskEvidenceSourceKind.COMPANY_DISCLOSURE: (
         "cninfo.com.cn",
         "sse.com.cn",
         "szse.cn",
-        "bse.cn",
     ),
     RiskEvidenceSourceKind.EXCHANGE_DISCLOSURE: (
         "sse.com.cn",
         "szse.cn",
-        "bse.cn",
     ),
     RiskEvidenceSourceKind.REGULATOR_DISCLOSURE: (
         "csrc.gov.cn",
@@ -1102,6 +1098,12 @@ def build_leader_risk_invalidation_features(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
             "source_unverified",
             ("risk_input_identity_missing",),
+        )
+    if re.fullmatch(r"[036][0-9]{5}", input_value.symbol) is None:
+        return _result(
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            "source_unverified",
+            ("risk_symbol_out_of_scope",),
         )
 
     coverage_failure = _validate_coverage(input_value, as_of)

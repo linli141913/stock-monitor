@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping as MappingABC
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Mapping, Optional, Sequence, Tuple
+from types import MappingProxyType
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from radar.contracts import (
     IndustryClassificationRecord,
@@ -28,6 +30,7 @@ from radar.leader_input_gate import (
 )
 from radar.leader_business_catalyst_features import (
     LeaderBusinessCatalystFeatureInput,
+    LeaderBusinessCatalystFeatureResult,
     build_leader_business_catalyst_features,
     missing_leader_business_catalyst_features,
 )
@@ -42,10 +45,29 @@ from radar.leader_liquidity_features import (
     build_leader_liquidity_features,
 )
 from radar.leader_research_features import (
+    LeaderResearchFeatureResult,
     ResearchFeatureStatus,
     build_leader_research_features,
     build_leader_research_market_context,
     is_research_quote_eligible,
+)
+from radar.leader_research_readiness_audit import (
+    LEADER_RESEARCH_READINESS_AUDIT_CONTRACT_ID,
+    LeaderResearchReadinessAuditResult,
+    LeaderResearchReadinessAuditStatus,
+)
+from radar.leader_research_readiness_audit_batch import (
+    is_leader_research_readiness_audit_valid,
+)
+from radar.leader_risk_candidate_projection import (
+    LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID,
+    LeaderRiskCandidateProjection,
+)
+from radar.leader_risk_evidence_bundle import (
+    RISK_RESEARCH_EVIDENCE_BUNDLE_CONTRACT_ID,
+)
+from radar.leader_risk_evidence_bundle_audit import (
+    RISK_RESEARCH_EVIDENCE_BUNDLE_AUDIT_CONTRACT_ID,
 )
 from radar.leader_scoring import LeaderGateInput, LeaderMetricStatus
 from radar.leader_state_machine import (
@@ -54,6 +76,7 @@ from radar.leader_state_machine import (
 )
 from radar.leader_tradability_features import (
     LeaderTradabilityFeatureInput,
+    LeaderTradabilityFeatureResult,
     build_leader_tradability_features,
     missing_leader_tradability_features,
 )
@@ -61,6 +84,10 @@ from radar.leader_tradability_features import (
 
 UTC = timezone.utc
 MAX_CANDIDATES_PER_INDUSTRY = 5
+LEADER_RUNTIME_INPUT_VERSION = "radar-leader-runtime-input-v3"
+LEADER_RESEARCH_COMPONENT_BATCH_ITEM_CONTRACT_ID = (
+    "radar-leader-research-component-batch-item-v2"
+)
 
 
 def _aware_utc(value: datetime, field_name: str) -> datetime:
@@ -71,6 +98,40 @@ def _aware_utc(value: datetime, field_name: str) -> datetime:
 
 def _dedupe(values) -> Tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
+
+
+def build_leader_research_component_set_id(
+    *,
+    symbol: str,
+    as_of: datetime,
+    radar_run_id: str,
+    quote_batch_id: str,
+    quote_source_contract_id: str,
+    industry_code: str,
+    industry_release_id: str,
+) -> str:
+    normalized_as_of = _aware_utc(as_of, "component.as_of")
+    return ":".join((
+        LEADER_RESEARCH_COMPONENT_BATCH_ITEM_CONTRACT_ID,
+        radar_run_id,
+        quote_batch_id,
+        quote_source_contract_id,
+        symbol,
+        normalized_as_of.isoformat(),
+        industry_code,
+        industry_release_id,
+    ))
+
+
+def _freeze_research_value(value: Any) -> Any:
+    if isinstance(value, MappingABC):
+        return MappingProxyType({
+            key: _freeze_research_value(item)
+            for key, item in value.items()
+        })
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze_research_value(item) for item in value)
+    return value
 
 
 def _minimum_coverage(values: Mapping[str, float]) -> float:
@@ -126,6 +187,275 @@ def _research_dimension_status(
     }[status]
 
 
+def _risk_candidate_projection_result(
+    *,
+    status: ResearchFeatureStatus,
+    reasons: Sequence[str],
+    projection: Optional[LeaderRiskCandidateProjection] = None,
+) -> Mapping[str, object]:
+    return {
+        "status": status.value,
+        "reasons": list(_dedupe(reasons)),
+        "scoreReady": False,
+        "researchScore": None,
+        "riskFilterPassed": False,
+        "formalGateReady": False,
+        "formalUsable": False,
+        "appliedToD3": False,
+        "appliedToD1": False,
+        "projection": (
+            projection.to_evidence()
+            if projection is not None
+            else None
+        ),
+    }
+
+
+def _risk_candidate_projection_evidence(
+    projection: Optional[LeaderRiskCandidateProjection],
+    *,
+    symbol: str,
+    as_of: datetime,
+) -> Mapping[str, object]:
+    if projection is None:
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.MISSING,
+            reasons=("risk_candidate_projection_missing",),
+        )
+    if not isinstance(projection, LeaderRiskCandidateProjection):
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            reasons=(
+                "risk_candidate_projection_contract_unverified",
+            ),
+        )
+    if projection.symbol != symbol:
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            reasons=(
+                "risk_candidate_projection_identity_mismatch",
+            ),
+        )
+    projection_as_of = projection.as_of
+    if (
+        not isinstance(projection_as_of, datetime)
+        or projection_as_of.tzinfo is None
+        or projection_as_of.utcoffset() is None
+        or projection_as_of.astimezone(UTC) != as_of
+    ):
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            reasons=("risk_candidate_projection_as_of_mismatch",),
+        )
+    if (
+        projection.projection_contract_id
+        != LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID
+        or (
+            projection.audit_contract_id
+            != RISK_RESEARCH_EVIDENCE_BUNDLE_AUDIT_CONTRACT_ID
+        )
+        or (
+            projection.bundle_contract_id
+            != RISK_RESEARCH_EVIDENCE_BUNDLE_CONTRACT_ID
+        )
+    ):
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            reasons=(
+                "risk_candidate_projection_contract_unverified",
+            ),
+        )
+    if any((
+        projection.risk_filter_passed is not False,
+        projection.formal_gate_ready is not False,
+        projection.formal_usable is not False,
+        projection.applied_to_d3 is not False,
+        projection.applied_to_d1 is not False,
+    )):
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+            reasons=(
+                "risk_candidate_projection_formal_flag_invalid",
+            ),
+        )
+    return _risk_candidate_projection_result(
+        status=ResearchFeatureStatus.READY,
+        reasons=(),
+        projection=projection,
+    )
+
+
+def _research_readiness_audit_result(
+    *,
+    status: str,
+    reasons: Sequence[str],
+    audit: Optional[
+        LeaderResearchReadinessAuditResult
+    ] = None,
+) -> Mapping[str, object]:
+    return {
+        "status": status,
+        "reasons": list(_dedupe(reasons)),
+        "scoreReady": False,
+        "researchScore": None,
+        "formalScoreReady": False,
+        "formalGateReady": False,
+        "formalUsable": False,
+        "stateTransitionAllowed": False,
+        "audit": (
+            _research_readiness_audit_summary(audit)
+            if audit is not None
+            else None
+        ),
+    }
+
+
+def _research_readiness_audit_summary(
+    audit: LeaderResearchReadinessAuditResult,
+) -> Mapping[str, object]:
+    return {
+        "contractId": audit.contract_id,
+        "auditStatus": audit.status.value,
+        "candidate": {
+            "symbol": audit.symbol,
+            "asOf": audit.as_of.isoformat(),
+        },
+        "completeness": {
+            "requiredItemCount": audit.required_item_count,
+            "evidenceAvailableCount": (
+                audit.evidence_available_count
+            ),
+            "satisfiedCount": audit.satisfied_count,
+            "missingItems": list(audit.missing_items),
+            "blockedItems": list(audit.blocked_items),
+        },
+        "firstVetoReason": audit.first_veto_reason,
+        "firstResearchBlockerReason": (
+            audit.first_research_blocker_reason
+        ),
+    }
+
+
+def _research_readiness_audit_evidence(
+    audit: Optional[LeaderResearchReadinessAuditResult],
+    *,
+    symbol: str,
+    as_of: datetime,
+) -> Mapping[str, object]:
+    if audit is None:
+        return _research_readiness_audit_result(
+            status="missing",
+            reasons=("leader_research_readiness_audit_missing",),
+        )
+    if not isinstance(audit, LeaderResearchReadinessAuditResult):
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_contract_unverified",
+            ),
+        )
+    if audit.symbol != symbol:
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_identity_mismatch",
+            ),
+        )
+    audit_as_of = audit.as_of
+    if (
+        not isinstance(audit_as_of, datetime)
+        or audit_as_of.tzinfo is None
+        or audit_as_of.utcoffset() is None
+        or audit_as_of.astimezone(UTC) != as_of
+    ):
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_audit_as_of_mismatch",
+            ),
+        )
+    if (
+        audit.contract_id
+        != LEADER_RESEARCH_READINESS_AUDIT_CONTRACT_ID
+    ):
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_contract_unverified",
+            ),
+        )
+    if any((
+        audit.formal_score_ready is not False,
+        audit.formal_gate_ready is not False,
+        audit.formal_usable is not False,
+        audit.state_transition_allowed is not False,
+    )):
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_formal_flag_invalid",
+            ),
+        )
+    if audit.status == LeaderResearchReadinessAuditStatus.BLOCKED:
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_not_consumable",
+            ),
+        )
+    if not is_leader_research_readiness_audit_valid(
+        audit,
+        symbol=symbol,
+        as_of=as_of,
+    ):
+        return _research_readiness_audit_result(
+            status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+            reasons=(
+                "leader_research_readiness_"
+                "audit_result_unverified",
+            ),
+        )
+    return _research_readiness_audit_result(
+        status=audit.status.value,
+        reasons=(),
+        audit=audit,
+    )
+
+
+@dataclass(frozen=True)
+class LeaderResearchComponentBatchItem:
+    index: int
+    symbol: str
+    as_of: datetime
+    industry_code: str
+    industry_release_id: str
+    radar_run_id: str
+    quote_batch_id: str
+    quote_source_contract_id: str
+    component_set_id: str
+    cross_sectional_features: LeaderResearchFeatureResult = field(
+        repr=False
+    )
+    history_features: LeaderHistoryFeatureResult = field(repr=False)
+    liquidity_features: LeaderLiquidityFeatureResult = field(
+        repr=False
+    )
+    business_catalyst_features: (
+        LeaderBusinessCatalystFeatureResult
+    ) = field(repr=False)
+    tradability_features: LeaderTradabilityFeatureResult = field(
+        repr=False
+    )
+    contract_id: str = (
+        LEADER_RESEARCH_COMPONENT_BATCH_ITEM_CONTRACT_ID
+    )
+
+
 @dataclass(frozen=True)
 class LeaderRuntimeAssembly:
     status: str
@@ -134,10 +464,157 @@ class LeaderRuntimeAssembly:
     gate_reasons: Tuple[str, ...]
     scanned_count: int
     mapped_count: int
+    research_component_items: Tuple[
+        LeaderResearchComponentBatchItem,
+        ...,
+    ] = field(default_factory=tuple, repr=False)
+    radar_run_id: Optional[str] = None
+    quote_batch_id: Optional[str] = None
 
     @property
     def item_count(self) -> int:
         return len(self.evidence_items)
+
+
+def attach_leader_research_readiness_audits(
+    assembly: LeaderRuntimeAssembly,
+    *,
+    audits_by_symbol: Optional[
+        Mapping[str, LeaderResearchReadinessAuditResult]
+    ],
+) -> LeaderRuntimeAssembly:
+    """将F2可信审计回挂到既有组装结果，不重算研究组件。"""
+
+    if not isinstance(assembly, LeaderRuntimeAssembly):
+        raise TypeError("assembly必须是LeaderRuntimeAssembly")
+    mapping_unverified = (
+        audits_by_symbol is not None
+        and not isinstance(audits_by_symbol, MappingABC)
+    )
+    audit_mapping = (
+        audits_by_symbol
+        if isinstance(audits_by_symbol, MappingABC)
+        else {}
+    )
+    updated_items = []
+    for item in assembly.evidence_items:
+        evidence = item.evidence
+        research_features = (
+            evidence.get("researchFeatures")
+            if isinstance(evidence, MappingABC)
+            else None
+        )
+        if not isinstance(research_features, MappingABC):
+            readiness = _research_readiness_audit_result(
+                status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+                reasons=(
+                    "leader_research_readiness_"
+                    "runtime_evidence_contract_unverified",
+                ),
+            )
+            updated_evidence = dict(evidence) if isinstance(
+                evidence,
+                MappingABC,
+            ) else {}
+            updated_research_features = {}
+        else:
+            readiness = (
+                _research_readiness_audit_result(
+                    status=(
+                        ResearchFeatureStatus.SOURCE_UNVERIFIED.value
+                    ),
+                    reasons=(
+                        "leader_research_readiness_"
+                        "audit_mapping_unverified",
+                    ),
+                )
+                if mapping_unverified
+                else _research_readiness_audit_evidence(
+                    audit_mapping.get(item.symbol),
+                    symbol=item.symbol,
+                    as_of=assembly.as_of,
+                )
+            )
+            updated_evidence = dict(evidence)
+            updated_research_features = dict(research_features)
+        updated_research_features[
+            "researchReadinessAudit"
+        ] = readiness
+        updated_evidence["researchFeatures"] = (
+            updated_research_features
+        )
+        updated_items.append(replace(item, evidence=updated_evidence))
+    return replace(assembly, evidence_items=tuple(updated_items))
+
+
+def attach_leader_risk_candidate_projections(
+    assembly: LeaderRuntimeAssembly,
+    *,
+    projections_by_symbol: Optional[
+        Mapping[str, LeaderRiskCandidateProjection]
+    ],
+) -> LeaderRuntimeAssembly:
+    """将E3风险投影挂到既有组装结果，不重算研究组件。"""
+
+    if not isinstance(assembly, LeaderRuntimeAssembly):
+        raise TypeError("assembly必须是LeaderRuntimeAssembly")
+    mapping_unverified = (
+        projections_by_symbol is not None
+        and not isinstance(projections_by_symbol, MappingABC)
+    )
+    projection_mapping = (
+        projections_by_symbol
+        if isinstance(projections_by_symbol, MappingABC)
+        else {}
+    )
+    updated_items = []
+    for item in assembly.evidence_items:
+        evidence = item.evidence
+        research_features = (
+            evidence.get("researchFeatures")
+            if isinstance(evidence, MappingABC)
+            else None
+        )
+        if not isinstance(research_features, MappingABC):
+            projection = _risk_candidate_projection_result(
+                status=ResearchFeatureStatus.SOURCE_UNVERIFIED.value,
+                reasons=(
+                    "risk_candidate_projection_"
+                    "runtime_evidence_contract_unverified",
+                ),
+            )
+            updated_evidence = dict(evidence) if isinstance(
+                evidence,
+                MappingABC,
+            ) else {}
+            updated_research_features = {}
+        else:
+            projection = (
+                _risk_candidate_projection_result(
+                    status=(
+                        ResearchFeatureStatus.SOURCE_UNVERIFIED.value
+                    ),
+                    reasons=(
+                        "risk_candidate_projection_mapping_unverified",
+                    ),
+                )
+                if mapping_unverified
+                else _risk_candidate_projection_evidence(
+                    projection_mapping.get(item.symbol),
+                    symbol=item.symbol,
+                    as_of=assembly.as_of,
+                )
+            )
+            updated_evidence = dict(evidence)
+            updated_research_features = dict(research_features)
+        updated_research_features[
+            "riskCandidateProjection"
+        ] = projection
+        updated_evidence["researchFeatures"] = (
+            updated_research_features
+        )
+        updated_items.append(replace(item, evidence=updated_evidence))
+    return replace(assembly, evidence_items=tuple(updated_items))
 
 
 def _not_ready(
@@ -389,6 +866,12 @@ def build_leader_runtime_evidence(
     tradability_inputs_by_symbol: Optional[
         Mapping[str, LeaderTradabilityFeatureInput]
     ] = None,
+    risk_candidate_projections_by_symbol: Optional[
+        Mapping[str, LeaderRiskCandidateProjection]
+    ] = None,
+    research_readiness_audits_by_symbol: Optional[
+        Mapping[str, LeaderResearchReadinessAuditResult]
+    ] = None,
 ) -> LeaderRuntimeAssembly:
     """组装每个行业涨跌幅前5名的研究性输入，不生成正式分数。"""
 
@@ -494,7 +977,24 @@ def build_leader_runtime_evidence(
         business_catalyst_inputs_by_symbol or {}
     )
     tradability_inputs_by_symbol = tradability_inputs_by_symbol or {}
+    risk_candidate_projections_by_symbol = (
+        risk_candidate_projections_by_symbol or {}
+    )
+    research_readiness_mapping_unverified = (
+        research_readiness_audits_by_symbol is not None
+        and not isinstance(
+            research_readiness_audits_by_symbol,
+            MappingABC,
+        )
+    )
+    if research_readiness_mapping_unverified:
+        research_readiness_audits_by_symbol = {}
+    else:
+        research_readiness_audits_by_symbol = (
+            research_readiness_audits_by_symbol or {}
+        )
     evidence_items = []
+    research_component_items = []
     mapped_count = sum(len(items) for items in grouped.values())
     for division_code in sorted(grouped):
         sector = sector_by_code[division_code]
@@ -619,6 +1119,35 @@ def build_leader_runtime_evidence(
                         tradability_input
                     )
                 )
+            risk_candidate_projection = (
+                _risk_candidate_projection_evidence(
+                    risk_candidate_projections_by_symbol.get(
+                        quote.symbol
+                    ),
+                    symbol=quote.symbol,
+                    as_of=as_of,
+                )
+            )
+            research_readiness_audit = (
+                _research_readiness_audit_result(
+                    status=(
+                        ResearchFeatureStatus
+                        .SOURCE_UNVERIFIED.value
+                    ),
+                    reasons=(
+                        "leader_research_readiness_"
+                        "audit_mapping_unverified",
+                    ),
+                )
+                if research_readiness_mapping_unverified
+                else _research_readiness_audit_evidence(
+                    research_readiness_audits_by_symbol.get(
+                        quote.symbol
+                    ),
+                    symbol=quote.symbol,
+                    as_of=as_of,
+                )
+            )
             research_features = build_leader_research_features(
                 as_of=as_of,
                 candidate_quote=quote,
@@ -648,6 +1177,64 @@ def build_leader_runtime_evidence(
                     quote_source.status
                 ),
                 market_context=research_market_context,
+            )
+            research_component_items.append(
+                LeaderResearchComponentBatchItem(
+                    index=len(research_component_items),
+                    symbol=quote.symbol,
+                    as_of=as_of,
+                    industry_code=industry.division_code,
+                    industry_release_id=str(
+                        sector["industryReleaseId"]
+                    ),
+                    radar_run_id=quote_batch.meta.radar_run_id,
+                    quote_batch_id=quote_batch.meta.batch_id,
+                    quote_source_contract_id=(
+                        quote_source.source_contract_id
+                    ),
+                    component_set_id=(
+                        build_leader_research_component_set_id(
+                            symbol=quote.symbol,
+                            as_of=as_of,
+                            radar_run_id=(
+                                quote_batch.meta.radar_run_id
+                            ),
+                            quote_batch_id=quote_batch.meta.batch_id,
+                            quote_source_contract_id=(
+                                quote_source.source_contract_id
+                            ),
+                            industry_code=industry.division_code,
+                            industry_release_id=str(
+                                sector["industryReleaseId"]
+                            ),
+                        )
+                    ),
+                    cross_sectional_features=research_features,
+                    history_features=replace(
+                        history_result,
+                        metrics=_freeze_research_value(
+                            history_result.metrics
+                        ),
+                    ),
+                    liquidity_features=replace(
+                        liquidity_result,
+                        metrics=_freeze_research_value(
+                            liquidity_result.metrics
+                        ),
+                    ),
+                    business_catalyst_features=replace(
+                        business_result,
+                        references=_freeze_research_value(
+                            business_result.references
+                        ),
+                    ),
+                    tradability_features=replace(
+                        tradability_result,
+                        references=_freeze_research_value(
+                            tradability_result.references
+                        ),
+                    ),
+                )
             )
             evidence_items.append(LeaderInputEvidence(
                 symbol=quote.symbol,
@@ -685,7 +1272,7 @@ def build_leader_runtime_evidence(
                     else 1
                 ),
                 evidence={
-                    "runtimeInputVersion": "radar-leader-runtime-input-v1",
+                    "runtimeInputVersion": LEADER_RUNTIME_INPUT_VERSION,
                     "researchFeatures": {
                         **research_features.to_evidence(),
                         "historyContinuity": (
@@ -699,6 +1286,12 @@ def build_leader_runtime_evidence(
                         ),
                         "securityTradability": (
                             tradability_result.to_evidence()
+                        ),
+                        "riskCandidateProjection": (
+                            risk_candidate_projection
+                        ),
+                        "researchReadinessAudit": (
+                            research_readiness_audit
                         ),
                     },
                     "withinIndustryRankByChangePercent": rank,
@@ -773,4 +1366,7 @@ def build_leader_runtime_evidence(
         ),
         scanned_count=scanned_count,
         mapped_count=mapped_count,
+        research_component_items=tuple(research_component_items),
+        radar_run_id=quote_batch.meta.radar_run_id,
+        quote_batch_id=quote_batch.meta.batch_id,
     )

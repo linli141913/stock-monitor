@@ -164,6 +164,25 @@ def make_input(
 
 
 class LeaderRiskInvalidationFeatureTests(unittest.TestCase):
+    def test_beijing_exchange_symbol_is_outside_stage6_scope(self):
+        coverage = replace(
+            make_coverage(),
+            coverage_id="risk-coverage-20260728-920023",
+            symbol="920023",
+            issuer_identity="issuer-cn-920023",
+        )
+        result = build_leader_risk_invalidation_features(replace(
+            make_input(coverage=coverage),
+            symbol="920023",
+            issuer_identity="issuer-cn-920023",
+        ))
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertIn("risk_symbol_out_of_scope", result.reasons)
+
     def test_complete_coverage_can_report_no_active_risk(self):
         result = build_leader_risk_invalidation_features(make_input())
         evidence = result.to_evidence()
@@ -580,6 +599,15 @@ class LeaderRiskInvalidationFeatureTests(unittest.TestCase):
                     coverage,
                     source_urls=("https://attacker.example/",),
                     source_names=("中国证监会",),
+                ),
+                (),
+                "risk_coverage_source_domain_untrusted",
+            ),
+            (
+                replace(
+                    coverage,
+                    source_urls=("https://www.bse.cn/risk.pdf",),
+                    source_names=("北京证券交易所",),
                 ),
                 (),
                 "risk_coverage_source_domain_untrusted",

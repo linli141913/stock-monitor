@@ -29,10 +29,6 @@ from radar.market_shadow_runner import (
     build_default_market_index_fetcher,
     build_default_market_quote_fetcher,
 )
-from radar.leader_input_gate import LeaderInputGatePolicy
-from radar.leader_repository import LeaderRepository
-from radar.leader_runtime_inputs import build_leader_runtime_evidence
-from radar.leader_shadow_runner import LeaderShadowRunner
 from radar.repository import RadarRepository, RadarRepositoryError
 from radar.scheduler import (
     ScheduleRegistration,
@@ -245,6 +241,7 @@ class RadarRuntime:
             RADAR_ETF_PRODUCT_MASTER_RUNTIME_LOCK_PATH
         ),
         etf_product_master_fetcher: Optional[Callable] = None,
+        leader_research_input_provider: Optional[Callable] = None,
         clock: Callable[[], datetime] = _utc_now,
         market_status_provider: MarketStatusProvider = (
             market_calendar.get_market_status
@@ -281,6 +278,9 @@ class RadarRuntime:
             )
         )
         self.etf_product_master_fetcher = etf_product_master_fetcher
+        self.leader_research_input_provider = (
+            leader_research_input_provider
+        )
         if (
             self.settings.etf_stage5_enabled
             and self.etf_product_master_fetcher is None
@@ -462,14 +462,34 @@ class RadarRuntime:
                     quote_batch,
                     quote_health,
                 ):
+                    from radar.leader_input_gate import (
+                        LeaderInputGatePolicy,
+                    )
+                    from radar.leader_repository import LeaderRepository
+                    from radar.leader_research_input_provider_batch import (
+                        LeaderResearchInputProviderBatchStatus,
+                        build_leader_research_input_provider_batch_from_plan,
+                    )
+                    from radar.leader_research_runtime_provider import (
+                        build_leader_research_runtime_source_context,
+                        build_explicit_missing_leader_research_provider_input,
+                    )
+                    from radar.leader_research_single_pass_orchestration import (
+                        LeaderResearchSinglePassInput,
+                        LeaderResearchSinglePassStatus,
+                        build_leader_research_single_pass,
+                    )
+                    from radar.leader_runtime_candidate_plan import (
+                        LeaderRuntimeCandidatePlanInput,
+                        LeaderRuntimeCandidatePlanStatus,
+                        build_leader_runtime_candidate_plan,
+                    )
+                    from radar.leader_shadow_runner import LeaderShadowRunner
+
                     monitoring_health.record_task_started(
                         RADAR_LEADER_STAGE6_TASK_NAME
                     )
                     try:
-                        leader_repository = LeaderRepository(
-                            connection,
-                            clock=self.clock,
-                        )
                         sector_rows = (
                             repository
                             .list_latest_sector_feature_rows_at_or_before(
@@ -488,47 +508,109 @@ class RadarRuntime:
                                     next(iter(release_ids))
                                 )
                             )
+                        market_snapshot = repository.get_market_feature_row(
+                            current_run_id
+                        )
+                        security_records = (
+                            repository.list_security_master_records(
+                                current_as_of
+                            )
+                        )
+                        plan = build_leader_runtime_candidate_plan(
+                            LeaderRuntimeCandidatePlanInput(
+                                as_of=current_as_of,
+                                quote_batch=quote_batch,
+                                quote_health=quote_health,
+                                market_snapshot=market_snapshot,
+                                sector_rows=sector_rows,
+                                industry_records=industry_records,
+                                security_records=security_records,
+                            )
+                        )
+                        if plan.status != LeaderRuntimeCandidatePlanStatus.READY:
+                            monitoring_health.record_task_degraded(
+                                RADAR_LEADER_STAGE6_TASK_NAME,
+                                plan.gate_reasons
+                                or ("leader_candidate_plan_not_ready",),
+                                item_count=0,
+                            )
+                            return plan
+
+                        provider = (
+                            self.leader_research_input_provider
+                            or build_explicit_missing_leader_research_provider_input
+                        )
+                        source_context = (
+                            build_leader_research_runtime_source_context(
+                                candidate_plan=plan,
+                                quote_batch=quote_batch,
+                                quote_health=quote_health,
+                                security_records=security_records,
+                                industry_records=industry_records,
+                            )
+                        )
+                        provider_input = provider(source_context)
+                        provider_result = (
+                            build_leader_research_input_provider_batch_from_plan(
+                                provider_input
+                            )
+                        )
+                        orchestration_input = LeaderResearchSinglePassInput(
+                            candidate_plan=plan,
+                            provider_input=provider_input,
+                            source_context=source_context,
+                            as_of=current_as_of,
+                            quote_batch=quote_batch,
+                            quote_health=quote_health,
+                            market_snapshot=market_snapshot,
+                            sector_rows=sector_rows,
+                            industry_records=industry_records,
+                            security_records=security_records,
+                        )
+                        if provider_result.status in (
+                            LeaderResearchInputProviderBatchStatus.BLOCKED,
+                            LeaderResearchInputProviderBatchStatus.MISSING,
+                        ):
+                            single_pass = build_leader_research_single_pass(
+                                orchestration_input
+                            )
+                            monitoring_health.record_task_degraded(
+                                RADAR_LEADER_STAGE6_TASK_NAME,
+                                single_pass.gate_reasons,
+                                item_count=0,
+                            )
+                            return single_pass
+
+                        leader_repository = LeaderRepository(
+                            connection,
+                            clock=self.clock,
+                        )
                         previous_states = (
                             leader_repository
                             .get_latest_state_records_before(current_as_of)
                         )
-                        assembly = build_leader_runtime_evidence(
-                            as_of=current_as_of,
-                            quote_batch=quote_batch,
-                            quote_health=quote_health,
-                            market_snapshot=(
-                                repository.get_market_feature_row(
-                                    current_run_id
-                                )
-                            ),
-                            sector_rows=sector_rows,
-                            industry_records=industry_records,
-                            security_records=(
-                                repository.list_security_master_records(
-                                    current_as_of
-                                )
-                            ),
-                            previous_states=previous_states,
+                        single_pass = build_leader_research_single_pass(
+                            replace(
+                                orchestration_input,
+                                previous_states=previous_states,
+                            )
                         )
-                        if assembly.status != "ready":
-                            reason = (
-                                assembly.gate_reasons[0]
-                                if assembly.gate_reasons
-                                else "leader_runtime_input_not_ready"
-                            )
-                            monitoring_health.record_task_skipped(
+                        if single_pass.runtime_assembly is None:
+                            monitoring_health.record_task_degraded(
                                 RADAR_LEADER_STAGE6_TASK_NAME,
-                                reason,
+                                single_pass.gate_reasons,
+                                item_count=0,
                             )
-                            return assembly
-                        result = LeaderShadowRunner(
+                            return single_pass
+
+                        shadow_result = LeaderShadowRunner(
                             leader_repository,
                             clock=self.clock,
                             run_lock=self._leader_stage6_run_lock,
                         ).run_evidence_once(
                             current_run_id,
                             current_as_of,
-                            assembly.evidence_items,
+                            single_pass.runtime_assembly.evidence_items,
                             previous_states=previous_states,
                             input_gate_policy=LeaderInputGatePolicy(
                                 maximum_source_age_seconds=(
@@ -544,11 +626,21 @@ class RadarRuntime:
                                 ),
                             ),
                         )
-                        monitoring_health.record_task_success(
-                            RADAR_LEADER_STAGE6_TASK_NAME,
-                            item_count=result.eligible_count,
-                        )
-                        return result
+                        if (
+                            single_pass.status
+                            == LeaderResearchSinglePassStatus.READY
+                        ):
+                            monitoring_health.record_task_success(
+                                RADAR_LEADER_STAGE6_TASK_NAME,
+                                item_count=shadow_result.eligible_count,
+                            )
+                        else:
+                            monitoring_health.record_task_degraded(
+                                RADAR_LEADER_STAGE6_TASK_NAME,
+                                single_pass.gate_reasons,
+                                item_count=shadow_result.eligible_count,
+                            )
+                        return single_pass
                     except Exception as exc:
                         monitoring_health.record_task_failure(
                             RADAR_LEADER_STAGE6_TASK_NAME,
@@ -769,6 +861,7 @@ def register_production_shadow_jobs(
     market_index_fetcher: Optional[MarketIndexFetcher] = None,
     market_quote_fetcher: Optional[MarketQuoteFetcher] = None,
     etf_product_master_fetcher: Optional[Callable] = None,
+    leader_research_input_provider: Optional[Callable] = None,
     clock: Callable[[], datetime] = _utc_now,
     market_status_provider: MarketStatusProvider = (
         market_calendar.get_market_status
@@ -812,6 +905,7 @@ def register_production_shadow_jobs(
         market_index_fetcher=market_index_fetcher,
         market_quote_fetcher=market_quote_fetcher,
         etf_product_master_fetcher=etf_product_master_fetcher,
+        leader_research_input_provider=leader_research_input_provider,
         clock=clock,
         market_status_provider=market_status_provider,
         connection_factory=connection_factory,

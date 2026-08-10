@@ -96,6 +96,127 @@ def official_direct_input():
 
 
 class LeaderBusinessCatalystFeatureTests(unittest.TestCase):
+    def test_source_kind_must_match_trusted_official_domain(self):
+        value = reviewed_input()
+        result = build_leader_business_catalyst_features(
+            replace(
+                value,
+                catalyst=replace(
+                    value.catalyst,
+                    source_url="https://example.test/disclosure/1",
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_source_domain_unverified",),
+        )
+
+    def test_source_url_cannot_embed_credentials(self):
+        value = reviewed_input()
+        result = build_leader_business_catalyst_features(
+            replace(
+                value,
+                catalyst=replace(
+                    value.catalyst,
+                    source_url=(
+                        "https://secret:token@www.szse.cn/"
+                        "disclosure/1"
+                    ),
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_source_url_unverified",),
+        )
+        self.assertNotIn("secret", repr(result))
+        self.assertNotIn("token", repr(result))
+
+    def test_source_url_cannot_embed_query_credentials(self):
+        value = reviewed_input()
+        result = build_leader_business_catalyst_features(
+            replace(
+                value,
+                catalyst=replace(
+                    value.catalyst,
+                    source_url=(
+                        "https://www.szse.cn/disclosure/1?token=secret"
+                    ),
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_source_url_unverified",),
+        )
+        self.assertNotIn("secret", repr(result))
+
+    def test_company_domain_cannot_be_declared_by_untrusted_caller(self):
+        self.assertNotIn(
+            "trusted_company_domains",
+            LeaderBusinessCatalystFeatureInput.__dataclass_fields__,
+        )
+        value = reviewed_input()
+        company_proof = replace(
+            value.business_proofs[0],
+            source_kind=BusinessEvidenceSourceKind.COMPANY_DISCLOSURE,
+            source_name="上市公司官网",
+            source_url="https://company.example.com/disclosure/1",
+        )
+
+        result = build_leader_business_catalyst_features(
+            replace(value, business_proofs=(company_proof,))
+        )
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_source_domain_unverified",),
+        )
+
+    def test_beijing_exchange_symbol_is_outside_stage6_scope(self):
+        value = reviewed_input()
+        result = build_leader_business_catalyst_features(
+            replace(
+                value,
+                symbol="920023",
+                business_proofs=(
+                    replace(value.business_proofs[0], symbol="920023"),
+                ),
+                reviews=(
+                    replace(value.reviews[0], symbol="920023"),
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_symbol_out_of_scope",),
+        )
+
     def test_official_disclosure_direct_relation_is_ready_research_only(
         self,
     ):
