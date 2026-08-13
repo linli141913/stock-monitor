@@ -118,3 +118,23 @@
   border-radius: 12px;
   border: 1px dashed var(--border-color);
 }
+
+@media (max-width: 640px) {
+  .container {
+    padding-top: 56px;
+  }
+
+  .header,
+  .radarContext {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .header {
+    gap: 12px;
+  }
+
+  .title {
+    white-space: nowrap;
+  }
+}

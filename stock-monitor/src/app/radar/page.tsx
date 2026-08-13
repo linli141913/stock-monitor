@@ -99,6 +99,8 @@ function blockerLabels(
 
 export default function RadarPage() {
   const [activeTab, setActiveTab] = useState<RadarTab>('overview');
+  const [focusedIndustryCode, setFocusedIndustryCode] = useState('');
+  const [focusedIndustryName, setFocusedIndustryName] = useState('');
   const [overview, setOverview] = useState<RadarOverviewResponse | null>(null);
   const [sectors, setSectors] = useState<RadarSectorsResponse | null>(null);
   const [etfs, setEtfs] = useState<RadarEtfsResponse | null>(null);
@@ -129,6 +131,17 @@ export default function RadarPage() {
   const leadersInFlight = useRef(false);
   const leaderReviewQueueInFlight = useRef(false);
   const leaderReviewQueueOffset = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') !== 'sectors') return;
+      setFocusedIndustryCode(params.get('industryCode') || '');
+      setFocusedIndustryName(params.get('industryName') || '');
+      setActiveTab('sectors');
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (overviewInFlight.current) return;
@@ -709,7 +722,11 @@ export default function RadarPage() {
                 ...(leaderReviewVersionCount < 2 ? ['D8真实连续人工版本不足'] : []),
                 ...(!leaderSnapshotReady ? ['龙头候选影子快照尚未生成'] : []),
               ]}
-              nextStep="基于已保存的3份真实正文形成第一个D8人工审核版本，后续再积累第二个连续版本。"
+              nextStep={leaderReviewVersionCount === 0
+                ? '基于已保存的3份真实正文形成第一个D8人工审核版本，后续再积累第二个连续版本。'
+                : leaderReviewVersionCount === 1
+                  ? '第一个真实D8人工版本已形成；等待包含实质证据变化的第二个连续版本，禁止复制补位。'
+                  : 'D8连续人工版本门槛已具备，等待下一轮影子快照复核。'}
             />
           </div>
         </div>
@@ -723,7 +740,12 @@ export default function RadarPage() {
             </div>
           )}
           {sectors ? (
-            <SectorObservationPanel module={sectors.module} full />
+            <SectorObservationPanel
+              module={sectors.module}
+              full
+              focusedIndustryCode={focusedIndustryCode}
+              focusedIndustryName={focusedIndustryName}
+            />
           ) : (
             <ModuleStatePanel
               state="not_ready"

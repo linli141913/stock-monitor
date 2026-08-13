@@ -117,7 +117,9 @@ export default function IndustryInsightPage() {
             <strong>来自主线雷达：{radarContext.name || radarContext.code}</strong>
             <span>当前仅携带行业上下文；下方公开资讯尚未按该行业精确过滤。</span>
           </div>
-          <Link href="/radar">返回对应雷达行业</Link>
+          <Link href={`/radar?tab=sectors&industryCode=${encodeURIComponent(radarContext.code)}&industryName=${encodeURIComponent(radarContext.name)}`}>
+            返回对应雷达行业
+          </Link>
         </div>
       )}
 

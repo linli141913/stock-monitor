@@ -8,6 +8,8 @@ interface SectorObservationPanelProps {
   module: RadarSectorModule;
   full?: boolean;
   onViewAll?: () => void;
+  focusedIndustryCode?: string;
+  focusedIndustryName?: string;
 }
 
 function signedPercent(value: number | null) {
@@ -19,6 +21,8 @@ export default function SectorObservationPanel({
   module,
   full = false,
   onViewAll,
+  focusedIndustryCode = '',
+  focusedIndustryName = '',
 }: SectorObservationPanelProps) {
   if (module.state === 'empty') {
     return (
@@ -59,6 +63,11 @@ export default function SectorObservationPanel({
           <button className={styles.textButton} onClick={onViewAll}>查看全部行业</button>
         )}
       </div>
+      {full && focusedIndustryCode && (
+        <div className={styles.industryContextBanner}>
+          来自行业洞察：{focusedIndustryName || focusedIndustryCode}（代码 {focusedIndustryCode}）
+        </div>
+      )}
       {(module.state === 'stale' || module.state === 'failed') && (
         <div className={module.state === 'failed' ? styles.errorBanner : styles.warningBanner}>
           当前显示最近成功行业快照，状态为
@@ -67,7 +76,10 @@ export default function SectorObservationPanel({
       )}
       <div className={full ? styles.sectorGrid : styles.sectorList}>
         {module.items.map((item) => (
-          <article className={styles.sectorCard} key={item.divisionCode}>
+          <article
+            className={`${styles.sectorCard} ${item.divisionCode === focusedIndustryCode ? styles.focusedSectorCard : ''}`}
+            key={item.divisionCode}
+          >
             <div className={styles.sectorTitleRow}>
               <div>
                 <strong>{item.divisionName}</strong>
