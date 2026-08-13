@@ -31,6 +31,7 @@ export default function RadarStatusStrip({
   const market = overview.modules.market;
   const sectors = overview.modules.sectors;
   const etf = overview.modules.etf;
+  const leaders = overview.modules.leaders;
   const cells = [
     {
       label: '当前交易状态',
@@ -56,7 +57,9 @@ export default function RadarStatusStrip({
     },
     {
       label: '龙头模块',
-      value: '阶段6未启用',
+      value: 'enabledStage' in leaders
+        ? `阶段${leaders.enabledStage}未启用`
+        : `阶段6已启用 · ${stateLabel(leaders.state)}`,
       tone: styles.statusNeutral,
     },
     {

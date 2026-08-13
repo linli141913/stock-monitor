@@ -6,6 +6,7 @@ import requests
 
 from radar.leader_risk_invalidation_features import RiskCategory
 from radar.sources.leader_risk_official import (
+    CNINFO_ISSUER_ROSTER_URL,
     CNINFO_ISSUER_SEARCH_URL,
     CNINFO_QUERY_URL,
     CninfoIssuerResolutionStatus,
@@ -13,6 +14,7 @@ from radar.sources.leader_risk_official import (
     CninfoRiskDiscoveryQuery,
     OfficialRiskSourceStatus,
     fetch_cninfo_issuer_scope,
+    fetch_cninfo_issuer_scopes_from_roster,
     fetch_cninfo_risk_discovery,
     parse_cninfo_issuer_search_payload,
     parse_cninfo_risk_discovery_payload,
@@ -85,6 +87,68 @@ def make_payload(*, rows=None, total=None):
 
 
 class LeaderRiskOfficialSourceTests(unittest.TestCase):
+    def test_official_roster_resolves_candidate_scopes_in_input_order(self):
+        captured = {}
+
+        def transport(url, *, headers, timeout):
+            captured.update({"url": url, "timeout": timeout})
+            return {"stockList": [
+                {
+                    "code": "600000",
+                    "category": "A股",
+                    "orgId": "gssh0600000",
+                    "zwjc": "浦发银行",
+                },
+                {
+                    "code": "300081",
+                    "category": "A股",
+                    "orgId": "9900012108",
+                    "zwjc": "ST恒信",
+                },
+            ]}
+
+        result = fetch_cninfo_issuer_scopes_from_roster(
+            ("300081", "600000"),
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(result.status, CninfoIssuerResolutionStatus.READY)
+        self.assertEqual(
+            tuple(scope.symbol for scope in result.scopes),
+            ("300081", "600000"),
+        )
+        self.assertEqual(
+            tuple(scope.issuer_identity for scope in result.scopes),
+            ("cninfo-org:9900012108", "cninfo-org:gssh0600000"),
+        )
+        self.assertEqual(captured["url"], CNINFO_ISSUER_ROSTER_URL)
+        self.assertEqual(captured["timeout"], 20.0)
+
+    def test_official_roster_fails_closed_on_missing_or_duplicate_identity(self):
+        cases = (
+            {"stockList": []},
+            {"stockList": [
+                {"code": "300081", "category": "B股", "orgId": "x"},
+            ]},
+            {"stockList": [
+                {"code": "300081", "category": "A股", "orgId": "x"},
+                {"code": "300081", "category": "A股", "orgId": "y"},
+            ]},
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                result = fetch_cninfo_issuer_scopes_from_roster(
+                    ("300081",),
+                    fetched_at=FETCHED_AT,
+                    transport=lambda *args, value=payload, **kwargs: value,
+                )
+                self.assertEqual(
+                    result.status,
+                    CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.scopes, ())
+
     def test_exact_official_issuer_scope_is_resolved(self):
         result = parse_cninfo_issuer_search_payload(
             "300081",
@@ -319,6 +383,37 @@ class LeaderRiskOfficialSourceTests(unittest.TestCase):
                 self.assertFalse(result.formal_usable)
                 self.assertIn(expected_reason, result.reasons)
 
+    def test_dot_prefixed_pdf_type_keeps_verified_official_pdf(self):
+        result = parse_cninfo_risk_discovery_payload(
+            make_query(),
+            make_payload(rows=[make_row(adjunctType=".PDF")]),
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(result.status, OfficialRiskSourceStatus.PARTIAL)
+        self.assertEqual(len(result.documents), 1)
+        self.assertNotIn(
+            "cninfo_document_url_unverified",
+            result.reasons,
+        )
+
+    def test_official_finalpage_html_with_missing_type_is_accepted(self):
+        result = parse_cninfo_risk_discovery_payload(
+            make_query(),
+            make_payload(rows=[make_row(
+                adjunctUrl="finalpage/2026-07-27/1225443882.html",
+                adjunctType=None,
+            )]),
+            fetched_at=FETCHED_AT,
+        )
+
+        self.assertEqual(result.status, OfficialRiskSourceStatus.PARTIAL)
+        self.assertEqual(len(result.documents), 1)
+        self.assertNotIn(
+            "cninfo_document_url_unverified",
+            result.reasons,
+        )
+
     def test_future_document_time_is_rejected(self):
         future_ms = int(
             (FETCHED_AT + timedelta(seconds=1)).timestamp()
@@ -462,6 +557,8 @@ class LeaderRiskOfficialSourceTests(unittest.TestCase):
             captured["data"]["searchkey"],
             "立案告知书",
         )
+        self.assertEqual(captured["data"]["sortName"], "announcementId")
+        self.assertEqual(captured["data"]["sortType"], "desc")
         self.assertIn("Referer", captured["headers"])
 
     def test_candidate_scope_is_sent_to_cninfo(self):

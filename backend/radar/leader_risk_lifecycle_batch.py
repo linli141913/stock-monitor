@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -270,7 +270,6 @@ def _query_audit(
         == set(ALL_RISK_CATEGORIES)
     )
     groups = {}
-    windows = set()
     query_contract_valid = True
     expected_symbol_shards = tuple(
         expected_symbols[index:index + MAXIMUM_CANDIDATE_SCOPE_COUNT]
@@ -320,8 +319,8 @@ def _query_audit(
                 if query.page_number == 1:
                     category_first_page_shards.setdefault(
                         query.candidate_category,
-                        [],
-                    ).append(shard_index)
+                        set(),
+                    ).add(shard_index)
         else:
             query_contract_valid = False
         expected_search_key = CANONICAL_DISCOVERY_SEARCH_KEYS.get(
@@ -337,18 +336,17 @@ def _query_audit(
         key = (
             query.search_key,
             query.candidate_category,
-            query.window_from,
-            query.window_until,
             query.page_size,
             scope_identity,
         )
-        groups.setdefault(key, []).append(batch)
-        windows.add((query.window_from, query.window_until))
+        window = (query.window_from, query.window_until)
+        groups.setdefault(key, {}).setdefault(window, []).append(batch)
     expected_shard_indexes = list(range(len(expected_symbol_shards)))
     if (
         set(canonical_scope_shards) != set(expected_shard_indexes)
+        or set(category_first_page_shards) != set(ALL_RISK_CATEGORIES)
         or any(
-            indexes != expected_shard_indexes
+            indexes != set(expected_shard_indexes)
             for indexes in category_first_page_shards.values()
         )
     ):
@@ -360,90 +358,132 @@ def _query_audit(
         len(groups) == expected_group_count
     )
     category_document_ids = {}
-    for grouped in groups.values():
-        total_pages_values = {item.total_pages for item in grouped}
-        reported_total_pages_values = {
-            item.reported_total_pages for item in grouped
-        }
-        total_records_values = {item.total_records for item in grouped}
+    outer_windows = set()
+    partition_windows_continuous = bool(groups)
+    for window_groups in groups.values():
+        ordered_windows = tuple(sorted(window_groups))
         if (
-            len(total_pages_values) != 1
-            or len(reported_total_pages_values) != 1
-            or len(total_records_values) != 1
+            not ordered_windows
             or any(
-                item.status != OfficialRiskSourceStatus.PARTIAL
-                for item in grouped
+                not isinstance(window_from, date)
+                or isinstance(window_from, datetime)
+                or not isinstance(window_until, date)
+                or isinstance(window_until, datetime)
+                or window_from > window_until
+                for window_from, window_until in ordered_windows
             )
-        ):
-            pages_complete = False
-            break
-        total_pages = next(iter(total_pages_values))
-        total_records = next(iter(total_records_values))
-        page_size = grouped[0].query.page_size
-        if (
-            not isinstance(total_pages, int)
-            or total_pages < 0
-            or not isinstance(total_records, int)
-            or total_records < 0
-            or not isinstance(page_size, int)
-            or page_size <= 0
-            or total_pages
-            != (
-                0
-                if total_records == 0
-                else (total_records + page_size - 1) // page_size
-            )
-        ):
-            pages_complete = False
-            break
-        expected_pages = (
-            (1,) if total_pages == 0 else tuple(range(1, total_pages + 1))
-        )
-        ordered = tuple(sorted(
-            grouped,
-            key=lambda item: item.query.page_number,
-        ))
-        page_numbers = tuple(item.query.page_number for item in ordered)
-        if page_numbers != expected_pages or any(
-            item.has_more != (index < len(ordered) - 1)
-            for index, item in enumerate(ordered)
-        ):
-            pages_complete = False
-            break
-        document_ids = []
-        for page_index, item in enumerate(ordered):
-            documents = item.documents
-            expected_count = (
-                0
-                if total_pages == 0
-                else (
-                    page_size
-                    if page_index < total_pages - 1
-                    else total_records - page_size * (total_pages - 1)
+            or any(
+                current[0] != previous[1] + timedelta(days=1)
+                for previous, current in zip(
+                    ordered_windows,
+                    ordered_windows[1:],
                 )
             )
+        ):
+            partition_windows_continuous = False
+        else:
+            outer_windows.add((
+                ordered_windows[0][0],
+                ordered_windows[-1][1],
+            ))
+        for grouped in window_groups.values():
+            total_pages_values = {item.total_pages for item in grouped}
+            reported_total_pages_values = {
+                item.reported_total_pages for item in grouped
+            }
+            total_records_values = {item.total_records for item in grouped}
             if (
-                not isinstance(documents, tuple)
-                or len(documents) != expected_count
+                len(total_pages_values) != 1
+                or len(reported_total_pages_values) != 1
+                or len(total_records_values) != 1
                 or any(
-                    not isinstance(document, OfficialRiskDocumentMetadata)
-                    or not isinstance(document.document_id, str)
-                    or not document.document_id
-                    for document in documents
+                    item.status != OfficialRiskSourceStatus.PARTIAL
+                    for item in grouped
                 )
             ):
                 pages_complete = False
                 break
-            document_ids.extend(document.document_id for document in documents)
-        if (
-            not pages_complete
-            or len(document_ids) != total_records
-            or len(document_ids) != len(set(document_ids))
-        ):
-            pages_complete = False
+            total_pages = next(iter(total_pages_values))
+            total_records = next(iter(total_records_values))
+            page_size = grouped[0].query.page_size
+            if (
+                not isinstance(total_pages, int)
+                or total_pages < 0
+                or not isinstance(total_records, int)
+                or total_records < 0
+                or not isinstance(page_size, int)
+                or page_size <= 0
+                or total_pages
+                != (
+                    0
+                    if total_records == 0
+                    else (total_records + page_size - 1) // page_size
+                )
+            ):
+                pages_complete = False
+                break
+            expected_pages = (
+                (1,)
+                if total_pages == 0
+                else tuple(range(1, total_pages + 1))
+            )
+            ordered = tuple(sorted(
+                grouped,
+                key=lambda item: item.query.page_number,
+            ))
+            page_numbers = tuple(
+                item.query.page_number for item in ordered
+            )
+            if page_numbers != expected_pages or any(
+                item.has_more != (index < len(ordered) - 1)
+                for index, item in enumerate(ordered)
+            ):
+                pages_complete = False
+                break
+            document_ids = []
+            for page_index, item in enumerate(ordered):
+                documents = item.documents
+                expected_count = (
+                    0
+                    if total_pages == 0
+                    else (
+                        page_size
+                        if page_index < total_pages - 1
+                        else total_records
+                        - page_size * (total_pages - 1)
+                    )
+                )
+                if (
+                    not isinstance(documents, tuple)
+                    or len(documents) != expected_count
+                    or any(
+                        not isinstance(
+                            document,
+                            OfficialRiskDocumentMetadata,
+                        )
+                        or not isinstance(document.document_id, str)
+                        or not document.document_id
+                        for document in documents
+                    )
+                ):
+                    pages_complete = False
+                    break
+                document_ids.extend(
+                    document.document_id for document in documents
+                )
+            if (
+                not pages_complete
+                or len(document_ids) != total_records
+                or len(document_ids) != len(set(document_ids))
+            ):
+                pages_complete = False
+                break
+            category = grouped[0].query.candidate_category
+            category_document_ids.setdefault(category, []).extend(
+                document_ids
+            )
+        if not pages_complete:
             break
-        category = grouped[0].query.candidate_category
-        category_document_ids.setdefault(category, []).extend(document_ids)
     if pages_complete and any(
         len(document_ids) != len(set(document_ids))
         for document_ids in category_document_ids.values()
@@ -451,9 +491,10 @@ def _query_audit(
         pages_complete = False
     plan_date = as_of.astimezone(SHANGHAI_TZ).date()
     window_continuous = bool(
-        len(windows) == 1
-        and next(iter(windows))[0] <= plan_date
-        and next(iter(windows))[1] >= plan_date
+        partition_windows_continuous
+        and len(outer_windows) == 1
+        and next(iter(outer_windows))[0] <= plan_date
+        and next(iter(outer_windows))[1] >= plan_date
     )
     return categories_complete, pages_complete, window_continuous
 

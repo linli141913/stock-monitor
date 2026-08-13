@@ -400,10 +400,54 @@ class LeaderRiskLifecycleDeliveryTests(unittest.TestCase):
             result.status,
             LeaderRiskLifecycleDeliveryStatus.SOURCE_FAILED,
         )
-        self.assertEqual(result.request_count, 1)
+        self.assertEqual(result.request_count, 2)
         self.assertEqual(
             result.lifecycle_result.status,
             LeaderRiskLifecycleBatchStatus.SOURCE_FAILED,
+        )
+        self.assertIn(
+            "risk_lifecycle_delivery_source_retry_attempted",
+            result.reasons,
+        )
+
+    def test_second_query_scope_failure_is_not_misreported_as_shard_mismatch(
+        self,
+    ):
+        input_value = self.large_input_value(
+            31,
+            max_page_requests=14,
+        )
+        calls = 0
+
+        def transport(url, *, data, headers, timeout):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return self.payload([])
+            return self.payload([
+                self.document_row(
+                    secCode="300030",
+                    orgId="fixture300030",
+                )
+            ])
+
+        result = deliver_leader_risk_lifecycle(
+            input_value,
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleDeliveryStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.request_count, 2)
+        self.assertIn(
+            "risk_lifecycle_discovery_source_unverified",
+            result.reasons,
+        )
+        self.assertNotIn(
+            "risk_official_candidate_discovery_scope_mismatch",
+            result.reasons,
         )
 
     def test_confirmation_is_required_before_any_source_call(self):
@@ -615,6 +659,253 @@ class LeaderRiskLifecycleDeliveryTests(unittest.TestCase):
             1,
         )
 
+    def test_cross_page_duplicate_uses_two_matching_date_partition_sweeps(self):
+        first_page_rows = tuple(
+            self.document_row(
+                announcementId=str(1225444400 + index),
+                adjunctUrl=(
+                    "finalpage/2026-07-27/"
+                    f"{1225444400 + index}.PDF"
+                ),
+            )
+            for index in range(30)
+        )
+        full_window = f"{self.window_from.isoformat()}~{self.window_until.isoformat()}"
+        midpoint = self.window_from + timedelta(
+            days=(self.window_until - self.window_from).days // 2
+        )
+        target_calls = []
+
+        def partition_rows(start, end):
+            indexes = range(15) if end == midpoint else range(15, 31)
+            published_at = datetime.combine(
+                end,
+                datetime.min.time(),
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            )
+            return tuple(
+                self.document_row(
+                    announcementId=str(1225444400 + index),
+                    announcementTime=int(published_at.timestamp() * 1000),
+                    adjunctUrl=(
+                        "finalpage/2026-07-27/"
+                        f"{1225444400 + index}.PDF"
+                    ),
+                )
+                for index in indexes
+            )
+
+        def transport(url, *, data, headers, timeout):
+            if data["searchkey"] != "减持计划":
+                return self.complete_transport(
+                    url,
+                    data=data,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            target_calls.append((data["seDate"], data["pageNum"]))
+            if data["seDate"] == full_window:
+                if data["pageNum"] == "2":
+                    return self.payload(
+                        [first_page_rows[-1]],
+                        total=31,
+                        total_pages=2,
+                        has_more=False,
+                    )
+                return self.payload(
+                    first_page_rows,
+                    total=31,
+                    total_pages=2,
+                    has_more=True,
+                )
+            start_text, end_text = data["seDate"].split("~", 1)
+            rows = partition_rows(
+                datetime.fromisoformat(start_text).date(),
+                datetime.fromisoformat(end_text).date(),
+            )
+            return self.payload(
+                rows,
+                total=len(rows),
+                total_pages=1,
+                has_more=False,
+            )
+
+        result = deliver_leader_risk_lifecycle(
+            self.input_value(max_page_requests=14),
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleDeliveryStatus.PARTIAL,
+        )
+        self.assertEqual(result.request_count, 14)
+        self.assertEqual(len(target_calls), 8)
+        self.assertIn(
+            "risk_lifecycle_delivery_date_partition_check_attempted",
+            result.reasons,
+        )
+        self.assertIn(
+            "risk_lifecycle_delivery_date_partition_check_succeeded",
+            result.reasons,
+        )
+        self.assertNotIn(
+            "risk_lifecycle_query_pages_incomplete",
+            result.reasons,
+        )
+
+    def test_date_partition_check_fails_closed_when_sweeps_differ(self):
+        first_page_rows = tuple(
+            self.document_row(
+                announcementId=str(1225444500 + index),
+                adjunctUrl=(
+                    "finalpage/2026-07-27/"
+                    f"{1225444500 + index}.PDF"
+                ),
+            )
+            for index in range(30)
+        )
+        full_window = f"{self.window_from.isoformat()}~{self.window_until.isoformat()}"
+        midpoint = self.window_from + timedelta(
+            days=(self.window_until - self.window_from).days // 2
+        )
+        partition_round = 0
+
+        def partition_rows(end):
+            indexes = list(
+                range(15) if end == midpoint else range(15, 31)
+            )
+            if partition_round == 3 and end != midpoint:
+                indexes[-1] = 31
+            published_at = datetime.combine(
+                end,
+                datetime.min.time(),
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            )
+            return tuple(
+                self.document_row(
+                    announcementId=str(1225444500 + index),
+                    announcementTime=int(published_at.timestamp() * 1000),
+                    adjunctUrl=(
+                        "finalpage/2026-07-27/"
+                        f"{1225444500 + index}.PDF"
+                    ),
+                )
+                for index in indexes
+            )
+
+        def transport(url, *, data, headers, timeout):
+            nonlocal partition_round
+            if data["searchkey"] != "减持计划":
+                return self.complete_transport(
+                    url,
+                    data=data,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            if data["seDate"] == full_window:
+                if data["pageNum"] == "1":
+                    partition_round += 1
+                if data["pageNum"] == "2":
+                    return self.payload(
+                        [first_page_rows[-1]],
+                        total=31,
+                        total_pages=2,
+                        has_more=False,
+                    )
+                return self.payload(
+                    first_page_rows,
+                    total=31,
+                    total_pages=2,
+                    has_more=True,
+                )
+            _, end_text = data["seDate"].split("~", 1)
+            end = datetime.fromisoformat(end_text).date()
+            rows = partition_rows(end)
+            return self.payload(
+                rows,
+                total=len(rows),
+                total_pages=1,
+                has_more=False,
+            )
+
+        result = deliver_leader_risk_lifecycle(
+            self.input_value(max_page_requests=14),
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleDeliveryStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.request_count, 14)
+        self.assertEqual(partition_round, 3)
+        self.assertIn(
+            "risk_lifecycle_delivery_date_partition_unverified",
+            result.reasons,
+        )
+        self.assertIsNone(result.lifecycle_result.projection_batch)
+
+    def test_date_partition_source_failure_stops_after_network_retry(self):
+        first_page_rows = tuple(
+            self.document_row(
+                announcementId=str(1225444600 + index),
+                adjunctUrl=(
+                    "finalpage/2026-07-27/"
+                    f"{1225444600 + index}.PDF"
+                ),
+            )
+            for index in range(30)
+        )
+        full_window = f"{self.window_from.isoformat()}~{self.window_until.isoformat()}"
+        target_calls = 0
+
+        def transport(url, *, data, headers, timeout):
+            nonlocal target_calls
+            if data["searchkey"] != "减持计划":
+                return self.complete_transport(
+                    url,
+                    data=data,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            target_calls += 1
+            if data["seDate"] != full_window:
+                raise requests.ConnectionError("temporary")
+            if data["pageNum"] == "1":
+                return self.payload(
+                    first_page_rows,
+                    total=31,
+                    total_pages=2,
+                    has_more=True,
+                )
+            return self.payload(
+                [first_page_rows[-1]],
+                total=31,
+                total_pages=2,
+                has_more=False,
+            )
+
+        result = deliver_leader_risk_lifecycle(
+            self.input_value(max_page_requests=12),
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleDeliveryStatus.SOURCE_FAILED,
+        )
+        self.assertEqual(result.request_count, 11)
+        self.assertEqual(target_calls, 5)
+        self.assertIn(
+            "risk_lifecycle_delivery_source_retry_attempted",
+            result.reasons,
+        )
+        self.assertNotIn(
+            "risk_lifecycle_delivery_date_partition_check_succeeded",
+            result.reasons,
+        )
+
     def test_cross_page_total_drift_is_source_unverified(self):
         first_page_rows = tuple(
             self.document_row(
@@ -721,7 +1012,42 @@ class LeaderRiskLifecycleDeliveryTests(unittest.TestCase):
         self.assertEqual(result.request_count, 8)
         self.assertIsNone(result.lifecycle_result.projection_batch)
 
-    def test_source_failure_stops_without_retry_or_sensitive_echo(self):
+    def test_source_request_failure_retries_once_within_page_budget(self):
+        calls = 0
+
+        def transport(url, *, data, headers, timeout):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise requests.ConnectionError("temporary")
+            return self.complete_transport(
+                url,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+            )
+
+        result = deliver_leader_risk_lifecycle(
+            self.input_value(max_page_requests=8),
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleDeliveryStatus.PARTIAL,
+        )
+        self.assertEqual(result.request_count, 8)
+        self.assertEqual(calls, 8)
+        self.assertIn(
+            "risk_lifecycle_delivery_source_retry_attempted",
+            result.reasons,
+        )
+        self.assertIn(
+            "risk_lifecycle_delivery_source_retry_succeeded",
+            result.reasons,
+        )
+
+    def test_source_failure_stops_after_one_retry_without_sensitive_echo(self):
         calls = []
 
         def transport(*args, **kwargs):
@@ -739,8 +1065,8 @@ class LeaderRiskLifecycleDeliveryTests(unittest.TestCase):
             result.status,
             LeaderRiskLifecycleDeliveryStatus.SOURCE_FAILED,
         )
-        self.assertEqual(result.request_count, 1)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(result.request_count, 2)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(result.fetched_page_count, 0)
         self.assertEqual(result.category_count, 0)
         self.assertNotIn("secret", str(result.to_evidence()))

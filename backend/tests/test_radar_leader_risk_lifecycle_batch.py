@@ -145,6 +145,7 @@ class LeaderRiskLifecycleBatchTests(unittest.TestCase):
         event=None,
         facts=None,
         candidate=None,
+        fact_supplements=None,
     ):
         as_of = self.plan.as_of - (
             timedelta(days=2)
@@ -161,11 +162,18 @@ class LeaderRiskLifecycleBatchTests(unittest.TestCase):
         previous_version = (
             f"manual-review-v{number - 1}" if number > 1 else None
         )
+        submission_changes = {
+            "review_version": f"manual-review-v{number}",
+            "supersedes_review_version": previous_version,
+            "reviewed_at": as_of - timedelta(hours=2),
+        }
+        if fact_supplements is not None:
+            submission_changes["fact_supplements"] = tuple(
+                fact_supplements
+            )
         submission = d5_helpers.make_submission(
             active_candidate,
-            review_version=f"manual-review-v{number}",
-            supersedes_review_version=previous_version,
-            reviewed_at=as_of - timedelta(hours=2),
+            **submission_changes,
         )
         artifact_input = ManualRiskReviewArtifactInput(
             as_of=as_of,
@@ -222,10 +230,15 @@ class LeaderRiskLifecycleBatchTests(unittest.TestCase):
         return version, artifact
 
     def _versions(self):
-        first, first_artifact = self._review_version(1)
+        manual_facts = d5_helpers.make_manual_facts()
+        first, first_artifact = self._review_version(
+            1,
+            fact_supplements=manual_facts[:4],
+        )
         second, _ = self._review_version(
             2,
             previous_artifacts=(first_artifact,),
+            fact_supplements=manual_facts,
         )
         return first, second
 
@@ -383,6 +396,49 @@ class LeaderRiskLifecycleBatchTests(unittest.TestCase):
         self.assertFalse(result.formal_gate_ready)
         self.assertFalse(result.formal_usable)
         self.assertFalse(result.state_transition_allowed)
+
+    def test_non_overlapping_date_partitions_preserve_complete_query_audit(self):
+        batches = list(self._discovery_batches())
+        index = next(
+            index
+            for index, batch in enumerate(batches)
+            if batch.query.candidate_category
+            == RiskCategory.INVESTIGATION
+        )
+        original = batches[index]
+        midpoint = original.query.window_until - timedelta(days=180)
+        first = replace(
+            original,
+            query=replace(
+                original.query,
+                window_until=midpoint - timedelta(days=1),
+            ),
+            total_records=0,
+            total_pages=0,
+            reported_total_pages=0,
+            documents=(),
+        )
+        second = replace(
+            original,
+            query=replace(
+                original.query,
+                window_from=midpoint,
+            ),
+        )
+        batches[index:index + 1] = [first, second]
+
+        result = build_leader_risk_lifecycle_batch(
+            self._input(batches=tuple(batches))
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskLifecycleBatchStatus.PARTIAL,
+        )
+        self.assertTrue(result.query_categories_complete)
+        self.assertTrue(result.query_pages_complete)
+        self.assertTrue(result.query_window_continuous)
+        self.assertEqual(result.projection_batch.ready_count, 1)
 
     def test_lifecycle_projection_enters_existing_unified_admission(self):
         lifecycle = build_leader_risk_lifecycle_batch(self._input())

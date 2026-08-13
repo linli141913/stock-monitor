@@ -4,6 +4,7 @@ const API_BASE = '/api/backend';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Activity } from 'lucide-react';
+import Link from 'next/link';
 import styles from './page.module.css';
 import RadarNewsCard, { RadarNews } from '@/components/industry/RadarNewsCard';
 
@@ -35,6 +36,18 @@ export default function IndustryInsightPage() {
   const [error, setError] = useState('');
   const [dataStatus, setDataStatus] = useState<NewsFeedStatus>('available_empty');
   const [total, setTotal] = useState(0);
+  const [radarContext, setRadarContext] = useState<{ code: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('from') !== 'radar') return;
+      const code = params.get('industryCode') || '';
+      const name = params.get('industryName') || '';
+      if (code || name) setRadarContext({ code, name });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
@@ -97,6 +110,16 @@ export default function IndustryInsightPage() {
           当日公开资讯（最新 {newsList.length} / {total} 条）
         </div>
       </div>
+
+      {radarContext && (
+        <div className={styles.radarContext}>
+          <div>
+            <strong>来自主线雷达：{radarContext.name || radarContext.code}</strong>
+            <span>当前仅携带行业上下文；下方公开资讯尚未按该行业精确过滤。</span>
+          </div>
+          <Link href="/radar">返回对应雷达行业</Link>
+        </div>
+      )}
 
       <div className={styles.tabs}>
         {TABS.map(tab => (

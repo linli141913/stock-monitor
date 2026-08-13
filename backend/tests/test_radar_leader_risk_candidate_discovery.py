@@ -199,6 +199,38 @@ class LeaderRiskOfficialCandidateDiscoveryTests(unittest.TestCase):
             mismatched.reasons,
         )
 
+    def test_scoped_batches_allow_multiple_non_overlapping_date_windows(self):
+        original = self.batch(RiskCategory.AUDIT)
+        midpoint = self.trade_date - timedelta(days=180)
+        first = replace(
+            original,
+            query=replace(
+                original.query,
+                window_until=midpoint - timedelta(days=1),
+            ),
+        )
+        second = replace(
+            original,
+            query=replace(
+                original.query,
+                window_from=midpoint,
+            ),
+        )
+
+        result = build_leader_risk_official_candidate_discovery_batch(
+            candidate_plan=self.plan,
+            batches=(first, second),
+        )
+
+        self.assertNotEqual(
+            result.status,
+            LeaderRiskOfficialCandidateDiscoveryStatus.BLOCKED,
+        )
+        self.assertNotIn(
+            "risk_official_candidate_discovery_scope_mismatch",
+            result.reasons,
+        )
+
     def test_scoped_batch_rejects_document_outside_issuer_scope(self):
         scopes = self.candidate_scopes()
         batch = self.batch(
@@ -221,6 +253,38 @@ class LeaderRiskOfficialCandidateDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             result.status,
             LeaderRiskOfficialCandidateDiscoveryStatus.BLOCKED,
+        )
+
+    def test_official_html_document_is_preserved_by_candidate_merge(self):
+        symbol = self.plan.items[0].symbol
+        html_document = replace(
+            document(
+                symbol=symbol,
+                category=RiskCategory.LITIGATION,
+                document_id="cninfo:official-html",
+                published_at=self.plan.as_of - timedelta(days=1),
+            ),
+            source_url=(
+                "https://static.cninfo.com.cn/finalpage/"
+                "2026-07-19/official-html.html"
+            ),
+        )
+
+        result = build_leader_risk_official_candidate_discovery_batch(
+            candidate_plan=self.plan,
+            batches=(self.batch(
+                RiskCategory.LITIGATION,
+                html_document,
+            ),),
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderRiskOfficialCandidateDiscoveryStatus.PARTIAL,
+        )
+        self.assertEqual(
+            result.documents_by_symbol[symbol][0].document_id,
+            "cninfo:official-html",
         )
 
     def test_malformed_scope_fields_are_blocked_without_exception(self):

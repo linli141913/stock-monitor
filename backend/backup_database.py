@@ -52,6 +52,7 @@ def create_database_backup(
         quick_check = verification_connection.execute("PRAGMA quick_check").fetchone()
     if not quick_check or quick_check[0] != "ok":
         raise RuntimeError("备份完整性校验失败")
+    backup_path.chmod(0o600)
 
     digest = _sha256(backup_path)
     checksum_path = backup_path.with_name(f"{backup_path.name}.sha256")
@@ -59,6 +60,7 @@ def create_database_backup(
         f"{digest}  {backup_path.name}\n",
         encoding="utf-8",
     )
+    checksum_path.chmod(0o600)
     return {
         "backupPath": str(backup_path),
         "checksumPath": str(checksum_path),

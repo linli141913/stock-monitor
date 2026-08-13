@@ -134,6 +134,13 @@ _RELATION_FIELDS = (
     "target_event_published_at",
 )
 
+_MATERIAL_RELATION_FIELDS = frozenset({
+    "relation_kind",
+    "replacement_event_version",
+    "target_event_official_status",
+    "target_event_published_at",
+})
+
 _ID_TUPLE_FIELDS = (
     "deterministic_fact_ids",
     "manual_fact_ids",
@@ -391,8 +398,10 @@ def _material_change_present(
         value.facts.manual_removed,
         value.facts.merged_added,
         value.facts.merged_removed,
-        value.artifact.field_changes,
-        value.relation.field_changes,
+        any(
+            change.field_name in _MATERIAL_RELATION_FIELDS
+            for change in value.relation.field_changes
+        ),
         value.relation.basis_fact_ids_added,
         value.relation.basis_fact_ids_removed,
         value.relation.manual_basis_fact_ids_added,

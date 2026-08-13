@@ -18,6 +18,11 @@ import SectorObservationPanel from '@/components/radar/SectorObservationPanel';
 import type {
   RadarEtfsResponse,
   RadarLeaderModule,
+  RadarLeaderReviewDocument,
+  RadarLeaderReviewDocumentResponse,
+  RadarLeaderReviewFormResponse,
+  RadarLeaderReviewSubmissionDraft,
+  RadarLeaderReviewQueueResponse,
   RadarLeadersResponse,
   RadarOverviewResponse,
   RadarSectorsResponse,
@@ -63,23 +68,67 @@ function stateLabel(state: string) {
   }[state] || state;
 }
 
+const ETF_REASON_LABELS: Record<string, string> = {
+  etf_product_evidence_not_ready: '产品正式证据未就绪',
+  etf_rule_not_frozen: '正式规则尚未冻结',
+  formal_source_inputs_incomplete: '正式来源输入不完整',
+  ranking_calibration_sample_missing: '排名校准样本不足',
+  management_style_unverified: '主动 / 被动属性未确认',
+  equity_region_unverified: '境内股票范围未确认',
+  asset_class_unverified: '资产类别未确认',
+  cross_border_asset_unverified: '跨境资产范围未确认',
+  product_type_unknown: '产品类型未确认',
+};
+
+function percent(value: number | null | undefined) {
+  return Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+}
+
+function blockerLabels(
+  reasonCodes: string[],
+  labels: Record<string, string>,
+  limit = 4,
+) {
+  const unique = Array.from(new Set(reasonCodes.map(
+    (reason) => labels[reason] || reason,
+  )));
+  const visible = unique.slice(0, limit);
+  if (unique.length > limit) visible.push(`另有 ${unique.length - limit} 项待补`);
+  return visible;
+}
+
 export default function RadarPage() {
   const [activeTab, setActiveTab] = useState<RadarTab>('overview');
   const [overview, setOverview] = useState<RadarOverviewResponse | null>(null);
   const [sectors, setSectors] = useState<RadarSectorsResponse | null>(null);
   const [etfs, setEtfs] = useState<RadarEtfsResponse | null>(null);
   const [leaders, setLeaders] = useState<RadarLeadersResponse | null>(null);
+  const [leaderReviewQueue, setLeaderReviewQueue] = useState<
+    RadarLeaderReviewQueueResponse | null
+  >(null);
+  const [selectedReviewDocument, setSelectedReviewDocument] = useState<
+    RadarLeaderReviewDocument | null
+  >(null);
+  const [leaderReviewForm, setLeaderReviewForm] = useState<
+    RadarLeaderReviewFormResponse | null
+  >(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const [sectorsRefreshError, setSectorsRefreshError] = useState('');
   const [etfsRefreshError, setEtfsRefreshError] = useState('');
   const [leadersRefreshError, setLeadersRefreshError] = useState('');
+  const [leaderReviewQueueError, setLeaderReviewQueueError] = useState('');
+  const [leaderReviewQueueLoading, setLeaderReviewQueueLoading] = useState(false);
+  const [leaderReviewSubmitting, setLeaderReviewSubmitting] = useState(false);
+  const [leaderReviewSubmitMessage, setLeaderReviewSubmitMessage] = useState('');
   const [renderedAt, setRenderedAt] = useState<string | null>(null);
   const overviewInFlight = useRef(false);
   const sectorsInFlight = useRef(false);
   const etfsInFlight = useRef(false);
   const leadersInFlight = useRef(false);
+  const leaderReviewQueueInFlight = useRef(false);
+  const leaderReviewQueueOffset = useRef(0);
 
   const loadOverview = useCallback(async (silent = false) => {
     if (overviewInFlight.current) return;
@@ -184,6 +233,136 @@ export default function RadarPage() {
     }
   }, []);
 
+  const loadLeaderReviewQueue = useCallback(async (offset = 0) => {
+    if (leaderReviewQueueInFlight.current) return;
+    leaderReviewQueueInFlight.current = true;
+    setLeaderReviewQueueLoading(true);
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/leaders/review-queue?limit=8&offset=${offset}&_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('D2审核队列暂不可用');
+      const payload = await response.json() as RadarLeaderReviewQueueResponse;
+      if (payload.schemaVersion !== 'radar-leader-review-queue-v1') {
+        throw new Error('D2审核队列数据契约不匹配');
+      }
+      setLeaderReviewQueue(payload);
+      leaderReviewQueueOffset.current = payload.offset;
+      setSelectedReviewDocument(null);
+      setLeaderReviewForm(null);
+      setLeaderReviewSubmitMessage('');
+      setLeaderReviewQueueError('');
+    } catch (error) {
+      setLeaderReviewQueueError(
+        error instanceof Error ? error.message : 'D2审核队列暂不可用',
+      );
+    } finally {
+      leaderReviewQueueInFlight.current = false;
+      setLeaderReviewQueueLoading(false);
+    }
+  }, []);
+
+  const loadLeaderReviewDocument = useCallback(async (
+    item: RadarLeaderReviewDocument,
+  ) => {
+    const batchId = leaderReviewQueue?.summary.reviewBatchId;
+    if (!batchId) return;
+    setLeaderReviewQueueLoading(true);
+    try {
+      const params = new URLSearchParams({
+        reviewBatchId: batchId,
+        documentId: item.documentId,
+        candidateCategory: item.candidateCategory,
+        _t: String(Date.now()),
+      });
+      const response = await fetch(
+        `/api/backend/api/radar/leaders/review-queue/document?${params}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('公告审核状态暂不可用');
+      const payload = await response.json() as RadarLeaderReviewDocumentResponse;
+      if (payload.schemaVersion !== 'radar-leader-review-document-v1') {
+        throw new Error('公告审核状态契约不匹配');
+      }
+      setSelectedReviewDocument(payload.item);
+      const formResponse = await fetch(
+        `/api/backend/api/radar/leaders/review-queue/review-form?${params.toString()}`,
+        { cache: 'no-store' },
+      );
+      if (!formResponse.ok) throw new Error('公告正文审核预览暂不可用');
+      const formPayload = await formResponse.json() as RadarLeaderReviewFormResponse;
+      if (formPayload.schemaVersion !== 'radar-leader-review-form-v1') {
+        throw new Error('公告正文审核预览契约不匹配');
+      }
+      setLeaderReviewForm(formPayload);
+      setLeaderReviewSubmitMessage('');
+      setLeaderReviewQueueError('');
+    } catch (error) {
+      setLeaderReviewQueueError(
+        error instanceof Error ? error.message : '公告审核状态暂不可用',
+      );
+    } finally {
+      setLeaderReviewQueueLoading(false);
+    }
+  }, [leaderReviewQueue?.summary.reviewBatchId]);
+
+  const submitLeaderReview = useCallback(async (
+    draft: RadarLeaderReviewSubmissionDraft,
+  ) => {
+    if (!leaderReviewForm) return;
+    setLeaderReviewSubmitting(true);
+    setLeaderReviewSubmitMessage('');
+    try {
+      const response = await fetch(
+        '/api/backend/api/radar/leaders/review-queue/review-version',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({
+            reviewBatchId: leaderReviewForm.summary.reviewBatchId,
+            documentId: leaderReviewForm.item.documentId,
+            candidateCategory: leaderReviewForm.item.candidateCategory,
+            contentSha256: leaderReviewForm.contentSha256,
+            candidateId: leaderReviewForm.candidate.candidateId,
+            ...draft,
+            effectiveUntil: draft.effectiveUntil
+              ? new Date(draft.effectiveUntil).toISOString()
+              : null,
+            targetEvent: {
+              ...draft.targetEvent,
+              publishedAt: new Date(draft.targetEvent.publishedAt).toISOString(),
+              effectiveFrom: new Date(draft.targetEvent.effectiveFrom).toISOString(),
+              effectiveUntil: draft.targetEvent.effectiveUntil
+                ? new Date(draft.targetEvent.effectiveUntil).toISOString()
+                : null,
+            },
+            factSupplements: draft.factSupplements.map((fact) => ({
+              ...fact,
+              mappedDocumentId: fact.factKind === 'referenced_document_id'
+                ? draft.targetEvent.documentId
+                : null,
+            })),
+          }),
+        },
+      );
+      const payload = await response.json() as {
+        detail?: string;
+        reviewVersion?: string;
+      };
+      if (!response.ok) throw new Error(payload.detail || '人工审核版本提交失败');
+      setLeaderReviewSubmitMessage(`已保存 ${payload.reviewVersion || '人工审核版本'}`);
+      await loadLeaderReviewQueue(leaderReviewQueueOffset.current);
+    } catch (error) {
+      setLeaderReviewSubmitMessage(
+        error instanceof Error ? error.message : '人工审核版本提交失败',
+      );
+    } finally {
+      setLeaderReviewSubmitting(false);
+    }
+  }, [leaderReviewForm, loadLeaderReviewQueue]);
+
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadOverview(false), 0);
     const timer = window.setInterval(() => {
@@ -221,21 +400,30 @@ export default function RadarPage() {
 
   useEffect(() => {
     if (activeTab !== 'leaders') return;
-    const initialTimer = window.setTimeout(() => void loadLeaders(), 0);
+    const initialTimer = window.setTimeout(() => {
+      void loadLeaders();
+      void loadLeaderReviewQueue(0);
+    }, 0);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadLeaders();
+      if (document.visibilityState === 'visible') {
+        void loadLeaders();
+        void loadLeaderReviewQueue(leaderReviewQueueOffset.current);
+      }
     }, 180_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [activeTab, loadLeaders]);
+  }, [activeTab, loadLeaderReviewQueue, loadLeaders]);
 
   const refreshNow = async () => {
     await loadOverview(false);
     if (activeTab === 'sectors') await loadSectors();
     if (activeTab === 'etf') await loadEtfs();
-    if (activeTab === 'leaders') await loadLeaders();
+    if (activeTab === 'leaders') {
+      await loadLeaders();
+      await loadLeaderReviewQueue(leaderReviewQueueOffset.current);
+    }
   };
 
   const showTab = (tab: RadarTab) => {
@@ -271,6 +459,23 @@ export default function RadarPage() {
     : null;
   const leaderModule: RadarLeaderModule | null = leaders?.module
     || overviewLeaderModule;
+  const etfSourceCoverage = etfModule.lastAttempt?.requiredFieldCoverage
+    || etfModule.sources[0]?.requiredFieldCoverage
+    || {};
+  const etfRowCoverage = etfModule.lastAttempt?.rowCoverage
+    ?? etfModule.sources[0]?.rowCoverage
+    ?? 0;
+  const etfReasonCodes = Array.from(new Set([
+    ...etfModule.reasonCodes,
+    ...etfModule.summary.reasonCodes,
+  ]));
+  const leaderCoverage = percent(leaderModule?.summary.coverage);
+  const leaderFormalCount = leaderModule?.summary.formalUsableCount || 0;
+  const leaderEligibleCount = leaderModule?.summary.eligibleCount || 0;
+  const leaderSnapshotReady = Boolean(leaderModule?.lastSuccess);
+  const leaderRuntimeEnabled = !('enabledStage' in overview.modules.leaders);
+  const leaderReviewQueueReady = leaderModule?.reviewQueue?.status === 'ready';
+  const leaderReviewVersionCount = leaderModule?.reviewQueue?.reviewVersionCount || 0;
   const dataHealthy = overview.mode === 'shadow'
     && market.state === 'available'
     && sectorModule.state === 'available';
@@ -364,11 +569,69 @@ export default function RadarPage() {
               title="行业ETF监测"
               description="总览只显示真实产品主档与候选摘要，详细时间和替代标的进入行业ETF页查看。"
               stage={etfModule.state === 'not_enabled' ? 5 : undefined}
-              badges={[
-                `官方产品 ${etfModule.summary.productCount}`,
-                `候选组 ${etfModule.summary.candidateGroupCount}`,
-                etfModule.summary.formalStateEnabled ? '正式状态可用' : '正式状态未启用',
+              metrics={[
+                { label: '产品主档', value: `${etfModule.summary.productCount} 只` },
+                { label: '正式准入', value: `${etfModule.summary.eligibleProductCount} 只` },
+                { label: '待补证据', value: `${etfModule.summary.missingCount} 只` },
+                {
+                  label: '计算覆盖',
+                  value: `${Math.round(etfModule.summary.coverage * 100)}%`,
+                },
               ]}
+              progress={[
+                {
+                  label: '官方产品主档',
+                  value: `${percent(etfRowCoverage)}%`,
+                  detail: '交易所产品行覆盖',
+                  percent: percent(etfRowCoverage),
+                  tone: 'good',
+                },
+                {
+                  label: '资产类别确认',
+                  value: `${percent(etfSourceCoverage.etf_asset_class_confirmed)}%`,
+                  detail: '仅采用可追溯分类证据',
+                  percent: percent(etfSourceCoverage.etf_asset_class_confirmed),
+                  tone: 'accent',
+                },
+                {
+                  label: '管理方式确认',
+                  value: `${percent(etfSourceCoverage.etf_management_style_confirmed)}%`,
+                  detail: '主动 / 被动仍需官方证据',
+                  percent: percent(etfSourceCoverage.etf_management_style_confirmed),
+                  tone: 'warning',
+                },
+                {
+                  label: '候选计算覆盖',
+                  value: `${percent(etfModule.summary.coverage)}%`,
+                  detail: '未满足门槛不生成候选',
+                  percent: percent(etfModule.summary.coverage),
+                  tone: 'warning',
+                },
+              ]}
+              milestones={[
+                {
+                  label: '官方产品主档',
+                  detail: `${etfModule.summary.productCount} 只产品已进入当前版本`,
+                  status: etfModule.summary.productCount > 0 ? 'done' : 'active',
+                },
+                {
+                  label: '产品分类与指数证据',
+                  detail: '补齐管理方式、资产范围和指数身份',
+                  status: etfModule.summary.eligibleProductCount > 0 ? 'done' : 'active',
+                },
+                {
+                  label: '规则冻结与排名校准',
+                  detail: '有真实样本后才能冻结正式规则',
+                  status: etfModule.summary.ruleVersionId ? 'done' : 'pending',
+                },
+                {
+                  label: '20个交易日影子验证',
+                  detail: '观察达标后再申请正式启用',
+                  status: etfModule.summary.formalStateEnabled ? 'done' : 'pending',
+                },
+              ]}
+              blockers={blockerLabels(etfReasonCodes, ETF_REASON_LABELS)}
+              nextStep="继续补齐产品分类与指数证据，同时保留阶段5影子观察。"
             />
             <ModuleStatePanel
               state={overview.modules.leaders.state}
@@ -377,11 +640,76 @@ export default function RadarPage() {
               stage={'enabledStage' in overview.modules.leaders
                 ? overview.modules.leaders.enabledStage
                 : undefined}
-              badges={leaderModule ? [
-                `预备龙头 ${leaderModule.summary.preliminaryCount}`,
-                `候选龙头 ${leaderModule.summary.candidateCount}`,
-                `已确认龙头 ${leaderModule.summary.confirmedCount}`,
-              ] : ['预备龙头 —', '候选龙头 —', '已确认龙头 —']}
+              metrics={leaderModule ? [
+                { label: '合资格', value: `${leaderModule.summary.eligibleCount} 只` },
+                { label: '预备龙头', value: `${leaderModule.summary.preliminaryCount} 只` },
+                { label: '候选龙头', value: `${leaderModule.summary.candidateCount} 只` },
+                { label: '已确认', value: `${leaderModule.summary.confirmedCount} 只` },
+              ] : [
+                { label: '生产开关', value: '尚未启用' },
+                { label: '影子快照', value: '未生成' },
+                { label: '正式状态', value: '保持关闭' },
+              ]}
+              progress={[
+                {
+                  label: '阶段6影子入口',
+                  value: leaderRuntimeEnabled ? '已启用' : '未启用',
+                  detail: '研究链路开关，不等于正式状态可用',
+                  percent: leaderRuntimeEnabled ? 100 : 0,
+                  tone: leaderRuntimeEnabled ? 'good' : 'warning',
+                },
+                {
+                  label: '影子输入覆盖',
+                  value: `${leaderCoverage}%`,
+                  detail: '仅计算已验证来源输入',
+                  percent: leaderCoverage,
+                  tone: leaderCoverage === 100 ? 'good' : 'accent',
+                },
+                {
+                  label: '可用影子快照',
+                  value: leaderSnapshotReady ? '已生成' : '未生成',
+                  detail: '无快照时不展示梯队',
+                  percent: leaderSnapshotReady ? 100 : 0,
+                  tone: leaderSnapshotReady ? 'good' : 'warning',
+                },
+                {
+                  label: '正式可用状态',
+                  value: `${leaderFormalCount} 只`,
+                  detail: '正式门禁通过的龙头数量',
+                  percent: leaderEligibleCount > 0
+                    ? (leaderFormalCount / leaderEligibleCount) * 100
+                    : 0,
+                  tone: leaderFormalCount > 0 ? 'good' : 'warning',
+                },
+              ]}
+              milestones={[
+                {
+                  label: 'D2 官方来源验收',
+                  detail: '385只冻结候选的七类风险公告',
+                  status: leaderReviewQueueReady ? 'done' : 'active',
+                },
+                {
+                  label: 'D8 连续人工审核版本',
+                  detail: '至少两个真实连续版本，不复制补位',
+                  status: leaderReviewVersionCount >= 2 ? 'done' : 'active',
+                },
+                {
+                  label: '风险审核存储迁移',
+                  detail: '生产迁移6与只增审核仓储',
+                  status: leaderReviewQueueReady ? 'done' : 'pending',
+                },
+                {
+                  label: '阶段6影子启用',
+                  detail: '受控重载后才生成真实梯队快照',
+                  status: leaderRuntimeEnabled ? 'done' : 'pending',
+                },
+              ]}
+              blockers={[
+                ...(!leaderRuntimeEnabled ? ['阶段6影子入口未启用'] : []),
+                ...(leaderReviewVersionCount < 2 ? ['D8真实连续人工版本不足'] : []),
+                ...(!leaderSnapshotReady ? ['龙头候选影子快照尚未生成'] : []),
+              ]}
+              nextStep="基于已保存的3份真实正文形成第一个D8人工审核版本，后续再积累第二个连续版本。"
             />
           </div>
         </div>
@@ -439,6 +767,16 @@ export default function RadarPage() {
           {leaderModule ? (
             <LeaderObservationPanel
               module={leaderModule}
+              reviewQueuePage={leaderReviewQueue}
+              selectedReviewDocument={selectedReviewDocument}
+              reviewForm={leaderReviewForm}
+              reviewQueueLoading={leaderReviewQueueLoading}
+              reviewQueueError={leaderReviewQueueError}
+              reviewSubmitting={leaderReviewSubmitting}
+              reviewSubmitMessage={leaderReviewSubmitMessage}
+              onReviewPageChange={(offset) => void loadLeaderReviewQueue(offset)}
+              onReviewDocumentSelect={(item) => void loadLeaderReviewDocument(item)}
+              onReviewSubmit={(draft) => void submitLeaderReview(draft)}
               formatTime={formatTime}
               renderedAt={renderedAt}
             />

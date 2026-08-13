@@ -16,9 +16,14 @@ from radar.api_contracts import (
     RadarLastSuccess,
     RadarLeaderItem,
     RadarLeaderModule,
+    RadarLeaderReviewQueue,
+    RadarLeaderReviewDocument,
+    RadarLeaderReviewQueueResponse,
+    RadarLeaderReviewDocumentResponse,
     RadarLeaderSnapshot,
     RadarLeaderSummary,
     RadarLeadersResponse,
+    RadarStockResponse,
     RadarMarketModule,
     RadarMarketSession,
     RadarModuleCollection,
@@ -35,6 +40,7 @@ from radar.leader_board import (
     build_leader_board_projection,
 )
 from radar.leader_repository import LeaderRepository
+from radar.leader_risk_review_repository import LeaderRiskReviewRepository
 from radar.repository import RadarRepository
 
 
@@ -56,6 +62,7 @@ class RadarReadService:
         market_status_provider=market_calendar.get_market_status,
         etf_repository: Optional[EtfRepository] = None,
         leader_repository: Optional[LeaderRepository] = None,
+        risk_review_repository: Optional[LeaderRiskReviewRepository] = None,
     ):
         self.repository = repository
         self.settings = settings
@@ -63,6 +70,7 @@ class RadarReadService:
         self.market_status_provider = market_status_provider
         self.etf_repository = etf_repository
         self.leader_repository = leader_repository
+        self.risk_review_repository = risk_review_repository
 
     def _market_session(self, now: datetime) -> RadarMarketSession:
         status, calendar_day = self.market_status_provider("cn", now)
@@ -718,10 +726,70 @@ class RadarReadService:
             ),
             sources=[],
             summary=self._empty_leader_summary(reason_codes),
+            reviewQueue=self._leader_review_queue(),
             preliminary=[],
             candidates=[],
             confirmed=[],
             reasonCodes=list(reason_codes),
+        )
+
+    def _leader_review_queue(self) -> RadarLeaderReviewQueue:
+        if (
+            not self.settings.enabled
+            or not self.settings.shadow_mode
+            or not self.settings.leader_stage6_enabled
+        ):
+            return RadarLeaderReviewQueue(
+                reasonCodes=["stage_not_enabled"],
+            )
+        if self.risk_review_repository is None:
+            return RadarLeaderReviewQueue(
+                reasonCodes=["d2_review_storage_not_ready"],
+            )
+        try:
+            summary = (
+                self.risk_review_repository
+                .get_latest_review_batch_summary()
+            )
+        except Exception:
+            return RadarLeaderReviewQueue(
+                status="failed",
+                reasonCodes=["d2_review_queue_read_failed"],
+            )
+        if summary is None:
+            return RadarLeaderReviewQueue(
+                reasonCodes=["d2_review_batch_missing"],
+            )
+        complete = all((
+            summary.get("queryCategoriesComplete") is True,
+            summary.get("queryPagesComplete") is True,
+            summary.get("queryWindowContinuous") is True,
+        ))
+        if not complete:
+            return RadarLeaderReviewQueue(
+                status="failed",
+                reasonCodes=["d2_review_completeness_unverified"],
+            )
+        reason_codes = ["d2_review_queue_ready"]
+        if int(summary.get("reviewVersionCount", 0)) < 2:
+            reason_codes.append("d8_review_versions_missing")
+        return RadarLeaderReviewQueue(
+            status="ready",
+            reviewBatchId=summary["reviewBatchId"],
+            candidatePlanId=summary["candidatePlanId"],
+            asOf=summary["asOf"],
+            windowFrom=summary["windowFrom"],
+            windowUntil=summary["windowUntil"],
+            candidateCount=summary["candidateCount"],
+            documentCount=summary["documentCount"],
+            documentLinkCount=summary["documentLinkCount"],
+            contentSnapshotCount=summary["contentSnapshotCount"],
+            reviewedDocumentCount=summary["reviewedDocumentCount"],
+            reviewVersionCount=summary["reviewVersionCount"],
+            queryCategoriesComplete=True,
+            queryPagesComplete=True,
+            queryWindowContinuous=True,
+            reasonCodes=reason_codes,
         )
 
     @staticmethod
@@ -903,6 +971,7 @@ class RadarReadService:
                 ruleVersion=board.rule_version,
                 reasonCodes=reason_codes,
             ),
+            reviewQueue=self._leader_review_queue(),
             preliminary=preliminary,
             candidates=candidates,
             confirmed=confirmed,
@@ -977,6 +1046,161 @@ class RadarReadService:
                 now=now,
                 is_trading=market_session.code == "trading",
             ),
+        )
+
+    def build_stock(self, symbol: str) -> RadarStockResponse:
+        now = self.clock()
+        market_session = self._market_session(now)
+        module = self._leader_module(
+            now=now,
+            is_trading=market_session.code == "trading",
+        )
+        normalized_symbol = str(symbol).strip().lower()
+        if normalized_symbol.startswith(("sh", "sz", "hk", "bj")):
+            normalized_symbol = normalized_symbol[2:]
+
+        status_by_module = {
+            "not_enabled": "not_enabled",
+            "failed": "failed",
+            "stale": "stale",
+        }
+        status = status_by_module.get(module.state)
+        if module.state == "not_ready":
+            status = (
+                "no_snapshot"
+                if any(code in {
+                    "candidate_snapshot_missing",
+                    "stage6_storage_not_ready",
+                } for code in module.reason_codes)
+                else "failed"
+            )
+        leader = next(
+            (
+                item
+                for item in (
+                    *module.preliminary,
+                    *module.candidates,
+                    *module.confirmed,
+                )
+                if item.symbol == normalized_symbol
+            ),
+            None,
+        )
+        if status is None:
+            status = "matched" if leader is not None else "not_listed"
+        reason_codes = list(module.reason_codes)
+        if status == "not_listed":
+            reason_codes = ["stock_not_in_public_tiers"]
+
+        return RadarStockResponse(
+            checkedAt=now,
+            mode=self._mode(),
+            symbol=normalized_symbol,
+            status=status,
+            snapshot=module.last_success,
+            freshness=module.freshness,
+            leader=leader,
+            reasonCodes=reason_codes,
+        )
+
+    def build_leader_review_queue(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> RadarLeaderReviewQueueResponse:
+        now = self.clock()
+        market_session = self._market_session(now)
+        summary = self._leader_review_queue()
+        page = {
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "items": (),
+        }
+        if (
+            summary.status == "ready"
+            and summary.review_batch_id is not None
+            and self.risk_review_repository is not None
+        ):
+            page = self.risk_review_repository.list_review_batch_documents(
+                summary.review_batch_id,
+                limit=limit,
+                offset=offset,
+            )
+        items = []
+        for row in page["items"]:
+            document = row["document"]
+            items.append(RadarLeaderReviewDocument(
+                documentId=document.document_id,
+                symbol=document.symbol,
+                issuerName=document.issuer_name,
+                title=document.title,
+                publishedAt=document.published_at,
+                sourceName=document.source_name,
+                sourceUrl=document.source_url,
+                candidateCategory=document.candidate_category.value,
+                hasContentSnapshot=row["hasContentSnapshot"],
+                contentSnapshotCount=row["contentSnapshotCount"],
+                contentStatus=row["contentStatus"],
+                contentFetchedAt=row["contentFetchedAt"],
+                reviewVersionCount=row["reviewVersionCount"],
+            ))
+        return RadarLeaderReviewQueueResponse(
+            checkedAt=now,
+            mode=self._mode(),
+            marketSession=market_session,
+            summary=summary,
+            total=page["total"],
+            limit=page["limit"],
+            offset=page["offset"],
+            items=items,
+        )
+
+    def build_leader_review_document(
+        self,
+        *,
+        review_batch_id: str,
+        document_id: str,
+        candidate_category: str,
+    ) -> RadarLeaderReviewDocumentResponse:
+        now = self.clock()
+        market_session = self._market_session(now)
+        summary = self._leader_review_queue()
+        if (
+            summary.status != "ready"
+            or self.risk_review_repository is None
+        ):
+            raise ValueError("D2审核队列当前不可读")
+        if summary.review_batch_id != review_batch_id:
+            raise ValueError("公告不属于当前审核批次")
+        row = self.risk_review_repository.get_review_batch_document(
+            review_batch_id,
+            document_id,
+            candidate_category,
+        )
+        document = row["document"]
+        item = RadarLeaderReviewDocument(
+            documentId=document.document_id,
+            symbol=document.symbol,
+            issuerName=document.issuer_name,
+            title=document.title,
+            publishedAt=document.published_at,
+            sourceName=document.source_name,
+            sourceUrl=document.source_url,
+            candidateCategory=document.candidate_category.value,
+            hasContentSnapshot=row["hasContentSnapshot"],
+            contentSnapshotCount=row["contentSnapshotCount"],
+            contentStatus=row["contentStatus"],
+            contentFetchedAt=row["contentFetchedAt"],
+            reviewVersionCount=row["reviewVersionCount"],
+        )
+        return RadarLeaderReviewDocumentResponse(
+            checkedAt=now,
+            mode=self._mode(),
+            marketSession=market_session,
+            summary=summary,
+            item=item,
         )
 
     def build_sectors(self) -> RadarSectorsResponse:

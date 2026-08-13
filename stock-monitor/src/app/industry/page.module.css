@@ -31,6 +31,21 @@
   border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
+.radarContext {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.radarContext div { display: grid; gap: 4px; }
+.radarContext span { color: var(--text-secondary); font-size: 13px; }
+.radarContext a { color: #3b82f6; white-space: nowrap; }
+
 .tabs {
   display: flex;
   gap: 8px;

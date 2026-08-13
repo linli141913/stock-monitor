@@ -46,6 +46,24 @@
   margin-top: 20px;
 }
 
+.radarStockCard {
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.radarStockCard > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.radarStockCard h2 { margin: 0 0 12px; font-size: 18px; }
+.radarStockCard p, .radarStockCard span { color: var(--text-secondary); }
+.radarStockGrid { display: grid; gap: 8px; }
+
 /* 响应式调整 */
 @media (max-width: 1199px) {
   .leftCol {
@@ -75,4 +93,3 @@
     gap: var(--space-md);
   }
 }
-

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -212,6 +213,7 @@ def _safe_url(value: Any) -> bool:
         port = parts.port
     except (TypeError, ValueError):
         return False
+    path = PurePosixPath(parts.path)
     return bool(
         parts.scheme == "https"
         and parts.hostname == "static.cninfo.com.cn"
@@ -221,7 +223,7 @@ def _safe_url(value: Any) -> bool:
         and not parts.fragment
         and port is None
         and parts.path.startswith("/finalpage/")
-        and parts.path.lower().endswith(".pdf")
+        and path.suffix.casefold() in {".pdf", ".html"}
     )
 
 
@@ -309,7 +311,7 @@ def _document_valid(
     ):
         return False
     document_id = document.document_id.removeprefix("cninfo:")
-    url_stem = urlsplit(document.source_url).path.rsplit("/", 1)[-1][:-4]
+    url_stem = PurePosixPath(urlsplit(document.source_url).path).stem
     if not bool(
         SAFE_ID_PATTERN.fullmatch(document_id)
         and url_stem == document_id
@@ -534,10 +536,50 @@ def build_leader_risk_official_candidate_discovery_batch(
                     [],
                 ).append(shard_index)
         expected_shard_indexes = list(range(len(expected_symbol_shards)))
-        if (
+        terminal_first_page_prefix = (
+            len(expected_symbol_shards) > 1
+            and bool(batches)
+            and bool(
+                batches[-1].status
+                in {
+                    OfficialRiskSourceStatus.SOURCE_FAILED,
+                    OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+                }
+                and all(
+                    batch.query.page_number == 1 for batch in batches
+                )
+                and all(
+                    batch.status
+                    not in {
+                        OfficialRiskSourceStatus.SOURCE_FAILED,
+                        OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+                    }
+                    for batch in batches[:-1]
+                )
+            )
+        )
+        if terminal_first_page_prefix:
+            expected_prefix = tuple(
+                (shard_index, category)
+                for shard_index in expected_shard_indexes
+                for category in ALL_RISK_CATEGORIES
+            )
+            actual_prefix = tuple(
+                (batch.query.shard_index, batch.query.candidate_category)
+                for batch in batches
+            )
+            encountered_shards = {
+                shard_index for shard_index, _ in actual_prefix
+            }
+            if (
+                actual_prefix != expected_prefix[:len(actual_prefix)]
+                or set(canonical_shards) != encountered_shards
+            ):
+                scope_layout_valid = False
+        elif (
             set(canonical_shards) != set(expected_shard_indexes)
             or any(
-                indexes != expected_shard_indexes
+                list(dict.fromkeys(indexes)) != expected_shard_indexes
                 for indexes in category_first_page_shards.values()
             )
         ):

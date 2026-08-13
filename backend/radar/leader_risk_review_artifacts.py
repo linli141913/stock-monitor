@@ -62,6 +62,7 @@ class ManualRiskDocumentFactSubmission:
     source_value: str = field(repr=False)
     page_number: int = 0
     source_fragment: str = field(default="", repr=False)
+    mapped_document_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,10 @@ def _manual_fact(
         or isinstance(submission.page_number, bool)
         or not isinstance(submission.source_value, str)
         or not isinstance(submission.source_fragment, str)
+        or (
+            submission.mapped_document_id is not None
+            and not isinstance(submission.mapped_document_id, str)
+        )
     ):
         return None, ("manual_risk_review_fact_unverified",)
     source_value = submission.source_value.strip()
@@ -287,10 +292,25 @@ def _manual_fact(
         return None, ("manual_risk_review_fragment_unverified",)
     if _compact(source_value) not in _compact(source_fragment):
         return None, ("manual_risk_review_value_unverified",)
-    normalized_value = _normalized_fact_value(
-        submission.fact_kind,
-        source_value,
-    )
+    if (
+        submission.fact_kind
+        == RiskDocumentFactKind.REFERENCED_DOCUMENT_ID
+        and submission.mapped_document_id is not None
+    ):
+        mapped_document_id = submission.mapped_document_id.strip()
+        normalized_value = (
+            mapped_document_id
+            if re.fullmatch(r"cninfo:\d{7,12}", mapped_document_id)
+            and any(character.isdigit() for character in source_value)
+            else None
+        )
+    elif submission.mapped_document_id is not None:
+        normalized_value = None
+    else:
+        normalized_value = _normalized_fact_value(
+            submission.fact_kind,
+            source_value,
+        )
     if normalized_value is None:
         return None, ("manual_risk_review_value_unverified",)
 

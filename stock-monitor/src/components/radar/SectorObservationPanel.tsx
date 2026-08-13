@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import type { RadarSectorModule } from '@/types/radar';
 import ModuleStatePanel from './ModuleStatePanel';
 import styles from './Radar.module.css';
@@ -90,6 +92,9 @@ export default function SectorObservationPanel({
                 {item.shadowUsable ? '影子可用' : '部分字段不可用'}
               </span>
               <span>{item.freshCount} 条行情新鲜</span>
+              <Link href={`/industry?from=radar&industryCode=${encodeURIComponent(item.divisionCode)}&industryName=${encodeURIComponent(item.divisionName)}`}>
+                查看行业资讯
+              </Link>
             </div>
           </article>
         ))}

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -31,6 +31,7 @@ from radar.sources.leader_risk_official import (
     CninfoRiskDiscoveryQuery,
     CninfoTransport,
     OfficialRiskDiscoveryBatch,
+    OfficialRiskDocumentMetadata,
     OfficialRiskSourceStatus,
     fetch_cninfo_risk_discovery,
 )
@@ -162,6 +163,206 @@ def _safe_report_id(value: Any) -> Optional[str]:
     ):
         return value
     return None
+
+
+def _pagination_group_key(
+    batch: OfficialRiskDiscoveryBatch,
+) -> Tuple[Optional[int], object]:
+    return (
+        batch.query.shard_index,
+        batch.query.candidate_category,
+    )
+
+
+def _validated_group_snapshot(
+    grouped: Sequence[OfficialRiskDiscoveryBatch],
+    *,
+    require_unique: bool,
+) -> Optional[Tuple[OfficialRiskDocumentMetadata, ...]]:
+    if not grouped:
+        return None
+    keys = {_pagination_group_key(item) for item in grouped}
+    total_pages_values = {item.total_pages for item in grouped}
+    reported_total_pages_values = {
+        item.reported_total_pages for item in grouped
+    }
+    total_records_values = {item.total_records for item in grouped}
+    if (
+        len(keys) != 1
+        or len(total_pages_values) != 1
+        or len(reported_total_pages_values) != 1
+        or len(total_records_values) != 1
+        or any(
+            item.status != OfficialRiskSourceStatus.PARTIAL
+            for item in grouped
+        )
+    ):
+        return None
+    total_pages = next(iter(total_pages_values))
+    total_records = next(iter(total_records_values))
+    page_size = grouped[0].query.page_size
+    if (
+        not isinstance(total_pages, int)
+        or isinstance(total_pages, bool)
+        or total_pages < 0
+        or not isinstance(total_records, int)
+        or isinstance(total_records, bool)
+        or total_records < 0
+        or not isinstance(page_size, int)
+        or isinstance(page_size, bool)
+        or page_size <= 0
+        or total_pages
+        != (
+            0
+            if total_records == 0
+            else (total_records + page_size - 1) // page_size
+        )
+    ):
+        return None
+    expected_pages = (
+        (1,) if total_pages == 0 else tuple(range(1, total_pages + 1))
+    )
+    ordered = tuple(sorted(
+        grouped,
+        key=lambda item: item.query.page_number,
+    ))
+    if tuple(item.query.page_number for item in ordered) != expected_pages:
+        return None
+    if any(
+        item.has_more != (index < len(ordered) - 1)
+        for index, item in enumerate(ordered)
+    ):
+        return None
+    documents = []
+    for page_index, item in enumerate(ordered):
+        expected_count = (
+            0
+            if total_pages == 0
+            else (
+                page_size
+                if page_index < total_pages - 1
+                else total_records - page_size * (total_pages - 1)
+            )
+        )
+        if (
+            not isinstance(item.documents, tuple)
+            or len(item.documents) != expected_count
+            or any(
+                not isinstance(document, OfficialRiskDocumentMetadata)
+                or not isinstance(document.document_id, str)
+                or not document.document_id
+                for document in item.documents
+            )
+        ):
+            return None
+        documents.extend(item.documents)
+    if len(documents) != total_records:
+        return None
+    document_ids = tuple(item.document_id for item in documents)
+    if require_unique and len(document_ids) != len(set(document_ids)):
+        return None
+    return tuple(sorted(documents, key=lambda item: item.document_id))
+
+
+def _exact_duplicate_pagination_groups(
+    batches: Sequence[OfficialRiskDiscoveryBatch],
+) -> Tuple[Tuple[Tuple[Optional[int], object], CninfoRiskDiscoveryQuery], ...]:
+    groups = {}
+    for batch in batches:
+        groups.setdefault(_pagination_group_key(batch), []).append(batch)
+    matches = []
+    for key, grouped in groups.items():
+        snapshot = _validated_group_snapshot(
+            grouped,
+            require_unique=False,
+        )
+        if snapshot is None or len(grouped) < 2:
+            continue
+        documents_by_id = {}
+        for document in snapshot:
+            documents_by_id.setdefault(document.document_id, []).append(
+                document
+            )
+        duplicate_groups = tuple(
+            documents
+            for documents in documents_by_id.values()
+            if len(documents) > 1
+        )
+        if not duplicate_groups or any(
+            any(document != documents[0] for document in documents[1:])
+            for documents in duplicate_groups
+        ):
+            continue
+        representative = min(
+            grouped,
+            key=lambda item: item.query.page_number,
+        ).query
+        matches.append((key, representative))
+    return tuple(matches)
+
+
+def _validated_partition_snapshot(
+    batches: Sequence[OfficialRiskDiscoveryBatch],
+    *,
+    representative: CninfoRiskDiscoveryQuery,
+) -> Optional[
+    Tuple[
+        Tuple[Tuple[date, date], ...],
+        Tuple[OfficialRiskDocumentMetadata, ...],
+    ]
+]:
+    if not batches:
+        return None
+    ordered = tuple(sorted(
+        batches,
+        key=lambda item: (
+            item.query.window_from,
+            item.query.window_until,
+        ),
+    ))
+    windows = tuple(
+        (item.query.window_from, item.query.window_until)
+        for item in ordered
+    )
+    if (
+        windows[0][0] != representative.window_from
+        or windows[-1][1] != representative.window_until
+        or any(
+            current[0] != previous[1] + timedelta(days=1)
+            for previous, current in zip(windows, windows[1:])
+        )
+        or any(
+            item.query.page_number != 1
+            or item.query.search_key != representative.search_key
+            or item.query.candidate_category
+            != representative.candidate_category
+            or item.query.page_size != representative.page_size
+            or item.query.candidate_scopes
+            != representative.candidate_scopes
+            or item.query.candidate_plan_id
+            != representative.candidate_plan_id
+            or item.query.shard_index != representative.shard_index
+            or item.query.shard_count != representative.shard_count
+            for item in ordered
+        )
+    ):
+        return None
+    documents = []
+    for batch in ordered:
+        snapshot = _validated_group_snapshot(
+            (batch,),
+            require_unique=True,
+        )
+        if snapshot is None:
+            return None
+        documents.extend(snapshot)
+    document_ids = tuple(item.document_id for item in documents)
+    if len(document_ids) != len(set(document_ids)):
+        return None
+    return (
+        windows,
+        tuple(sorted(documents, key=lambda item: item.document_id)),
+    )
 
 
 def _result(
@@ -421,7 +622,12 @@ def deliver_leader_risk_lifecycle(
     request_count = 0
     source_terminal_status = None
     unexpected_source_failure = False
+    source_retry_attempted = False
+    source_retry_succeeded = False
     pagination_blocked = False
+    date_partition_attempted = False
+    date_partition_succeeded = False
+    date_partition_unverified = False
     scope_shards = tuple(
         input_value.candidate_scopes[
             index:index + MAXIMUM_CANDIDATE_SCOPE_COUNT
@@ -438,14 +644,16 @@ def deliver_leader_risk_lifecycle(
         else input_value.max_page_requests
     )
     assert isinstance(page_budget, int)
+    budget_exhausted = False
 
     def fetch(query: CninfoRiskDiscoveryQuery) -> Optional[
         OfficialRiskDiscoveryBatch
     ]:
         nonlocal request_count, unexpected_source_failure
+        nonlocal source_retry_attempted, source_retry_succeeded
         request_count += 1
         try:
-            return fetch_cninfo_risk_discovery(
+            batch = fetch_cninfo_risk_discovery(
                 query,
                 fetched_at=collected_at,
                 transport=transport,
@@ -453,9 +661,32 @@ def deliver_leader_risk_lifecycle(
         except Exception:
             unexpected_source_failure = True
             return None
+        if (
+            batch.status != OfficialRiskSourceStatus.SOURCE_FAILED
+            or "cninfo_source_request_failed" not in batch.reasons
+            or request_count >= page_budget
+        ):
+            return batch
+        source_retry_attempted = True
+        request_count += 1
+        try:
+            retry_batch = fetch_cninfo_risk_discovery(
+                query,
+                fetched_at=collected_at,
+                transport=transport,
+            )
+        except Exception:
+            unexpected_source_failure = True
+            return None
+        if retry_batch.status != OfficialRiskSourceStatus.SOURCE_FAILED:
+            source_retry_succeeded = True
+        return retry_batch
 
     for shard_index, scope_shard in enumerate(scope_shards):
         for category, search_key in CANONICAL_DISCOVERY_SEARCH_KEYS.items():
+            if request_count >= page_budget:
+                budget_exhausted = True
+                break
             query = CninfoRiskDiscoveryQuery(
                 search_key=search_key,
                 candidate_category=category,
@@ -486,7 +717,11 @@ def deliver_leader_risk_lifecycle(
                 pagination_blocked = True
                 break
             expected_pages[(shard_index, category)] = batch.total_pages or 0
-        if source_terminal_status is not None or pagination_blocked:
+        if (
+            source_terminal_status is not None
+            or pagination_blocked
+            or budget_exhausted
+        ):
             break
 
     if source_terminal_status is None and not pagination_blocked and (
@@ -494,7 +729,6 @@ def deliver_leader_risk_lifecycle(
         == len(CANONICAL_DISCOVERY_SEARCH_KEYS) * len(scope_shards)
     ):
         highest_page = max(expected_pages.values(), default=0)
-        budget_exhausted = False
         for page_number in range(2, highest_page + 1):
             for shard_index, scope_shard in enumerate(scope_shards):
                 for category, search_key in (
@@ -546,8 +780,133 @@ def deliver_leader_risk_lifecycle(
                 break
             if budget_exhausted:
                 break
-    else:
-        budget_exhausted = False
+
+    def fetch_date_partition_sweep(
+        representative: CninfoRiskDiscoveryQuery,
+    ) -> Optional[Tuple[OfficialRiskDiscoveryBatch, ...]]:
+        nonlocal budget_exhausted, pagination_blocked
+        nonlocal source_terminal_status
+        pending = [(
+            representative.window_from,
+            representative.window_until,
+        )]
+        sweep = []
+        while pending:
+            window_from, window_until = pending.pop()
+            if request_count >= page_budget:
+                budget_exhausted = True
+                return None
+            batch = fetch(replace(
+                representative,
+                window_from=window_from,
+                window_until=window_until,
+                page_number=1,
+            ))
+            if batch is None:
+                source_terminal_status = (
+                    OfficialRiskSourceStatus.SOURCE_FAILED
+                )
+                return None
+            if batch.status in {
+                OfficialRiskSourceStatus.SOURCE_FAILED,
+                OfficialRiskSourceStatus.SOURCE_UNVERIFIED,
+            }:
+                source_terminal_status = batch.status
+                return None
+            if any(
+                reason in PAGINATION_BLOCKING_REASONS
+                for reason in batch.reasons
+            ):
+                pagination_blocked = True
+                return None
+            total_records = batch.total_records
+            total_pages = batch.total_pages
+            requires_partition = bool(
+                isinstance(total_records, int)
+                and not isinstance(total_records, bool)
+                and total_records > PAGE_SIZE
+            ) or bool(
+                isinstance(total_pages, int)
+                and not isinstance(total_pages, bool)
+                and total_pages > 1
+            )
+            if requires_partition:
+                if window_from >= window_until:
+                    return None
+                midpoint = window_from + timedelta(
+                    days=(window_until - window_from).days // 2
+                )
+                pending.append((
+                    midpoint + timedelta(days=1),
+                    window_until,
+                ))
+                pending.append((window_from, midpoint))
+                continue
+            sweep.append(batch)
+        return tuple(sorted(
+            sweep,
+            key=lambda item: (
+                item.query.window_from,
+                item.query.window_until,
+            ),
+        ))
+
+    if (
+        source_terminal_status is None
+        and not pagination_blocked
+        and not budget_exhausted
+    ):
+        duplicate_groups = _exact_duplicate_pagination_groups(batches)
+        if duplicate_groups:
+            date_partition_attempted = True
+            date_partition_succeeded = True
+        for group_key, representative in duplicate_groups:
+            first_sweep = fetch_date_partition_sweep(representative)
+            if first_sweep is None:
+                date_partition_succeeded = False
+                date_partition_unverified = True
+                break
+            second_sweep = fetch_date_partition_sweep(representative)
+            first_snapshot = (
+                _validated_partition_snapshot(
+                    first_sweep,
+                    representative=representative,
+                )
+                if first_sweep is not None
+                else None
+            )
+            second_snapshot = (
+                _validated_partition_snapshot(
+                    second_sweep,
+                    representative=representative,
+                )
+                if second_sweep is not None
+                else None
+            )
+            if (
+                first_snapshot is None
+                or second_snapshot is None
+                or first_snapshot != second_snapshot
+            ):
+                date_partition_succeeded = False
+                date_partition_unverified = True
+                break
+            matching_indexes = tuple(
+                index
+                for index, batch in enumerate(batches)
+                if _pagination_group_key(batch) == group_key
+            )
+            if not matching_indexes:
+                date_partition_succeeded = False
+                date_partition_unverified = True
+                break
+            first_index = matching_indexes[0]
+            batches = [
+                batch
+                for index, batch in enumerate(batches)
+                if index not in matching_indexes
+            ]
+            batches[first_index:first_index] = list(second_sweep)
 
     lifecycle = build_leader_risk_lifecycle_batch(
         LeaderRiskLifecycleBatchInput(
@@ -560,6 +919,22 @@ def deliver_leader_risk_lifecycle(
     reasons = list(lifecycle.reasons)
     if unexpected_source_failure:
         reasons.append("risk_lifecycle_delivery_source_request_failed")
+    if source_retry_attempted:
+        reasons.append("risk_lifecycle_delivery_source_retry_attempted")
+    if source_retry_succeeded:
+        reasons.append("risk_lifecycle_delivery_source_retry_succeeded")
+    if date_partition_attempted:
+        reasons.append(
+            "risk_lifecycle_delivery_date_partition_check_attempted"
+        )
+    if date_partition_succeeded:
+        reasons.append(
+            "risk_lifecycle_delivery_date_partition_check_succeeded"
+        )
+    if date_partition_unverified:
+        reasons.append(
+            "risk_lifecycle_delivery_date_partition_unverified"
+        )
     if source_terminal_status == OfficialRiskSourceStatus.SOURCE_FAILED:
         status = LeaderRiskLifecycleDeliveryStatus.SOURCE_FAILED
     elif (
@@ -572,6 +947,12 @@ def deliver_leader_risk_lifecycle(
         reasons.append("risk_lifecycle_delivery_page_budget_exhausted")
     if pagination_blocked:
         reasons.append("risk_lifecycle_delivery_pagination_unverified")
+    if (
+        date_partition_unverified
+        and source_terminal_status
+        != OfficialRiskSourceStatus.SOURCE_FAILED
+    ):
+        status = LeaderRiskLifecycleDeliveryStatus.SOURCE_UNVERIFIED
 
     return _result(
         status=status,

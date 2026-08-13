@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from radar.contracts import (
     EtfRegistryRecord,
@@ -20,6 +21,7 @@ from radar.repository import (
     RadarRepository,
     RepositoryConflictError,
     RepositoryWriteError,
+    _begin_immediate,
 )
 
 
@@ -51,6 +53,24 @@ class RadarRepositoryTests(unittest.TestCase):
             started_at=FETCHED_1,
             shadow_mode=True,
         )
+
+    def test_begin_immediate_retries_one_transient_disk_io_error(self):
+        class TransientConnection:
+            def __init__(self):
+                self.attempts = 0
+
+            def execute(self, statement):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise sqlite3.OperationalError("disk I/O error")
+
+        connection = TransientConnection()
+
+        with patch("radar.repository.time.sleep") as sleep:
+            _begin_immediate(connection)
+
+        self.assertEqual(connection.attempts, 2)
+        sleep.assert_called_once_with(1.0)
 
     def security_record(
         self,

@@ -273,6 +273,131 @@ export interface RadarLeaderItem {
   formalUsable: false;
 }
 
+export interface RadarLeaderReviewQueue {
+  status: 'not_ready' | 'ready' | 'failed';
+  reviewBatchId: string | null;
+  candidatePlanId: string | null;
+  asOf: string | null;
+  windowFrom: string | null;
+  windowUntil: string | null;
+  candidateCount: number;
+  documentCount: number;
+  documentLinkCount: number;
+  contentSnapshotCount: number;
+  reviewedDocumentCount: number;
+  reviewVersionCount: number;
+  queryCategoriesComplete: boolean;
+  queryPagesComplete: boolean;
+  queryWindowContinuous: boolean;
+  reasonCodes: string[];
+  formalUsable: false;
+}
+
+export interface RadarLeaderReviewDocument {
+  documentId: string;
+  symbol: string;
+  issuerName: string;
+  title: string;
+  publishedAt: string;
+  sourceName: string;
+  sourceUrl: string;
+  candidateCategory: string;
+  hasContentSnapshot: boolean;
+  contentSnapshotCount: number;
+  contentStatus: 'not_fetched' | 'available';
+  contentFetchedAt: string | null;
+  reviewVersionCount: number;
+  formalUsable: false;
+}
+
+export interface RadarLeaderReviewQueueResponse {
+  schemaVersion: 'radar-leader-review-queue-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  marketSession: RadarMarketSession;
+  summary: RadarLeaderReviewQueue;
+  total: number;
+  limit: number;
+  offset: number;
+  items: RadarLeaderReviewDocument[];
+}
+
+export interface RadarLeaderReviewDocumentResponse {
+  schemaVersion: 'radar-leader-review-document-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  marketSession: RadarMarketSession;
+  summary: RadarLeaderReviewQueue;
+  item: RadarLeaderReviewDocument;
+}
+
+export interface RadarLeaderReviewPage {
+  pageNumber: number;
+  text: string;
+}
+
+export interface RadarLeaderReviewFormResponse {
+  schemaVersion: 'radar-leader-review-form-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  marketSession: RadarMarketSession;
+  summary: RadarLeaderReviewQueue;
+  item: RadarLeaderReviewDocument;
+  contentSha256: string;
+  contentFetchedAt: string;
+  pageCount: number;
+  pages: RadarLeaderReviewPage[];
+  candidate: {
+    candidateId: string;
+    candidateKind: 'fact_extraction_missing' | 'relation_review_required';
+    autoFactCount: number;
+    requiredFactKinds: string[];
+    reasonCodes: string[];
+  };
+  replayDiagnostic: {
+    status: 'ready' | 'missing' | 'source_unverified' | 'stale' | 'source_failed';
+    reviewVersionCount: number;
+    bundleCount: number;
+    activeReviewVersion: string | null;
+    materialChangeRequired: boolean;
+    reasonCodes: string[];
+    formalUsable: false;
+  };
+  nextReviewVersion: string;
+  supersedesReviewVersion: string | null;
+  writeEnabled: boolean;
+  writeReasonCode: string;
+  formalUsable: false;
+}
+
+export interface RadarLeaderReviewFactDraft {
+  factKind: string;
+  sourceValue: string;
+  pageNumber: number;
+  sourceFragment: string;
+}
+
+export interface RadarLeaderReviewSubmissionDraft {
+  reviewerKey: string;
+  effectiveUntil: string | null;
+  factSupplements: RadarLeaderReviewFactDraft[];
+  targetEvent: {
+    eventVersion: string;
+    eventSubtype: string;
+    sourceUrl: string;
+    documentId: string;
+    publishedAt: string;
+    effectiveFrom: string;
+    effectiveUntil: string;
+    factSummary: string;
+    officialStatus: 'active' | 'completed' | 'withdrawn';
+  };
+  relationKind: 'resolves' | 'supersedes';
+  replacementEventVersion: string | null;
+  decisionSummary: string;
+  confirmOfficialEvidence: boolean;
+}
+
 export interface RadarLeaderModule {
   state: RadarModuleState;
   quality: RadarModuleQuality;
@@ -282,6 +407,7 @@ export interface RadarLeaderModule {
   freshness: RadarFreshness;
   sources: RadarSourceStatus[];
   summary: RadarLeaderSummary;
+  reviewQueue?: RadarLeaderReviewQueue;
   preliminary: RadarLeaderItem[];
   candidates: RadarLeaderItem[];
   confirmed: RadarLeaderItem[];
@@ -333,4 +459,16 @@ export interface RadarLeadersResponse {
   mode: 'shadow' | 'disabled';
   marketSession: RadarMarketSession;
   module: RadarLeaderModule;
+}
+
+export interface RadarStockResponse {
+  schemaVersion: 'radar-stock-v1';
+  checkedAt: string;
+  mode: 'shadow' | 'disabled';
+  symbol: string;
+  status: 'matched' | 'not_listed' | 'no_snapshot' | 'stale' | 'failed' | 'not_enabled';
+  snapshot: RadarLeaderSnapshot | null;
+  freshness: RadarFreshness;
+  leader: RadarLeaderItem | null;
+  reasonCodes: string[];
 }

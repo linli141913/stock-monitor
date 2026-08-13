@@ -15,6 +15,7 @@ class RadarSettings:
     market_shadow_enabled: bool = False
     etf_stage5_enabled: bool = False
     leader_stage6_enabled: bool = False
+    leader_d8_review_write_enabled: bool = False
     stock_scan_interval_seconds: int = 180
     etf_scan_interval_seconds: int = 300
     sector_scan_interval_seconds: int = 180
@@ -84,6 +85,11 @@ def load_radar_settings(
         leader_stage6_enabled=_read_bool(
             values,
             "RADAR_LEADER_STAGE6_ENABLED",
+            False,
+        ),
+        leader_d8_review_write_enabled=_read_bool(
+            values,
+            "RADAR_LEADER_D8_REVIEW_WRITE_ENABLED",
             False,
         ),
         stock_scan_interval_seconds=_read_int(

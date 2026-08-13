@@ -39,6 +39,8 @@ class DatabaseBackupTests(unittest.TestCase):
             checksum_path = Path(result["checksumPath"])
             self.assertTrue(backup_path.is_file())
             self.assertTrue(checksum_path.is_file())
+            self.assertEqual(backup_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(checksum_path.stat().st_mode & 0o777, 0o600)
             with sqlite3.connect(backup_path) as connection:
                 self.assertEqual(
                     connection.execute("SELECT value FROM samples").fetchone()[0],

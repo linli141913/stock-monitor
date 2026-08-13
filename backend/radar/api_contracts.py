@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -393,6 +393,93 @@ class RadarLeaderItem(RadarApiModel):
     formal_usable: Literal[False] = Field(alias="formalUsable")
 
 
+class RadarLeaderReviewQueue(RadarApiModel):
+    status: Literal["not_ready", "ready", "failed"] = "not_ready"
+    review_batch_id: Optional[str] = Field(
+        default=None,
+        alias="reviewBatchId",
+    )
+    candidate_plan_id: Optional[str] = Field(
+        default=None,
+        alias="candidatePlanId",
+    )
+    as_of: Optional[datetime] = Field(default=None, alias="asOf")
+    window_from: Optional[date] = Field(default=None, alias="windowFrom")
+    window_until: Optional[date] = Field(default=None, alias="windowUntil")
+    candidate_count: int = Field(default=0, alias="candidateCount", ge=0)
+    document_count: int = Field(default=0, alias="documentCount", ge=0)
+    document_link_count: int = Field(
+        default=0,
+        alias="documentLinkCount",
+        ge=0,
+    )
+    content_snapshot_count: int = Field(
+        default=0,
+        alias="contentSnapshotCount",
+        ge=0,
+    )
+    reviewed_document_count: int = Field(
+        default=0,
+        alias="reviewedDocumentCount",
+        ge=0,
+    )
+    review_version_count: int = Field(
+        default=0,
+        alias="reviewVersionCount",
+        ge=0,
+    )
+    query_categories_complete: bool = Field(
+        default=False,
+        alias="queryCategoriesComplete",
+    )
+    query_pages_complete: bool = Field(
+        default=False,
+        alias="queryPagesComplete",
+    )
+    query_window_continuous: bool = Field(
+        default=False,
+        alias="queryWindowContinuous",
+    )
+    reason_codes: List[str] = Field(
+        default_factory=lambda: ["d2_review_batch_missing"],
+        alias="reasonCodes",
+    )
+    formal_usable: Literal[False] = Field(
+        default=False,
+        alias="formalUsable",
+    )
+
+
+class RadarLeaderReviewDocument(RadarApiModel):
+    document_id: str = Field(alias="documentId")
+    symbol: str
+    issuer_name: str = Field(alias="issuerName")
+    title: str
+    published_at: datetime = Field(alias="publishedAt")
+    source_name: str = Field(alias="sourceName")
+    source_url: str = Field(alias="sourceUrl")
+    candidate_category: str = Field(alias="candidateCategory")
+    has_content_snapshot: bool = Field(alias="hasContentSnapshot")
+    content_snapshot_count: int = Field(
+        default=0,
+        alias="contentSnapshotCount",
+        ge=0,
+    )
+    content_status: Literal["not_fetched", "available"] = Field(
+        default="not_fetched",
+        alias="contentStatus",
+    )
+    content_fetched_at: Optional[datetime] = Field(
+        default=None,
+        alias="contentFetchedAt",
+    )
+    review_version_count: int = Field(alias="reviewVersionCount", ge=0)
+    formal_usable: Literal[False] = Field(
+        default=False,
+        alias="formalUsable",
+    )
+
+
 class RadarLeaderModule(RadarApiModel):
     state: RadarModuleState
     quality: RadarModuleQuality
@@ -408,6 +495,10 @@ class RadarLeaderModule(RadarApiModel):
     freshness: RadarFreshness
     sources: List[RadarSourceStatus] = Field(default_factory=list)
     summary: RadarLeaderSummary
+    review_queue: RadarLeaderReviewQueue = Field(
+        default_factory=RadarLeaderReviewQueue,
+        alias="reviewQueue",
+    )
     preliminary: List[RadarLeaderItem] = Field(default_factory=list)
     candidates: List[RadarLeaderItem] = Field(default_factory=list)
     confirmed: List[RadarLeaderItem] = Field(default_factory=list)
@@ -468,3 +559,224 @@ class RadarLeadersResponse(RadarApiModel):
     mode: Literal["shadow", "disabled"]
     market_session: RadarMarketSession = Field(alias="marketSession")
     module: RadarLeaderModule
+
+
+class RadarStockResponse(RadarApiModel):
+    schema_version: Literal["radar-stock-v1"] = Field(
+        default="radar-stock-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    mode: Literal["shadow", "disabled"]
+    symbol: str
+    status: Literal[
+        "matched",
+        "not_listed",
+        "no_snapshot",
+        "stale",
+        "failed",
+        "not_enabled",
+    ]
+    snapshot: Optional[RadarLeaderSnapshot] = None
+    freshness: RadarFreshness
+    leader: Optional[RadarLeaderItem] = None
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
+class RadarLeaderReviewQueueResponse(RadarApiModel):
+    schema_version: Literal["radar-leader-review-queue-v1"] = Field(
+        default="radar-leader-review-queue-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    mode: Literal["shadow", "disabled"]
+    market_session: RadarMarketSession = Field(alias="marketSession")
+    summary: RadarLeaderReviewQueue
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    items: List[RadarLeaderReviewDocument] = Field(default_factory=list)
+
+
+class RadarLeaderReviewDocumentResponse(RadarApiModel):
+    schema_version: Literal["radar-leader-review-document-v1"] = Field(
+        default="radar-leader-review-document-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    mode: Literal["shadow", "disabled"]
+    market_session: RadarMarketSession = Field(alias="marketSession")
+    summary: RadarLeaderReviewQueue
+    item: RadarLeaderReviewDocument
+
+
+class RadarLeaderReviewPage(RadarApiModel):
+    page_number: int = Field(alias="pageNumber", ge=1)
+    text: str
+
+
+class RadarLeaderReviewCandidate(RadarApiModel):
+    candidate_id: str = Field(alias="candidateId")
+    candidate_kind: Literal[
+        "fact_extraction_missing",
+        "relation_review_required",
+    ] = Field(alias="candidateKind")
+    auto_fact_count: int = Field(alias="autoFactCount", ge=0)
+    required_fact_kinds: List[str] = Field(
+        default_factory=list,
+        alias="requiredFactKinds",
+    )
+    reason_codes: List[str] = Field(
+        default_factory=list,
+        alias="reasonCodes",
+    )
+
+
+class RadarLeaderReviewReplayDiagnostic(RadarApiModel):
+    status: Literal[
+        "ready",
+        "missing",
+        "source_unverified",
+        "stale",
+        "source_failed",
+    ]
+    review_version_count: int = Field(alias="reviewVersionCount", ge=0)
+    bundle_count: int = Field(alias="bundleCount", ge=0)
+    active_review_version: Optional[str] = Field(
+        default=None,
+        alias="activeReviewVersion",
+    )
+    material_change_required: bool = Field(alias="materialChangeRequired")
+    reason_codes: List[str] = Field(
+        default_factory=list,
+        alias="reasonCodes",
+    )
+    formal_usable: Literal[False] = Field(
+        default=False,
+        alias="formalUsable",
+    )
+
+
+class RadarLeaderReviewFormResponse(RadarApiModel):
+    schema_version: Literal["radar-leader-review-form-v1"] = Field(
+        default="radar-leader-review-form-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    mode: Literal["shadow", "disabled"]
+    market_session: RadarMarketSession = Field(alias="marketSession")
+    summary: RadarLeaderReviewQueue
+    item: RadarLeaderReviewDocument
+    content_sha256: str = Field(alias="contentSha256")
+    content_fetched_at: datetime = Field(alias="contentFetchedAt")
+    page_count: int = Field(alias="pageCount", ge=1)
+    pages: List[RadarLeaderReviewPage]
+    candidate: RadarLeaderReviewCandidate
+    replay_diagnostic: RadarLeaderReviewReplayDiagnostic = Field(
+        alias="replayDiagnostic"
+    )
+    next_review_version: str = Field(alias="nextReviewVersion")
+    supersedes_review_version: Optional[str] = Field(
+        default=None,
+        alias="supersedesReviewVersion",
+    )
+    write_enabled: bool = Field(alias="writeEnabled")
+    write_reason_code: str = Field(alias="writeReasonCode")
+    formal_usable: Literal[False] = Field(
+        default=False,
+        alias="formalUsable",
+    )
+
+
+class RadarLeaderManualFactRequest(RadarApiModel):
+    fact_kind: Literal[
+        "case_id",
+        "reporting_period",
+        "audit_report_id",
+        "referenced_document_id",
+        "effective_date",
+        "effective_interval",
+    ] = Field(alias="factKind")
+    source_value: str = Field(alias="sourceValue", min_length=1, max_length=200)
+    page_number: int = Field(alias="pageNumber", ge=1, le=200)
+    source_fragment: str = Field(
+        alias="sourceFragment",
+        min_length=1,
+        max_length=500,
+    )
+    mapped_document_id: Optional[str] = Field(
+        default=None,
+        alias="mappedDocumentId",
+        max_length=160,
+    )
+
+
+class RadarLeaderTargetEventRequest(RadarApiModel):
+    event_version: str = Field(alias="eventVersion", min_length=1, max_length=80)
+    event_subtype: str = Field(alias="eventSubtype", min_length=1)
+    source_url: str = Field(alias="sourceUrl", min_length=1, max_length=500)
+    document_id: str = Field(alias="documentId", min_length=1, max_length=160)
+    published_at: datetime = Field(alias="publishedAt")
+    effective_from: datetime = Field(alias="effectiveFrom")
+    effective_until: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveUntil",
+    )
+    fact_summary: str = Field(alias="factSummary", min_length=2, max_length=300)
+    official_status: Literal["active", "completed", "withdrawn"] = Field(
+        alias="officialStatus",
+    )
+
+
+class RadarLeaderReviewVersionRequest(RadarApiModel):
+    review_batch_id: str = Field(alias="reviewBatchId", min_length=1)
+    document_id: str = Field(alias="documentId", min_length=1)
+    candidate_category: str = Field(alias="candidateCategory", min_length=1)
+    content_sha256: str = Field(alias="contentSha256", min_length=64, max_length=64)
+    candidate_id: str = Field(alias="candidateId", min_length=1, max_length=160)
+    reviewer_key: str = Field(alias="reviewerKey", min_length=1, max_length=160)
+    effective_until: Optional[datetime] = Field(
+        default=None,
+        alias="effectiveUntil",
+    )
+    fact_supplements: List[RadarLeaderManualFactRequest] = Field(
+        alias="factSupplements",
+        min_length=1,
+        max_length=12,
+    )
+    target_event: RadarLeaderTargetEventRequest = Field(alias="targetEvent")
+    relation_kind: Literal["resolves", "supersedes"] = Field(alias="relationKind")
+    replacement_event_version: Optional[str] = Field(
+        default=None,
+        alias="replacementEventVersion",
+        max_length=80,
+    )
+    decision_summary: str = Field(
+        alias="decisionSummary",
+        min_length=4,
+        max_length=300,
+    )
+    confirm_official_evidence: Literal[True] = Field(
+        alias="confirmOfficialEvidence",
+    )
+
+
+class RadarLeaderReviewVersionResponse(RadarApiModel):
+    schema_version: Literal["radar-leader-review-version-v1"] = Field(
+        default="radar-leader-review-version-v1",
+        alias="schemaVersion",
+    )
+    accepted_at: datetime = Field(alias="acceptedAt")
+    created: bool
+    review_batch_id: str = Field(alias="reviewBatchId")
+    document_id: str = Field(alias="documentId")
+    review_version: str = Field(alias="reviewVersion")
+    supersedes_review_version: Optional[str] = Field(
+        default=None,
+        alias="supersedesReviewVersion",
+    )
+    review_version_count: int = Field(alias="reviewVersionCount", ge=1)
+    formal_usable: Literal[False] = Field(
+        default=False,
+        alias="formalUsable",
+    )

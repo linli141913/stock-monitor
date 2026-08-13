@@ -22,6 +22,7 @@ import type {
   StockOverview,
 } from '@/types/stock';
 import type { IndustryMonitor } from '@/types/industry';
+import type { RadarStockResponse } from '@/types/radar';
 
 // Removed mock data imports
 
@@ -118,6 +119,7 @@ function HomeContent() {
   const [industryLoading, setIndustryLoading] = useState(true);
   const [industryRefreshing, setIndustryRefreshing] = useState(false);
   const [industryStatusMessage, setIndustryStatusMessage] = useState('');
+  const [radarStock, setRadarStock] = useState<RadarStockResponse | null>(null);
 
   const overviewRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const slowDataRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -344,15 +346,42 @@ function HomeContent() {
     void fetchIndustry(stockCode, true);
   };
 
+  const fetchRadarStock = useCallback(async (sym: string) => {
+    setRadarStock(null);
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/radar/stocks/${encodeURIComponent(sym)}?_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('股票雷达状态请求失败');
+      const payload = await response.json() as RadarStockResponse;
+      if (payload.schemaVersion !== 'radar-stock-v1') throw new Error('股票雷达合同不匹配');
+      setRadarStock(payload);
+    } catch {
+      setRadarStock({
+        schemaVersion: 'radar-stock-v1',
+        checkedAt: new Date().toISOString(),
+        mode: 'shadow',
+        symbol: sym,
+        status: 'failed',
+        snapshot: null,
+        freshness: { ageSeconds: null, staleAfterSeconds: 0, isStale: false, reasonCodes: ['request_failed'] },
+        leader: null,
+        reasonCodes: ['request_failed'],
+      });
+    }
+  }, []);
+
   // 换股时，行情 + 公司信息 都刷新
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void fetchOverview();
       void fetchCompanyInfo();
       void fetchIndustry(stockCode);
+      void fetchRadarStock(stockCode);
     }, 0);
     return () => clearTimeout(timer);
-  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchIndustry]);
+  }, [stockCode, fetchOverview, fetchCompanyInfo, fetchIndustry, fetchRadarStock]);
 
   // 换周期或换股时，刷新 K 线
   useEffect(() => {
@@ -444,6 +473,35 @@ function HomeContent() {
             announcements={companyData?.announcements || []}
             news={companyData?.news || []}
           />
+          {radarStock && (
+            <section className={styles.radarStockCard}>
+              <div>
+                <h2>主线雷达状态</h2>
+                <span>影子规则状态，不是投资建议</span>
+              </div>
+              {radarStock.leader ? (
+                <div className={styles.radarStockGrid}>
+                  <strong>
+                    {radarStock.status === 'stale' ? '快照已过期 · ' : ''}
+                    {({ preliminary: '预备龙头', candidate: '候选龙头', confirmed: '已确认龙头' })[radarStock.leader.state]}
+                  </strong>
+                  <span>行业：{radarStock.leader.industryName || '暂无'}</span>
+                  <span>规则：{radarStock.snapshot?.ruleVersion || '暂无'}</span>
+                  <span>数据时间：{radarStock.snapshot?.asOf ? new Date(radarStock.snapshot.asOf).toLocaleString('zh-CN') : '暂无'}</span>
+                  <span>首个否决原因：{radarStock.leader.firstRejectionReason || '无'}</span>
+                </div>
+              ) : (
+                <p>{({
+                  matched: '已命中公开梯队，条目数据暂不可用。',
+                  not_listed: '该股未进入最新公开龙头梯队。',
+                  no_snapshot: '尚无龙头影子快照，等待真实数据。',
+                  stale: '龙头快照已过期，暂不展示为当前状态。',
+                  failed: '龙头状态读取失败。',
+                  not_enabled: '主线雷达龙头模块尚未启用。',
+                } as const)[radarStock.status] || '等待主线雷达状态。'}</p>
+              )}
+            </section>
+          )}
         </div>
 
         {/* 右侧侧栏 */}

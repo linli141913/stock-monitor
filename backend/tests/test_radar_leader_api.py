@@ -1,10 +1,14 @@
 import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import market_calendar
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from radar.api import _service
+from radar.api import router as radar_router
 from radar.config import RadarSettings
 from radar.leader_repository import LeaderRepository
 from radar.migrations import (
@@ -47,6 +51,54 @@ class BrokenLeaderRepository:
         raise sqlite3.OperationalError("leader read failed")
 
 
+class FakeRiskReviewRepository:
+    def get_latest_review_batch_summary(self):
+        return {
+            "reviewBatchId": "risk-review-batch-1",
+            "candidatePlanId": "candidate-plan-1",
+            "asOf": NOW - timedelta(seconds=15),
+            "windowFrom": (NOW - timedelta(days=365)).date(),
+            "windowUntil": NOW.date(),
+            "candidateCount": 385,
+            "documentCount": 1919,
+            "documentLinkCount": 1919,
+            "contentSnapshotCount": 0,
+            "reviewedDocumentCount": 0,
+            "reviewVersionCount": 0,
+            "queryCategoriesComplete": True,
+            "queryPagesComplete": True,
+            "queryWindowContinuous": True,
+        }
+
+    def list_review_batch_documents(self, batch_id, *, limit, offset):
+        return {
+            "reviewBatchId": batch_id,
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "items": (),
+        }
+
+    def get_review_batch_document(self, batch_id, document_id, category):
+        return {
+            "document": SimpleNamespace(
+                document_id=document_id,
+                symbol="000725",
+                issuer_name="京东方A",
+                title="官方风险公告",
+                published_at=NOW - timedelta(minutes=30),
+                source_name="巨潮资讯",
+                source_url="https://static.cninfo.com.cn/finalpage/2026-07-27/123.PDF",
+                candidate_category=SimpleNamespace(value=category),
+            ),
+            "hasContentSnapshot": False,
+            "contentSnapshotCount": 0,
+            "contentStatus": "not_fetched",
+            "contentFetchedAt": None,
+            "reviewVersionCount": 0,
+        }
+
+
 def market_status_provider(market, now):
     return (
         market_calendar.MarketStatus("trading", "交易中"),
@@ -59,7 +111,12 @@ def market_status_provider(market, now):
 
 
 class RadarLeaderReadServiceTests(unittest.TestCase):
-    def service(self, settings, leader_repository=None):
+    def service(
+        self,
+        settings,
+        leader_repository=None,
+        risk_review_repository=None,
+    ):
         arguments = {
             "settings": settings,
             "clock": lambda: NOW,
@@ -67,6 +124,8 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
         }
         if leader_repository is not None:
             arguments["leader_repository"] = leader_repository
+        if risk_review_repository is not None:
+            arguments["risk_review_repository"] = risk_review_repository
         try:
             return RadarReadService(
                 UnusedRadarRepository(),
@@ -299,6 +358,170 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
             "candidate_snapshot_missing",
             payload["module"]["reasonCodes"],
         )
+
+    def test_stock_radar_matches_latest_public_leader_tier(self):
+        service = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(self.snapshot(
+                as_of=NOW - timedelta(seconds=30),
+                entries=[self.entry("000725", "candidate", 91)],
+            )),
+        )
+
+        payload = service.build_stock("000725").model_dump(
+            mode="json",
+            by_alias=True,
+        )
+
+        self.assertEqual(payload["schemaVersion"], "radar-stock-v1")
+        self.assertEqual(payload["status"], "matched")
+        self.assertEqual(payload["symbol"], "000725")
+        self.assertEqual(payload["leader"]["state"], "candidate")
+        self.assertEqual(payload["leader"]["industryCode"], "C39")
+        self.assertEqual(payload["leader"]["firstRejectionReason"], None)
+        self.assertEqual(
+            payload["snapshot"]["ruleVersion"],
+            "radar-leader-state-machine-v1",
+        )
+
+    def test_stock_radar_distinguishes_not_listed_from_d2_review_queue(self):
+        service = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(self.snapshot(
+                as_of=NOW - timedelta(seconds=30),
+                entries=[self.entry("000001", "preliminary", 88)],
+            )),
+            risk_review_repository=FakeRiskReviewRepository(),
+        )
+
+        payload = service.build_stock("000725").model_dump(
+            mode="json",
+            by_alias=True,
+        )
+
+        self.assertEqual(payload["status"], "not_listed")
+        self.assertIsNone(payload["leader"])
+        self.assertEqual(payload["reasonCodes"], ["stock_not_in_public_tiers"])
+
+    def test_stock_radar_reports_no_snapshot(self):
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(None),
+        ).build_stock("000725").model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["status"], "no_snapshot")
+        self.assertIsNone(payload["snapshot"])
+        self.assertEqual(payload["reasonCodes"], ["candidate_snapshot_missing"])
+
+    def test_stock_radar_preserves_stale_and_failed_semantics(self):
+        stale = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(self.snapshot(
+                as_of=NOW - timedelta(seconds=391),
+                entries=[self.entry("000725", "candidate", 91)],
+            )),
+        ).build_stock("000725").model_dump(mode="json", by_alias=True)
+        failed = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=BrokenLeaderRepository(),
+        ).build_stock("000725").model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(stale["status"], "stale")
+        self.assertEqual(stale["leader"]["state"], "candidate")
+        self.assertTrue(stale["freshness"]["isStale"])
+        self.assertEqual(failed["status"], "failed")
+        self.assertIsNone(failed["leader"])
+
+    def test_stock_radar_reports_disabled_stage(self):
+        payload = self.service(RadarSettings()).build_stock(
+            "000725",
+        ).model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["status"], "not_enabled")
+        self.assertEqual(payload["reasonCodes"], ["stage_not_enabled"])
+
+    def test_stock_radar_route_rejects_invalid_symbol_before_storage(self):
+        app = FastAPI()
+        app.include_router(radar_router)
+
+        response = TestClient(app).get("/api/radar/stocks/not-a-code")
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_verified_d2_queue_is_visible_without_claiming_leader_ready(self):
+        service = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(None),
+            risk_review_repository=FakeRiskReviewRepository(),
+        )
+
+        module = service.build_leaders().model_dump(
+            mode="json",
+            by_alias=True,
+        )["module"]
+
+        self.assertEqual(module["state"], "not_ready")
+        self.assertEqual(module["reviewQueue"]["status"], "ready")
+        self.assertEqual(module["reviewQueue"]["documentCount"], 1919)
+        self.assertEqual(module["reviewQueue"]["reviewVersionCount"], 0)
+        self.assertFalse(module["reviewQueue"]["formalUsable"])
+        self.assertIn("d8_review_versions_missing", module["reviewQueue"]["reasonCodes"])
+
+        queue = service.build_leader_review_queue(
+            limit=25,
+            offset=0,
+        ).model_dump(mode="json", by_alias=True)
+        self.assertEqual(
+            queue["schemaVersion"],
+            "radar-leader-review-queue-v1",
+        )
+        self.assertEqual(queue["summary"]["status"], "ready")
+        self.assertEqual(queue["limit"], 25)
+        self.assertEqual(queue["items"], [])
+
+        detail = service.build_leader_review_document(
+            review_batch_id="risk-review-batch-1",
+            document_id="cninfo:123",
+            candidate_category="regulatory",
+        ).model_dump(mode="json", by_alias=True)
+        self.assertEqual(
+            detail["schemaVersion"],
+            "radar-leader-review-document-v1",
+        )
+        self.assertEqual(detail["item"]["contentStatus"], "not_fetched")
+        self.assertEqual(detail["item"]["reviewVersionCount"], 0)
+        self.assertFalse(detail["item"]["formalUsable"])
+
+        with self.assertRaises(ValueError):
+            service.build_leader_review_document(
+                review_batch_id="old-risk-review-batch",
+                document_id="cninfo:123",
+                candidate_category="regulatory",
+            )
 
     def test_trading_snapshot_older_than_two_cycles_plus_grace_is_stale(self):
         payload = self.build_payload_with_repository(

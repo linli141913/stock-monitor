@@ -34,6 +34,9 @@ CNINFO_QUERY_URL = (
 CNINFO_ISSUER_SEARCH_URL = (
     "https://www.cninfo.com.cn/new/information/topSearch/query"
 )
+CNINFO_ISSUER_ROSTER_URL = (
+    "https://www.cninfo.com.cn/new/data/szse_stock.json"
+)
 CNINFO_STATIC_BASE_URL = "https://static.cninfo.com.cn/"
 CNINFO_SOURCE_CONTRACT_ID = (
     "radar-leader-risk-cninfo-discovery-v1"
@@ -97,6 +100,17 @@ class CninfoIssuerResolutionResult:
     fetched_at: Optional[datetime]
     scope: Optional[CninfoRiskIssuerScope] = field(
         default=None,
+        repr=False,
+    )
+    reasons: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CninfoIssuerRosterResolutionResult:
+    status: CninfoIssuerResolutionStatus
+    fetched_at: Optional[datetime]
+    scopes: Tuple[CninfoRiskIssuerScope, ...] = field(
+        default_factory=tuple,
         repr=False,
     )
     reasons: Tuple[str, ...] = ()
@@ -188,7 +202,7 @@ def _split_raw_codes(value: Any) -> Optional[Tuple[str, ...]]:
     return values
 
 
-def _official_pdf_url(value: Any) -> Optional[str]:
+def _official_document_url(value: Any) -> Optional[str]:
     if not _required_text(value):
         return None
     raw_path = value.strip()
@@ -201,7 +215,7 @@ def _official_pdf_url(value: Any) -> Optional[str]:
         or ".." in path.parts
         or not path.parts
         or path.parts[0] != "finalpage"
-        or path.suffix.lower() != ".pdf"
+        or path.suffix.lower() not in {".pdf", ".html"}
     ):
         return None
     source_url = f"{CNINFO_STATIC_BASE_URL}{path.as_posix()}"
@@ -216,6 +230,16 @@ def _official_pdf_url(value: Any) -> Optional[str]:
     ):
         return None
     return source_url
+
+
+def _official_document_type(value: Any, source_url: str) -> bool:
+    suffix = PurePosixPath(urlsplit(source_url).path).suffix.casefold()
+    if suffix == ".pdf":
+        return (
+            isinstance(value, str)
+            and value.strip().casefold() in {"pdf", ".pdf"}
+        )
+    return suffix == ".html" and value is None
 
 
 def _published_at(value: Any) -> Optional[datetime]:
@@ -461,8 +485,11 @@ def _parse_document(
             "cninfo_document_outside_query_window"
         )
 
-    source_url = _official_pdf_url(row.get("adjunctUrl"))
-    if row.get("adjunctType") != "PDF" or source_url is None:
+    source_url = _official_document_url(row.get("adjunctUrl"))
+    if (
+        source_url is None
+        or not _official_document_type(row.get("adjunctType"), source_url)
+    ):
         reasons.append("cninfo_document_url_unverified")
     elif (
         _safe_source_id(announcement_id)
@@ -805,6 +832,128 @@ def _default_issuer_transport(
         return response.json()
 
 
+def _default_issuer_roster_transport(
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> Any:
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def fetch_cninfo_issuer_scopes_from_roster(
+    symbols: Any,
+    *,
+    fetched_at: Optional[datetime] = None,
+    transport: Optional[Callable[..., Any]] = None,
+) -> CninfoIssuerRosterResolutionResult:
+    """从巨潮官方全量名册一次解析候选全集发行人身份。"""
+
+    actual_fetched_at = fetched_at or datetime.now(UTC)
+    fetched_at_utc = _aware_utc(actual_fetched_at)
+    if (
+        not isinstance(symbols, tuple)
+        or not symbols
+        or len(symbols) != len(set(symbols))
+        or any(
+            not isinstance(symbol, str)
+            or STAGE6_SECURITY_CODE_PATTERN.fullmatch(symbol) is None
+            for symbol in symbols
+        )
+        or fetched_at_utc is None
+    ):
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_query_contract_unverified",),
+        )
+    request = transport or _default_issuer_roster_transport
+    try:
+        payload = request(
+            CNINFO_ISSUER_ROSTER_URL,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://www.cninfo.com.cn/",
+                "Accept": "application/json, text/plain, */*",
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_FAILED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_source_request_failed",),
+        )
+    except (TypeError, ValueError):
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_response_contract_unverified",),
+        )
+    if not isinstance(payload, Mapping):
+        rows = None
+    else:
+        rows = payload.get("stockList")
+    if not isinstance(rows, list):
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_response_contract_unverified",),
+        )
+    requested = set(symbols)
+    matches = {symbol: [] for symbol in symbols}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        code = row.get("code")
+        if code not in requested or row.get("category") != "A股":
+            continue
+        org_id = row.get("orgId")
+        if not _safe_source_id(org_id):
+            return CninfoIssuerRosterResolutionResult(
+                status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+                fetched_at=fetched_at_utc,
+                reasons=("cninfo_issuer_roster_identity_unverified",),
+            )
+        matches[code].append(str(org_id).strip())
+    if any(
+        len(identities) != 1
+        for identities in matches.values()
+    ):
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_coverage_unverified",),
+        )
+    identities = tuple(matches[symbol][0] for symbol in symbols)
+    if len(identities) != len(set(identities)):
+        return CninfoIssuerRosterResolutionResult(
+            status=CninfoIssuerResolutionStatus.SOURCE_UNVERIFIED,
+            fetched_at=fetched_at_utc,
+            reasons=("cninfo_issuer_roster_identity_duplicate",),
+        )
+    return CninfoIssuerRosterResolutionResult(
+        status=CninfoIssuerResolutionStatus.READY,
+        fetched_at=fetched_at_utc,
+        scopes=tuple(
+            CninfoRiskIssuerScope(
+                symbol=symbol,
+                issuer_identity=f"cninfo-org:{matches[symbol][0]}",
+                resolved_at=fetched_at_utc,
+            )
+            for symbol in symbols
+        ),
+    )
+
+
 def fetch_cninfo_issuer_scope(
     symbol: Any,
     *,
@@ -913,7 +1062,7 @@ def fetch_cninfo_risk_discovery(
             f"{query.window_from.isoformat()}"
             f"~{query.window_until.isoformat()}"
         ),
-        "sortName": "time",
+        "sortName": "announcementId",
         "sortType": "desc",
         "isHLtitle": "true",
     }

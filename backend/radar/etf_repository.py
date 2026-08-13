@@ -33,6 +33,7 @@ from radar.repository import (
     RepositoryConflictError,
     RepositoryStateError,
     RepositoryWriteError,
+    _begin_immediate,
     _canonical_json,
     _datetime_text,
     _parse_datetime,
@@ -171,7 +172,7 @@ class EtfRepository:
             raise RepositoryStateError("ETF仓储写入前连接不能处于未提交事务中")
         try:
             self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("BEGIN IMMEDIATE")
+            _begin_immediate(self._connection)
             yield
             self._connection.commit()
         except RadarRepositoryError:

@@ -1706,6 +1706,307 @@ STAGE6_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
     LEADER_STORAGE_MIGRATION,
 )
 
+
+LEADER_RISK_REVIEW_STORAGE_MIGRATION = Migration(
+    version=6,
+    name="leader_risk_review_storage",
+    statements=(
+        """
+        CREATE TABLE radar_leader_risk_review_batches (
+            review_batch_id TEXT PRIMARY KEY CHECK (
+                trim(review_batch_id) <> ''
+            ),
+            candidate_plan_id TEXT NOT NULL CHECK (
+                trim(candidate_plan_id) <> ''
+            ),
+            radar_run_id TEXT NOT NULL,
+            as_of TEXT NOT NULL CHECK (julianday(as_of) IS NOT NULL),
+            window_from TEXT NOT NULL CHECK (date(window_from) IS NOT NULL),
+            window_until TEXT NOT NULL CHECK (date(window_until) IS NOT NULL),
+            candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+            shard_count INTEGER NOT NULL CHECK (shard_count > 0),
+            category_count INTEGER NOT NULL CHECK (category_count > 0),
+            document_count INTEGER NOT NULL CHECK (document_count >= 0),
+            query_categories_complete INTEGER NOT NULL CHECK (
+                query_categories_complete IN (0, 1)
+            ),
+            query_pages_complete INTEGER NOT NULL CHECK (
+                query_pages_complete IN (0, 1)
+            ),
+            query_window_continuous INTEGER NOT NULL CHECK (
+                query_window_continuous IN (0, 1)
+            ),
+            source_contract_id TEXT NOT NULL CHECK (
+                trim(source_contract_id) <> ''
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            FOREIGN KEY (radar_run_id)
+                REFERENCES radar_runs(radar_run_id)
+                ON DELETE RESTRICT,
+            CHECK (date(window_until) >= date(window_from))
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_risk_review_batch_as_of
+        ON radar_leader_risk_review_batches (as_of, review_batch_id)
+        """,
+        """
+        CREATE TABLE radar_leader_risk_documents (
+            document_id TEXT PRIMARY KEY CHECK (trim(document_id) <> ''),
+            source_contract_id TEXT NOT NULL CHECK (
+                trim(source_contract_id) <> ''
+            ),
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            issuer_identity TEXT NOT NULL CHECK (
+                trim(issuer_identity) <> ''
+            ),
+            issuer_name TEXT NOT NULL CHECK (trim(issuer_name) <> ''),
+            title TEXT NOT NULL CHECK (trim(title) <> ''),
+            published_at TEXT NOT NULL CHECK (
+                julianday(published_at) IS NOT NULL
+            ),
+            source_name TEXT NOT NULL CHECK (trim(source_name) <> ''),
+            source_url TEXT NOT NULL CHECK (trim(source_url) <> ''),
+            raw_column_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                CASE WHEN json_valid(raw_column_ids_json)
+                    THEN json_type(raw_column_ids_json) = 'array'
+                    ELSE 0
+                END
+            ),
+            raw_announcement_types_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                CASE WHEN json_valid(raw_announcement_types_json)
+                    THEN json_type(raw_announcement_types_json) = 'array'
+                    ELSE 0
+                END
+            ),
+            raw_page_column TEXT,
+            association_reported INTEGER NOT NULL DEFAULT 0 CHECK (
+                association_reported IN (0, 1)
+            ),
+            formal_usable INTEGER NOT NULL DEFAULT 0 CHECK (
+                formal_usable = 0
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL)
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_risk_document_symbol_published
+        ON radar_leader_risk_documents (symbol, published_at, document_id)
+        """,
+        """
+        CREATE TABLE radar_leader_risk_review_batch_documents (
+            review_batch_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            candidate_category TEXT NOT NULL CHECK (
+                candidate_category IN (
+                    'reduction', 'unlock', 'regulatory', 'investigation',
+                    'litigation', 'earnings', 'audit'
+                )
+            ),
+            search_key TEXT NOT NULL CHECK (trim(search_key) <> ''),
+            PRIMARY KEY (
+                review_batch_id, document_id, candidate_category
+            ),
+            FOREIGN KEY (review_batch_id)
+                REFERENCES radar_leader_risk_review_batches(review_batch_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (document_id)
+                REFERENCES radar_leader_risk_documents(document_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_risk_batch_document_document
+        ON radar_leader_risk_review_batch_documents (
+            document_id, review_batch_id
+        )
+        """,
+        """
+        CREATE TABLE radar_leader_risk_document_contents (
+            document_id TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL CHECK (
+                length(content_sha256) = 64
+                AND content_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            issuer_identity TEXT NOT NULL CHECK (
+                trim(issuer_identity) <> ''
+            ),
+            status TEXT NOT NULL CHECK (status = 'ready'),
+            byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+            page_count INTEGER NOT NULL CHECK (
+                page_count BETWEEN 1 AND 200
+            ),
+            fetched_at TEXT NOT NULL CHECK (julianday(fetched_at) IS NOT NULL),
+            content_contract_id TEXT NOT NULL CHECK (
+                trim(content_contract_id) <> ''
+            ),
+            formal_usable INTEGER NOT NULL DEFAULT 0 CHECK (
+                formal_usable = 0
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            PRIMARY KEY (document_id, content_sha256),
+            FOREIGN KEY (document_id)
+                REFERENCES radar_leader_risk_documents(document_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE TABLE radar_leader_risk_document_pages (
+            document_id TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            page_number INTEGER NOT NULL CHECK (page_number > 0),
+            page_text TEXT NOT NULL,
+            character_count INTEGER NOT NULL CHECK (
+                character_count BETWEEN 0 AND 100000
+                AND character_count = length(page_text)
+            ),
+            page_sha256 TEXT NOT NULL CHECK (
+                length(page_sha256) = 64
+                AND page_sha256 NOT GLOB '*[^0-9a-f]*'
+            ),
+            PRIMARY KEY (document_id, content_sha256, page_number),
+            FOREIGN KEY (document_id, content_sha256)
+                REFERENCES radar_leader_risk_document_contents(
+                    document_id, content_sha256
+                )
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE TABLE radar_leader_risk_manual_review_versions (
+            review_record_id TEXT PRIMARY KEY CHECK (
+                trim(review_record_id) <> ''
+            ),
+            review_batch_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            candidate_category TEXT NOT NULL CHECK (
+                candidate_category IN (
+                    'reduction', 'unlock', 'regulatory', 'investigation',
+                    'litigation', 'earnings', 'audit'
+                )
+            ),
+            content_sha256 TEXT NOT NULL,
+            symbol TEXT NOT NULL CHECK (
+                length(symbol) = 6 AND symbol NOT GLOB '*[^0-9]*'
+            ),
+            issuer_identity TEXT NOT NULL CHECK (
+                trim(issuer_identity) <> ''
+            ),
+            candidate_id TEXT NOT NULL CHECK (trim(candidate_id) <> ''),
+            candidate_kind TEXT NOT NULL CHECK (
+                candidate_kind IN (
+                    'fact_extraction_missing',
+                    'relation_review_required'
+                )
+            ),
+            as_of TEXT NOT NULL CHECK (julianday(as_of) IS NOT NULL),
+            review_version TEXT NOT NULL CHECK (trim(review_version) <> ''),
+            supersedes_review_version TEXT,
+            review_method TEXT NOT NULL CHECK (review_method = 'manual'),
+            reviewer_key TEXT NOT NULL CHECK (trim(reviewer_key) <> ''),
+            reviewed_at TEXT NOT NULL CHECK (julianday(reviewed_at) IS NOT NULL),
+            effective_until TEXT CHECK (
+                effective_until IS NULL
+                OR julianday(effective_until) IS NOT NULL
+            ),
+            event_versions_json TEXT NOT NULL CHECK (
+                CASE WHEN json_valid(event_versions_json)
+                    THEN json_type(event_versions_json) = 'array'
+                    ELSE 0
+                END
+            ),
+            fact_supplements_json TEXT NOT NULL CHECK (
+                CASE WHEN json_valid(fact_supplements_json)
+                    THEN json_type(fact_supplements_json) = 'array'
+                    ELSE 0
+                END
+            ),
+            submission_relation_json TEXT CHECK (
+                submission_relation_json IS NULL
+                OR CASE WHEN json_valid(submission_relation_json)
+                    THEN json_type(submission_relation_json) = 'object'
+                    ELSE 0
+                END
+            ),
+            lifecycle_relation_json TEXT NOT NULL CHECK (
+                CASE WHEN json_valid(lifecycle_relation_json)
+                    THEN json_type(lifecycle_relation_json) = 'object'
+                    ELSE 0
+                END
+            ),
+            record_checksum TEXT NOT NULL CHECK (
+                length(record_checksum) = 64
+                AND record_checksum NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            UNIQUE (document_id, candidate_id, review_version),
+            FOREIGN KEY (
+                review_batch_id, document_id, candidate_category
+            ) REFERENCES radar_leader_risk_review_batch_documents (
+                review_batch_id, document_id, candidate_category
+            ) ON DELETE RESTRICT,
+            FOREIGN KEY (document_id, content_sha256)
+                REFERENCES radar_leader_risk_document_contents(
+                    document_id, content_sha256
+                )
+                ON DELETE RESTRICT,
+            FOREIGN KEY (
+                document_id, candidate_id, supersedes_review_version
+            ) REFERENCES radar_leader_risk_manual_review_versions (
+                document_id, candidate_id, review_version
+            ) ON DELETE RESTRICT,
+            CHECK (
+                effective_until IS NULL
+                OR julianday(effective_until) >= julianday(reviewed_at)
+            )
+        )
+        """,
+        """
+        CREATE INDEX idx_leader_risk_manual_review_history
+        ON radar_leader_risk_manual_review_versions (
+            document_id, candidate_id, reviewed_at, review_version
+        )
+        """,
+        """
+        CREATE TRIGGER trg_leader_risk_manual_review_no_update
+        BEFORE UPDATE ON radar_leader_risk_manual_review_versions
+        BEGIN
+            SELECT RAISE(ABORT, '人工审核版本只允许追加');
+        END
+        """,
+        """
+        CREATE TRIGGER trg_leader_risk_manual_review_no_delete
+        BEFORE DELETE ON radar_leader_risk_manual_review_versions
+        BEGIN
+            SELECT RAISE(ABORT, '人工审核版本只允许追加');
+        END
+        """,
+    ),
+)
+
+
+STAGE6_REVIEW_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
+    *STAGE6_RADAR_MIGRATIONS,
+    LEADER_RISK_REVIEW_STORAGE_MIGRATION,
+)
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_V1 = frozenset({
     ("table", "radar_schema_migrations"),
     ("table", "radar_rule_versions"),
@@ -1786,12 +2087,28 @@ REQUIRED_RADAR_SCHEMA_OBJECTS_V5 = frozenset({
     ("index", "idx_leader_state_history_run"),
 })
 
+REQUIRED_RADAR_SCHEMA_OBJECTS_V6 = frozenset({
+    ("table", "radar_leader_risk_review_batches"),
+    ("table", "radar_leader_risk_documents"),
+    ("table", "radar_leader_risk_review_batch_documents"),
+    ("table", "radar_leader_risk_document_contents"),
+    ("table", "radar_leader_risk_document_pages"),
+    ("table", "radar_leader_risk_manual_review_versions"),
+    ("index", "idx_leader_risk_review_batch_as_of"),
+    ("index", "idx_leader_risk_document_symbol_published"),
+    ("index", "idx_leader_risk_batch_document_document"),
+    ("index", "idx_leader_risk_manual_review_history"),
+    ("trigger", "trg_leader_risk_manual_review_no_update"),
+    ("trigger", "trg_leader_risk_manual_review_no_delete"),
+})
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_BY_VERSION = {
     1: REQUIRED_RADAR_SCHEMA_OBJECTS_V1,
     2: REQUIRED_RADAR_SCHEMA_OBJECTS_V2,
     3: REQUIRED_RADAR_SCHEMA_OBJECTS_V3,
     4: REQUIRED_RADAR_SCHEMA_OBJECTS_V4,
     5: REQUIRED_RADAR_SCHEMA_OBJECTS_V5,
+    6: REQUIRED_RADAR_SCHEMA_OBJECTS_V6,
 }
 
 REQUIRED_RADAR_SCHEMA_OBJECTS = frozenset().union(
@@ -1858,6 +2175,17 @@ def _validate_applied_rows(
     return applied
 
 
+def _known_migration_lineage(
+    ordered: Sequence[Migration],
+) -> Sequence[Migration]:
+    """让正式迁移前缀识别同一代码中的后续可选版本。"""
+
+    canonical = STAGE6_REVIEW_RADAR_MIGRATIONS
+    if tuple(ordered) == canonical[:len(ordered)]:
+        return canonical
+    return ordered
+
+
 def validate_applied_migrations(
     connection: sqlite3.Connection,
     *,
@@ -1897,11 +2225,7 @@ def validate_applied_migrations(
         ordered,
         applied_rows,
         require_all=True,
-        known_migrations=(
-            STAGE6_RADAR_MIGRATIONS
-            if ordered == RADAR_MIGRATIONS
-            else ordered
-        ),
+        known_migrations=_known_migration_lineage(ordered),
     )
     return sorted(applied)
 
@@ -1931,11 +2255,7 @@ def apply_pending_migrations(
         ordered,
         applied_rows,
         require_all=False,
-        known_migrations=(
-            STAGE5_RADAR_MIGRATIONS
-            if ordered == RADAR_MIGRATIONS
-            else ordered
-        ),
+        known_migrations=_known_migration_lineage(ordered),
     )
 
     applied_now = []

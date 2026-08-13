@@ -341,6 +341,31 @@ class RiskResearchEvidenceBundleAuditTests(unittest.TestCase):
             ("risk_evidence_bundle_audit_material_change_missing",),
         )
 
+    def test_review_metadata_only_replacement_is_rejected(self):
+        first = make_bundle()
+        second = replace(
+            first,
+            bundle_id="risk-research-evidence-bundle:bundle-2",
+            built_at=first.built_at + timedelta(hours=1),
+            active_artifact_id="artifact-2",
+            active_artifact_version="manual-review-v2",
+            relation_id="supplemented-relation-2",
+            review_id="supplemented-review-2",
+            mapping_version="supplemented-map-v2",
+        )
+
+        result = audit(first, second)
+
+        self.assertEqual(
+            result.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertIsNone(result.current_bundle)
+        self.assertEqual(
+            result.reasons,
+            ("risk_evidence_bundle_audit_material_change_missing",),
+        )
+
     def test_malformed_and_insufficient_inputs_are_stable(self):
         malformed = (
             audit_risk_research_evidence_bundle_versions(None)

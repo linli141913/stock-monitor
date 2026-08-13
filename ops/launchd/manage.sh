@@ -9,6 +9,9 @@ readonly BACKEND_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.plist"
 readonly BACKEND_RADAR_DISABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.radar-disabled.plist"
 readonly BACKEND_SECTOR_ENABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.sector-shadow-enabled.plist"
 readonly BACKEND_MARKET_ENABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.market-shadow-enabled.plist"
+readonly BACKEND_ETF_STAGE5_ENABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.etf-stage5-enabled.plist"
+readonly BACKEND_LEADER_STAGE6_ENABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.leader-stage6-enabled.plist"
+readonly BACKEND_LEADER_D8_WRITE_ENABLED_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.fastapi.leader-d8-write-enabled.plist"
 readonly NGROK_SOURCE="$LAUNCHD_DIR/com.linjian.stock-monitor.ngrok.plist"
 readonly LAUNCH_AGENTS_DIR="/Users/linjian/Library/LaunchAgents"
 readonly ARCHIVE_ROOT="$LAUNCH_AGENTS_DIR/stock-monitor-archive"
@@ -32,7 +35,7 @@ readonly NGROK_DOMAIN="banister-drilling-jawless.ngrok-free.dev"
 readonly BACKEND_HEALTH_URL="http://127.0.0.1:8001/docs"
 
 usage() {
-  print -- "用法：ops/launchd/manage.sh <validate|preflight|install|reload-backend|enable-radar|disable-radar|enable-sector-shadow|disable-sector-shadow|enable-market-shadow|disable-market-shadow|status|uninstall|rollback-screen>"
+  print -- "用法：ops/launchd/manage.sh <validate|preflight|install|reload-backend|enable-radar|disable-radar|enable-sector-shadow|disable-sector-shadow|enable-market-shadow|disable-market-shadow|enable-etf-stage5|disable-etf-stage5|enable-leader-stage6|disable-leader-stage6|enable-leader-d8-write|disable-leader-d8-write|status|uninstall|rollback-screen>"
 }
 
 assert_macos() {
@@ -52,6 +55,9 @@ validate_assets() {
     "$BACKEND_RADAR_DISABLED_SOURCE" \
     "$BACKEND_SECTOR_ENABLED_SOURCE" \
     "$BACKEND_MARKET_ENABLED_SOURCE" \
+    "$BACKEND_ETF_STAGE5_ENABLED_SOURCE" \
+    "$BACKEND_LEADER_STAGE6_ENABLED_SOURCE" \
+    "$BACKEND_LEADER_D8_WRITE_ENABLED_SOURCE" \
     "$NGROK_SOURCE" \
     "$PYTHON_BIN" \
     "$NGROK_BIN" \
@@ -71,6 +77,9 @@ validate_assets() {
     "$BACKEND_RADAR_DISABLED_SOURCE" \
     "$BACKEND_SECTOR_ENABLED_SOURCE" \
     "$BACKEND_MARKET_ENABLED_SOURCE" \
+    "$BACKEND_ETF_STAGE5_ENABLED_SOURCE" \
+    "$BACKEND_LEADER_STAGE6_ENABLED_SOURCE" \
+    "$BACKEND_LEADER_D8_WRITE_ENABLED_SOURCE" \
     "$NGROK_SOURCE" >/dev/null
   "$NGROK_BIN" config check >/dev/null
   print -- "launchd资产验证通过"
@@ -329,7 +338,10 @@ reload_backend() {
   if [[ "$source_plist" != "$BACKEND_SOURCE" &&
         "$source_plist" != "$BACKEND_RADAR_DISABLED_SOURCE" &&
         "$source_plist" != "$BACKEND_SECTOR_ENABLED_SOURCE" &&
-        "$source_plist" != "$BACKEND_MARKET_ENABLED_SOURCE" ]]; then
+        "$source_plist" != "$BACKEND_MARKET_ENABLED_SOURCE" &&
+        "$source_plist" != "$BACKEND_ETF_STAGE5_ENABLED_SOURCE" &&
+        "$source_plist" != "$BACKEND_LEADER_STAGE6_ENABLED_SOURCE" &&
+        "$source_plist" != "$BACKEND_LEADER_D8_WRITE_ENABLED_SOURCE" ]]; then
     print -u2 -- "FastAPI重载来源不在允许列表中"
     return 64
   fi
@@ -478,6 +490,24 @@ case "$command" in
     ;;
   disable-market-shadow)
     reload_backend "$BACKEND_SECTOR_ENABLED_SOURCE"
+    ;;
+  enable-etf-stage5)
+    reload_backend "$BACKEND_ETF_STAGE5_ENABLED_SOURCE"
+    ;;
+  disable-etf-stage5)
+    reload_backend "$BACKEND_MARKET_ENABLED_SOURCE"
+    ;;
+  enable-leader-stage6)
+    reload_backend "$BACKEND_LEADER_STAGE6_ENABLED_SOURCE"
+    ;;
+  disable-leader-stage6)
+    reload_backend "$BACKEND_ETF_STAGE5_ENABLED_SOURCE"
+    ;;
+  enable-leader-d8-write)
+    reload_backend "$BACKEND_LEADER_D8_WRITE_ENABLED_SOURCE"
+    ;;
+  disable-leader-d8-write)
+    reload_backend "$BACKEND_LEADER_STAGE6_ENABLED_SOURCE"
     ;;
   status)
     status_services

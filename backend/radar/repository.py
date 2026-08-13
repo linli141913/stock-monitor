@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -63,6 +64,16 @@ class HistoryWriteResult:
 
 
 FINAL_RUN_STATUSES = frozenset({"succeeded", "degraded", "failed"})
+
+
+def _begin_immediate(connection: sqlite3.Connection) -> None:
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as exc:
+        if str(exc).casefold() != "disk i/o error":
+            raise
+        time.sleep(1.0)
+        connection.execute("BEGIN IMMEDIATE")
 UTC = timezone.utc
 
 
@@ -401,7 +412,7 @@ class RadarRepository:
             raise RepositoryStateError("仓储写入前连接不能处于未提交事务中")
         try:
             self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("BEGIN IMMEDIATE")
+            _begin_immediate(self._connection)
             yield
             self._connection.commit()
         except RadarRepositoryError:

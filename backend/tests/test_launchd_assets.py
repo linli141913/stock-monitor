@@ -20,6 +20,18 @@ BACKEND_MARKET_ENABLED_PLIST = (
     LAUNCHD_DIR
     / "com.linjian.stock-monitor.fastapi.market-shadow-enabled.plist"
 )
+BACKEND_ETF_STAGE5_ENABLED_PLIST = (
+    LAUNCHD_DIR
+    / "com.linjian.stock-monitor.fastapi.etf-stage5-enabled.plist"
+)
+BACKEND_LEADER_STAGE6_ENABLED_PLIST = (
+    LAUNCHD_DIR
+    / "com.linjian.stock-monitor.fastapi.leader-stage6-enabled.plist"
+)
+BACKEND_LEADER_D8_WRITE_ENABLED_PLIST = (
+    LAUNCHD_DIR
+    / "com.linjian.stock-monitor.fastapi.leader-d8-write-enabled.plist"
+)
 NGROK_PLIST = LAUNCHD_DIR / "com.linjian.stock-monitor.ngrok.plist"
 BACKEND_RUNNER = LAUNCHD_DIR / "run-backend.sh"
 NGROK_RUNNER = LAUNCHD_DIR / "run-ngrok.sh"
@@ -44,6 +56,15 @@ class LaunchdAssetTests(unittest.TestCase):
         backend_radar_disabled = self.load_plist(BACKEND_RADAR_DISABLED_PLIST)
         backend_sector_enabled = self.load_plist(BACKEND_SECTOR_ENABLED_PLIST)
         backend_market_enabled = self.load_plist(BACKEND_MARKET_ENABLED_PLIST)
+        backend_etf_stage5_enabled = self.load_plist(
+            BACKEND_ETF_STAGE5_ENABLED_PLIST
+        )
+        backend_leader_stage6_enabled = self.load_plist(
+            BACKEND_LEADER_STAGE6_ENABLED_PLIST
+        )
+        backend_leader_d8_write_enabled = self.load_plist(
+            BACKEND_LEADER_D8_WRITE_ENABLED_PLIST
+        )
         ngrok = self.load_plist(NGROK_PLIST)
 
         self.assertEqual(
@@ -141,6 +162,32 @@ class LaunchdAssetTests(unittest.TestCase):
             backend_market_enabled["EnvironmentVariables"],
             expected_market_environment,
         )
+        expected_etf_stage5_environment = dict(expected_market_environment)
+        expected_etf_stage5_environment["RADAR_ETF_STAGE5_ENABLED"] = "true"
+        self.assertEqual(
+            backend_etf_stage5_enabled["EnvironmentVariables"],
+            expected_etf_stage5_environment,
+        )
+        expected_leader_stage6_environment = dict(
+            expected_etf_stage5_environment
+        )
+        expected_leader_stage6_environment[
+            "RADAR_LEADER_STAGE6_ENABLED"
+        ] = "true"
+        self.assertEqual(
+            backend_leader_stage6_enabled["EnvironmentVariables"],
+            expected_leader_stage6_environment,
+        )
+        expected_leader_d8_write_environment = dict(
+            expected_leader_stage6_environment
+        )
+        expected_leader_d8_write_environment[
+            "RADAR_LEADER_D8_REVIEW_WRITE_ENABLED"
+        ] = "true"
+        self.assertEqual(
+            backend_leader_d8_write_enabled["EnvironmentVariables"],
+            expected_leader_d8_write_environment,
+        )
         self.assertEqual(
             backend_radar_disabled["ProgramArguments"],
             backend["ProgramArguments"],
@@ -159,6 +206,30 @@ class LaunchdAssetTests(unittest.TestCase):
             backend["ProgramArguments"],
         )
         self.assertEqual(backend_market_enabled["Label"], backend["Label"])
+        self.assertEqual(
+            backend_etf_stage5_enabled["ProgramArguments"],
+            backend["ProgramArguments"],
+        )
+        self.assertEqual(
+            backend_etf_stage5_enabled["Label"],
+            backend["Label"],
+        )
+        self.assertEqual(
+            backend_leader_stage6_enabled["ProgramArguments"],
+            backend["ProgramArguments"],
+        )
+        self.assertEqual(
+            backend_leader_stage6_enabled["Label"],
+            backend["Label"],
+        )
+        self.assertEqual(
+            backend_leader_d8_write_enabled["ProgramArguments"],
+            backend["ProgramArguments"],
+        )
+        self.assertEqual(
+            backend_leader_d8_write_enabled["Label"],
+            backend["Label"],
+        )
 
     def test_launchd_assets_do_not_embed_secrets_or_browser_variables(self):
         assets = [
@@ -166,6 +237,9 @@ class LaunchdAssetTests(unittest.TestCase):
             BACKEND_RADAR_DISABLED_PLIST,
             BACKEND_SECTOR_ENABLED_PLIST,
             BACKEND_MARKET_ENABLED_PLIST,
+            BACKEND_ETF_STAGE5_ENABLED_PLIST,
+            BACKEND_LEADER_STAGE6_ENABLED_PLIST,
+            BACKEND_LEADER_D8_WRITE_ENABLED_PLIST,
             NGROK_PLIST,
             BACKEND_RUNNER,
             NGROK_RUNNER,
@@ -223,6 +297,10 @@ class LaunchdAssetTests(unittest.TestCase):
             "disable-sector-shadow",
             "enable-market-shadow",
             "disable-market-shadow",
+            "enable-etf-stage5",
+            "disable-etf-stage5",
+            "enable-leader-stage6",
+            "disable-leader-stage6",
             "status",
             "uninstall",
             "rollback-screen",
@@ -242,8 +320,14 @@ class LaunchdAssetTests(unittest.TestCase):
         self.assertIn("BACKEND_RADAR_DISABLED_SOURCE", content)
         self.assertIn("BACKEND_SECTOR_ENABLED_SOURCE", content)
         self.assertIn("BACKEND_MARKET_ENABLED_SOURCE", content)
+        self.assertIn("BACKEND_ETF_STAGE5_ENABLED_SOURCE", content)
+        self.assertIn("BACKEND_LEADER_STAGE6_ENABLED_SOURCE", content)
         self.assertIn(
             'disable-market-shadow)\n    reload_backend "$BACKEND_SECTOR_ENABLED_SOURCE"',
+            content,
+        )
+        self.assertIn(
+            'disable-leader-stage6)\n    reload_backend "$BACKEND_ETF_STAGE5_ENABLED_SOURCE"',
             content,
         )
         self.assertIn(str(RUNTIME_DIR), content)

@@ -53,6 +53,11 @@ def request_requires_backend_token(request: Request) -> bool:
         return True
     if request.method == "GET" and path.startswith("/api/stock/risk/"):
         return True
+    if (
+        request.method == "POST"
+        and path == "/api/radar/leaders/review-queue/review-version"
+    ):
+        return True
     protected_ai_prefixes = ("/api/stock/ai_attribution/",)
     return request.method == "GET" and path.startswith(protected_ai_prefixes)
 
