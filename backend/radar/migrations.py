@@ -2007,6 +2007,126 @@ STAGE6_REVIEW_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
     LEADER_RISK_REVIEW_STORAGE_MIGRATION,
 )
 
+
+RADAR_AI_STORAGE_MIGRATION = Migration(
+    version=7,
+    name="radar_ai_and_notification_preferences",
+    statements=(
+        """
+        CREATE TABLE radar_ai_analysis_runs (
+            analysis_run_id TEXT PRIMARY KEY CHECK (trim(analysis_run_id) <> ''),
+            reuse_key TEXT NOT NULL CHECK (trim(reuse_key) <> ''),
+            radar_run_id TEXT NOT NULL CHECK (trim(radar_run_id) <> ''),
+            as_of TEXT NOT NULL CHECK (julianday(as_of) IS NOT NULL),
+            scope_type TEXT NOT NULL CHECK (
+                scope_type IN ('market', 'sector', 'etf', 'leader')
+            ),
+            scope_id TEXT NOT NULL CHECK (trim(scope_id) <> ''),
+            evidence_fingerprint TEXT NOT NULL CHECK (
+                length(evidence_fingerprint) = 64
+                AND evidence_fingerprint NOT GLOB '*[^0-9a-f]*'
+            ),
+            prompt_version TEXT NOT NULL CHECK (trim(prompt_version) <> ''),
+            model TEXT NOT NULL CHECK (trim(model) <> ''),
+            analysis_status TEXT NOT NULL CHECK (
+                analysis_status IN ('running', 'success', 'failed')
+            ),
+            manual INTEGER NOT NULL DEFAULT 0 CHECK (manual IN (0, 1)),
+            duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+            usage_prompt_tokens INTEGER NOT NULL DEFAULT 0 CHECK (
+                usage_prompt_tokens >= 0
+            ),
+            usage_completion_tokens INTEGER NOT NULL DEFAULT 0 CHECK (
+                usage_completion_tokens >= 0
+            ),
+            usage_total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (
+                usage_total_tokens =
+                    usage_prompt_tokens + usage_completion_tokens
+            ),
+            error_category TEXT,
+            analysis_at TEXT NOT NULL CHECK (julianday(analysis_at) IS NOT NULL),
+            completed_at TEXT CHECK (
+                completed_at IS NULL OR julianday(completed_at) IS NOT NULL
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL)
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX uq_radar_ai_active_success_reuse
+        ON radar_ai_analysis_runs (reuse_key)
+        WHERE analysis_status IN ('running', 'success')
+        """,
+        """
+        CREATE INDEX idx_radar_ai_scope_history
+        ON radar_ai_analysis_runs (scope_type, scope_id, analysis_at DESC)
+        """,
+        """
+        CREATE INDEX idx_radar_ai_daily_usage
+        ON radar_ai_analysis_runs (analysis_at, analysis_status)
+        """,
+        """
+        CREATE TABLE radar_ai_outputs (
+            analysis_run_id TEXT PRIMARY KEY,
+            confirmed_facts_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(confirmed_facts_json)
+                AND json_type(confirmed_facts_json) = 'array'
+            ),
+            inferences_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(inferences_json)
+                AND json_type(inferences_json) = 'array'
+            ),
+            unknowns_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(unknowns_json)
+                AND json_type(unknowns_json) = 'array'
+            ),
+            counter_evidence_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(counter_evidence_json)
+                AND json_type(counter_evidence_json) = 'array'
+            ),
+            conditional_scenarios_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(conditional_scenarios_json)
+                AND json_type(conditional_scenarios_json) = 'array'
+            ),
+            plain_english_summary TEXT NOT NULL CHECK (
+                trim(plain_english_summary) <> ''
+            ),
+            source_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(source_ids_json)
+                AND json_type(source_ids_json) = 'array'
+            ),
+            invalidating_conditions_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(invalidating_conditions_json)
+                AND json_type(invalidating_conditions_json) = 'array'
+            ),
+            created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+            FOREIGN KEY (analysis_run_id)
+                REFERENCES radar_ai_analysis_runs(analysis_run_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE TABLE radar_notification_preferences (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            site_enabled INTEGER NOT NULL DEFAULT 1 CHECK (
+                site_enabled IN (0, 1)
+            ),
+            email_enabled INTEGER NOT NULL DEFAULT 0 CHECK (
+                email_enabled IN (0, 1)
+            ),
+            p2_email INTEGER NOT NULL DEFAULT 1 CHECK (p2_email IN (0, 1)),
+            p3_email INTEGER NOT NULL DEFAULT 0 CHECK (p3_email IN (0, 1)),
+            updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL)
+        )
+        """,
+    ),
+)
+
+
+STAGE8_RADAR_MIGRATIONS: Tuple[Migration, ...] = (
+    *STAGE6_REVIEW_RADAR_MIGRATIONS,
+    RADAR_AI_STORAGE_MIGRATION,
+)
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_V1 = frozenset({
     ("table", "radar_schema_migrations"),
     ("table", "radar_rule_versions"),
@@ -2102,6 +2222,15 @@ REQUIRED_RADAR_SCHEMA_OBJECTS_V6 = frozenset({
     ("trigger", "trg_leader_risk_manual_review_no_delete"),
 })
 
+REQUIRED_RADAR_SCHEMA_OBJECTS_V7 = frozenset({
+    ("table", "radar_ai_analysis_runs"),
+    ("table", "radar_ai_outputs"),
+    ("table", "radar_notification_preferences"),
+    ("index", "uq_radar_ai_active_success_reuse"),
+    ("index", "idx_radar_ai_scope_history"),
+    ("index", "idx_radar_ai_daily_usage"),
+})
+
 REQUIRED_RADAR_SCHEMA_OBJECTS_BY_VERSION = {
     1: REQUIRED_RADAR_SCHEMA_OBJECTS_V1,
     2: REQUIRED_RADAR_SCHEMA_OBJECTS_V2,
@@ -2109,6 +2238,7 @@ REQUIRED_RADAR_SCHEMA_OBJECTS_BY_VERSION = {
     4: REQUIRED_RADAR_SCHEMA_OBJECTS_V4,
     5: REQUIRED_RADAR_SCHEMA_OBJECTS_V5,
     6: REQUIRED_RADAR_SCHEMA_OBJECTS_V6,
+    7: REQUIRED_RADAR_SCHEMA_OBJECTS_V7,
 }
 
 REQUIRED_RADAR_SCHEMA_OBJECTS = frozenset().union(
@@ -2180,7 +2310,7 @@ def _known_migration_lineage(
 ) -> Sequence[Migration]:
     """让正式迁移前缀识别同一代码中的后续可选版本。"""
 
-    canonical = STAGE6_REVIEW_RADAR_MIGRATIONS
+    canonical = STAGE8_RADAR_MIGRATIONS
     if tuple(ordered) == canonical[:len(ordered)]:
         return canonical
     return ordered

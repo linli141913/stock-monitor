@@ -51,6 +51,20 @@ function canOpenStockExplanation(symbol: string) {
   return /^(?:(?:sh|sz|bj)\d{6}|hk\d{5}|\d{6})$/i.test(symbol);
 }
 
+function radarAlertHref(alert: AlertEvent) {
+  if (alert.eventType.startsWith('radar_sector_')) {
+    const params = new URLSearchParams({
+      tab: 'sectors',
+      industryCode: alert.symbol,
+      industryName: alert.stockName,
+      from: 'alerts',
+    });
+    return `/radar?${params.toString()}`;
+  }
+  if (alert.eventType.startsWith('radar_etf_')) return '/radar?tab=etf&from=alerts';
+  return '/radar?tab=leaders&from=alerts';
+}
+
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,7 +218,9 @@ export default function AlertsPage() {
                   <p>{alert.summary}</p>
                   <div className={styles.sourceRow}>
                     <span>{alert.source} · {formatAlertSourceTime(alert)}</span>
-                    {alert.eventType === 'market_risk' ? (
+                    {alert.source === 'mainline_radar' ? (
+                      <span>确定性主线雷达规则提醒，无资讯原文</span>
+                    ) : alert.eventType === 'market_risk' ? (
                       <span>行情规则提醒，无资讯原文</span>
                     ) : alert.eventType === 'linkage_risk' ? (
                       <span>板块与海外联动规则提醒，无资讯原文</span>
@@ -224,7 +240,9 @@ export default function AlertsPage() {
                   >
                     {deliveryText(emailDelivery)}
                   </span>
-                  {alert.priority !== 'P3' && canOpenStockExplanation(alert.symbol) && (
+                  {alert.source === 'mainline_radar' ? (
+                    <Link href={radarAlertHref(alert)}>返回主线雷达</Link>
+                  ) : alert.priority !== 'P3' && canOpenStockExplanation(alert.symbol) && (
                     <Link href={`/?code=${encodeURIComponent(alert.symbol)}`}>
                       查看事件与风险解释
                     </Link>

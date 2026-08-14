@@ -149,7 +149,13 @@ def _watchlist_alerts(
         ):
         symbol = item["symbol"].strip().lower()
         is_system_health = item.get("eventType") == "system_health"
-        if today_only and symbol not in monitored and not is_system_health:
+        is_radar_alert = item.get("source") == "mainline_radar"
+        if (
+            today_only
+            and symbol not in monitored
+            and not is_system_health
+            and not is_radar_alert
+        ):
             continue
         if today_only and not news_api.is_source_published_today({
                 "publishedAt": item.get("publishedAt"),

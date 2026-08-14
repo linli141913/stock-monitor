@@ -230,6 +230,120 @@
   background: #eef4ff;
 }
 
+.aiPanel {
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid #dce5f1;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 7px 18px rgba(15, 23, 42, 0.04);
+}
+
+.aiHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 15px;
+  color: #2563eb;
+}
+
+.aiHeader > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.aiHeader h2 {
+  margin: 0 0 3px;
+  color: #172238;
+  font-size: 15px;
+}
+
+.aiHeader p {
+  margin: 0;
+  color: #718096;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aiAction {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #cbdaf3;
+  border-radius: 7px;
+  background: #f5f8ff;
+  color: #2856a6;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.aiAction:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.aiBody {
+  padding: 0 15px 15px;
+  border-top: 1px solid #e7edf5;
+}
+
+.aiSummary {
+  margin: 13px 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.aiColumns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.aiColumns > div {
+  padding: 10px;
+  border: 1px solid #e7edf5;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.aiColumns strong,
+.aiColumns span,
+.aiColumns li {
+  color: #5d687a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.aiColumns strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #26354d;
+}
+
+.aiColumns ul {
+  margin: 0;
+  padding-left: 17px;
+}
+
+.aiMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  color: #8490a2;
+  font-size: 10px;
+}
+
+@media (max-width: 760px) {
+  .aiHeader {
+    flex-wrap: wrap;
+  }
+
+  .aiColumns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sectorList {
   display: flex;
   flex-direction: column;

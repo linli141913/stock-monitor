@@ -1,6 +1,6 @@
 export type AlertDirection = 'positive' | 'negative' | 'neutral' | 'uncertain';
 export type AlertPriority = 'P1' | 'P2' | 'P3';
-export type EvidenceLevel = 'S' | 'A' | 'B' | 'C';
+export type EvidenceLevel = 'S' | 'A' | 'B' | 'C' | 'RULE';
 export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'not_configured';
 
 export interface AlertDelivery {

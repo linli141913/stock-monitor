@@ -428,6 +428,69 @@ def save_global_email_settings(recipient_email: str) -> Dict[str, Any]:
     return get_global_email_settings()
 
 
+def get_radar_notification_preferences() -> Dict[str, Any]:
+    """读取阶段8雷达偏好；迁移未应用时保持默认关闭邮件。"""
+    init_alert_tables()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT site_enabled, email_enabled, p2_email, p3_email, updated_at "
+            "FROM radar_notification_preferences WHERE id=1"
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        row = None
+    finally:
+        conn.close()
+    if row is None:
+        return {
+            "siteEnabled": True,
+            "emailEnabled": False,
+            "p2Email": True,
+            "p3Email": False,
+            "updatedAt": None,
+        }
+    return {
+        "siteEnabled": bool(row["site_enabled"]),
+        "emailEnabled": bool(row["email_enabled"]),
+        "p2Email": bool(row["p2_email"]),
+        "p3Email": bool(row["p3_email"]),
+        "updatedAt": row["updated_at"],
+    }
+
+
+def save_radar_notification_preferences(
+    *,
+    site_enabled: bool,
+    email_enabled: bool,
+    p2_email: bool,
+    p3_email: bool,
+) -> Dict[str, Any]:
+    init_alert_tables()
+    conn = _connect()
+    conn.execute('''
+    INSERT INTO radar_notification_preferences (
+        id, site_enabled, email_enabled, p2_email, p3_email, updated_at
+    ) VALUES (1, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        site_enabled=excluded.site_enabled,
+        email_enabled=excluded.email_enabled,
+        p2_email=excluded.p2_email,
+        p3_email=excluded.p3_email,
+        updated_at=excluded.updated_at
+    ''', (
+        int(site_enabled),
+        int(email_enabled),
+        int(p2_email),
+        int(p3_email),
+        _now(),
+    ))
+    conn.commit()
+    conn.close()
+    return get_radar_notification_preferences()
+
+
 def _snapshot_time_parts(source_time: str):
     parsed = datetime.strptime(source_time, "%Y-%m-%d %H:%M:%S")
     rounded = parsed + timedelta(minutes=2, seconds=30)

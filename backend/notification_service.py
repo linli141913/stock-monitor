@@ -123,16 +123,29 @@ def _next_retry_at(attempt_count: int) -> Optional[str]:
     ).isoformat(timespec="seconds")
 
 
-def deliver_alert(alert: Dict[str, Any]) -> None:
+def deliver_alert(
+    alert: Dict[str, Any],
+    *,
+    email_enabled: Optional[bool] = None,
+    p2_email: Optional[bool] = None,
+    p3_email: bool = False,
+) -> None:
     alert_repository.record_delivery(alert["id"], "site", "sent")
-    if alert["priority"] not in {"P1", "P2"}:
-        return
-
-    preferences = alert_repository.get_preferences(alert["symbol"])
-    if not preferences["enabled"] or not preferences["emailEnabled"]:
-        return
-    if alert["priority"] == "P2" and not preferences["p2Email"]:
-        return
+    if email_enabled is None:
+        if alert["priority"] not in {"P1", "P2"}:
+            return
+        preferences = alert_repository.get_preferences(alert["symbol"])
+        if not preferences["enabled"] or not preferences["emailEnabled"]:
+            return
+        if alert["priority"] == "P2" and not preferences["p2Email"]:
+            return
+    else:
+        if not email_enabled:
+            return
+        if alert["priority"] == "P2" and not bool(p2_email):
+            return
+        if alert["priority"] == "P3" and not p3_email:
+            return
 
     result = send_alert_email(alert)
     status = str(result["status"])
@@ -220,9 +233,22 @@ def trigger_event_ai_analysis(alert: Dict[str, Any]) -> str:
     return "started"
 
 
-def process_new_alert(alert: Dict[str, Any]) -> None:
-    deliver_alert(alert)
-    trigger_event_ai_analysis(alert)
+def process_new_alert(
+    alert: Dict[str, Any],
+    *,
+    email_enabled: Optional[bool] = None,
+    p2_email: Optional[bool] = None,
+    p3_email: bool = False,
+    trigger_old_ai: bool = True,
+) -> None:
+    deliver_alert(
+        alert,
+        email_enabled=email_enabled,
+        p2_email=p2_email,
+        p3_email=p3_email,
+    )
+    if trigger_old_ai:
+        trigger_event_ai_analysis(alert)
 
 
 def retry_due_email_deliveries() -> int:

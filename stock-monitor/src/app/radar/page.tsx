@@ -6,9 +6,10 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import MarketContextPanel from '@/components/radar/MarketContextPanel';
+import RadarAiInsightLoader from '@/components/radar/RadarAiInsightLoader';
 import LeaderObservationPanel from '@/components/radar/LeaderObservationPanel';
 import ModuleStatePanel from '@/components/radar/ModuleStatePanel';
 import RadarDataGatePanel from '@/components/radar/RadarDataGatePanel';
@@ -27,6 +28,7 @@ import type {
   RadarOverviewResponse,
   RadarSectorsResponse,
 } from '@/types/radar';
+import type { RadarAiScopeType } from '@/types/radar-ai';
 import styles from './page.module.css';
 
 type RadarTab = 'overview' | 'sectors' | 'etf' | 'leaders' | 'history';
@@ -131,6 +133,42 @@ export default function RadarPage() {
   const leadersInFlight = useRef(false);
   const leaderReviewQueueInFlight = useRef(false);
   const leaderReviewQueueOffset = useRef(0);
+
+  const aiTarget = useMemo(() => {
+    if (activeTab === 'overview') {
+      return { scopeType: 'market' as RadarAiScopeType, scopeId: 'overview', path: 'overview', title: '雷达AI解读 · 市场环境' };
+    }
+    if (activeTab === 'sectors') {
+      return focusedIndustryCode
+        ? { scopeType: 'sector' as RadarAiScopeType, scopeId: focusedIndustryCode, path: `sectors/${encodeURIComponent(focusedIndustryCode)}`, title: `雷达AI解读 · ${focusedIndustryName || focusedIndustryCode}` }
+        : null;
+    }
+    if (activeTab === 'etf') {
+      const symbol = etfs?.module.candidates[0]?.representativeSymbol
+        || '';
+      return symbol
+        ? { scopeType: 'etf' as RadarAiScopeType, scopeId: symbol, path: `etfs/${symbol}`, title: `雷达AI解读 · ETF ${symbol}` }
+        : null;
+    }
+    if (activeTab === 'leaders') {
+      const symbol = leaders?.module.preliminary[0]?.symbol
+        || leaders?.module.candidates[0]?.symbol
+        || leaders?.module.confirmed[0]?.symbol
+        || '';
+      return symbol
+        ? { scopeType: 'leader' as RadarAiScopeType, scopeId: symbol, path: `leaders/${symbol}`, title: `雷达AI解读 · 龙头 ${symbol}` }
+        : null;
+    }
+    return null;
+  }, [
+    activeTab,
+    etfs?.module.candidates,
+    focusedIndustryCode,
+    focusedIndustryName,
+    leaders?.module.candidates,
+    leaders?.module.confirmed,
+    leaders?.module.preliminary,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -560,6 +598,13 @@ export default function RadarPage() {
         <div className={styles.refreshError}>
           {refreshError}。当前保留上一轮成功页面内容。
         </div>
+      )}
+
+      {activeTab !== 'history' && (
+        <RadarAiInsightLoader
+          key={aiTarget ? `${aiTarget.scopeType}:${aiTarget.scopeId}` : activeTab}
+          target={aiTarget}
+        />
       )}
 
       {activeTab === 'overview' && (

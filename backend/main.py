@@ -17,6 +17,7 @@ from news_api import router as news_router
 from ai_analysis import router as ai_analysis_router, get_ai_attribution
 from alerts_api import router as alerts_router
 from radar.api import router as radar_router
+from radar.ai.api import router as radar_ai_router
 from pydantic import BaseModel
 import database
 import alert_repository
@@ -58,6 +59,10 @@ def request_requires_backend_token(request: Request) -> bool:
         and path == "/api/radar/leaders/review-queue/review-version"
     ):
         return True
+    if request.method == "POST" and path == "/api/radar/ai/analyze":
+        return True
+    if request.method == "PUT" and path == "/api/radar/alerts/preferences":
+        return True
     protected_ai_prefixes = ("/api/stock/ai_attribution/",)
     return request.method == "GET" and path.startswith(protected_ai_prefixes)
 
@@ -88,6 +93,7 @@ app.include_router(ai_analysis_router)
 app.include_router(news_router)
 app.include_router(alerts_router)
 app.include_router(radar_router)
+app.include_router(radar_ai_router)
 
 # ── 后台定时追踪任务 ──────────────────────────────────────────────
 AI_ANALYSIS_SLOTS = ("10:30", "11:30", "15:00", "22:00")
@@ -520,6 +526,9 @@ def start_scheduler():
         scheduler,
         database_path=database.DB_PATH,
     )
+    # 独立雷达AI默认关闭；开启后也只消费服务端正式冻结证据，当前影子状态零调用。
+    from radar.ai.scheduler import register_radar_ai_job
+    register_radar_ai_job(scheduler)
     scheduler.start()
     print("后台自动化追踪与资讯采集调度器已启动。")
 # ── 公共工具函数 ──────────────────────────────────────────────

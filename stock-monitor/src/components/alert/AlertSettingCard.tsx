@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BellRing, RefreshCw } from 'lucide-react';
+import type { RadarNotificationPreferences } from '@/types/radar-ai';
 import styles from './AlertSettingCard.module.css';
 
 interface TaskHealth {
@@ -62,6 +63,9 @@ export default function AlertSettingCard() {
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailTesting, setEmailTesting] = useState(false);
   const [emailFeedback, setEmailFeedback] = useState<EmailFeedback | null>(null);
+  const [radarPreferences, setRadarPreferences] = useState<RadarNotificationPreferences | null>(null);
+  const [radarPreferencesLoading, setRadarPreferencesLoading] = useState(true);
+  const [radarPreferencesSaving, setRadarPreferencesSaving] = useState(false);
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
@@ -100,13 +104,63 @@ export default function AlertSettingCard() {
     }
   }, []);
 
+  const fetchRadarPreferences = useCallback(async () => {
+    setRadarPreferencesLoading(true);
+    try {
+      const response = await fetch('/api/backend/api/radar/alerts/preferences', {
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(`雷达提醒设置请求失败 (${response.status})`);
+      const payload = await response.json() as { data: RadarNotificationPreferences };
+      setRadarPreferences(payload.data);
+    } catch (requestError) {
+      setEmailFeedback({
+        tone: 'error',
+        text: requestError instanceof Error ? requestError.message : '雷达提醒设置获取失败',
+      });
+    } finally {
+      setRadarPreferencesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void fetchHealth();
       void fetchEmailSettings();
+      void fetchRadarPreferences();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [fetchEmailSettings, fetchHealth]);
+  }, [fetchEmailSettings, fetchHealth, fetchRadarPreferences]);
+
+  const saveRadarPreferences = async (
+    next: RadarNotificationPreferences,
+  ) => {
+    setRadarPreferencesSaving(true);
+    try {
+      const response = await fetch('/api/backend/api/radar/alerts/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+        cache: 'no-store',
+      });
+      const payload = await response.json() as {
+        data?: RadarNotificationPreferences;
+        detail?: string;
+      };
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.detail || `雷达提醒设置保存失败 (${response.status})`);
+      }
+      setRadarPreferences(payload.data);
+      setEmailFeedback({ tone: 'success', text: '雷达提醒偏好已保存' });
+    } catch (requestError) {
+      setEmailFeedback({
+        tone: 'error',
+        text: requestError instanceof Error ? requestError.message : '雷达提醒设置保存失败',
+      });
+    } finally {
+      setRadarPreferencesSaving(false);
+    }
+  };
 
   const isValidEmail = (value: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value);
 
@@ -310,6 +364,57 @@ export default function AlertSettingCard() {
             aria-live="polite"
           >
             {emailFeedback.text}
+          </div>
+        )}
+      </div>
+
+      <div className={styles.emailPanel}>
+        <div>
+          <h3>主线雷达提醒</h3>
+          <p>只针对正式状态变化；影子状态不会生成提醒或发送邮件。</p>
+        </div>
+        {radarPreferencesLoading || !radarPreferences ? (
+          <p>正在读取雷达提醒偏好…</p>
+        ) : (
+          <div className={styles.preferenceList}>
+            <label>
+              <span>站内提醒</span>
+              <input
+                type="checkbox"
+                checked={radarPreferences.siteEnabled}
+                disabled={radarPreferencesSaving}
+                onChange={(event) => void saveRadarPreferences({
+                  ...radarPreferences,
+                  siteEnabled: event.target.checked,
+                })}
+              />
+            </label>
+            <label>
+              <span>P2 状态变化邮件</span>
+              <input
+                type="checkbox"
+                checked={radarPreferences.emailEnabled && radarPreferences.p2Email}
+                disabled={radarPreferencesSaving}
+                onChange={(event) => void saveRadarPreferences({
+                  ...radarPreferences,
+                  emailEnabled: event.target.checked || radarPreferences.p3Email,
+                  p2Email: event.target.checked,
+                })}
+              />
+            </label>
+            <label>
+              <span>P3 观察级邮件</span>
+              <input
+                type="checkbox"
+                checked={radarPreferences.emailEnabled && radarPreferences.p3Email}
+                disabled={radarPreferencesSaving}
+                onChange={(event) => void saveRadarPreferences({
+                  ...radarPreferences,
+                  emailEnabled: event.target.checked || radarPreferences.p2Email,
+                  p3Email: event.target.checked,
+                })}
+              />
+            </label>
           </div>
         )}
       </div>
