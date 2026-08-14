@@ -1,7 +1,17 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-14 09:17 CST
+> 保存时间：2026-08-14 10:55 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-08-14阶段8提交与受控上线
+
+- 阶段6至阶段8的4个本地提交已推送到 `origin/main`，当前发布代码提交为 `d76c188 feat: 完成阶段8提醒与独立雷达AI工程`；推送前后本地 `main` 与远端 `main` 一致。
+- 8001已通过 `ops/launchd/manage.sh enable-leader-stage6` 受控重载，运行PID为85231，旧运行资产归档于 `/Users/linjian/Library/LaunchAgents/stock-monitor-archive/20260814-100845-radar-2b6b2b`；`/docs` 返回200，阶段5 ETF与阶段6龙头开关保持启用，D8写入保持关闭。
+- 阶段8生产运行时如实保持门禁关闭：`/api/radar/ai/health` 返回 `status=disabled`、`enabled=false`、`manualEnabled=false`、`configured=false`、`storageReady=false`；AI总览为 `not_run / stage8_storage_not_ready`，提醒偏好返回安全默认值。本次未应用迁移7、未修改生产环境变量、未发起付费AI调用、未写生产SQLite。
+- Vercel生产部署 `dpl_2eRUgoFMdCHSoSPNFYAkBhKEHVcm` 已为 `Ready`，正式别名为 `https://stock-monitor-murex-one.vercel.app`。线上首页、主线雷达、提醒中心、监测列表和携带雷达上下文的行业洞察均返回200并通过应用内真实浏览器验收；首页真实行情加载正常，行业页联动提示正确，1280px桌面视口无页面级横向溢出，浏览器控制台0错误，Vercel最近一小时无错误日志。
+- `/api/health` 当前为 `degraded`，Vercel、隧道与FastAPI均健康；唯一降级项是既有 `radarLeaderStage6` 正式研究提供方缺失（`leader_research_single_pass_provider_missing`、`leader_research_input_provider_batch_missing`），不是本次发布故障。不得把该状态写成全健康，也不得用影子数据或D2审核队列补正式证据。
+
+下一步：先补齐行业、ETF、龙头正式状态与服务端冻结证据提供方；通过真实证据门禁后，再备份生产SQLite并受控应用迁移7，最后单独配置和启用雷达AI，以第一个真实正式证据包验收。阶段9历史回放仍未开始。
 
 ## 2026-08-14阶段8提醒与独立雷达AI本地工程
 
