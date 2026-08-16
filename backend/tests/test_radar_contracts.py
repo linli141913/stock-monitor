@@ -10,6 +10,7 @@ from radar.contracts import (
     RadarBatchMeta,
     SourceIssue,
     SourceStatus,
+    UnitVerificationStatus,
 )
 from radar.source_health import SourceHealthPolicy, evaluate_source_health
 
@@ -124,6 +125,53 @@ class RadarContractTests(unittest.TestCase):
                         fetchedAt=timestamp,
                         **{field_name: value},
                     )
+
+    def test_verified_market_cap_requires_complete_crosscheck_fields(self):
+        timestamp = datetime(2026, 7, 17, 10, 0, tzinfo=SHANGHAI_TZ)
+        with self.assertRaises(ValidationError):
+            QuoteSnapshot(
+                symbol="000001",
+                name="平安银行",
+                sourceTime=timestamp,
+                fetchedAt=timestamp,
+                price=10.0,
+                marketCapSource=100.0,
+                marketCapUnitStatus=UnitVerificationStatus.VERIFIED,
+                totalSharesSource=1_000_000_000.0,
+                currency="CNY",
+            )
+
+    def test_unverified_market_cap_cannot_expose_cny_value(self):
+        timestamp = datetime(2026, 7, 17, 10, 0, tzinfo=SHANGHAI_TZ)
+        with self.assertRaises(ValidationError):
+            QuoteSnapshot(
+                symbol="000001",
+                name="平安银行",
+                sourceTime=timestamp,
+                fetchedAt=timestamp,
+                price=10.0,
+                marketCapSource=100.0,
+                marketCapCny=10_000_000_000.0,
+                marketCapUnitStatus=UnitVerificationStatus.UNVERIFIED,
+                totalSharesSource=1_000_000_000.0,
+                currency="CNY",
+            )
+
+    def test_verified_market_cap_rejects_zero_crosscheck_values(self):
+        timestamp = datetime(2026, 7, 17, 10, 0, tzinfo=SHANGHAI_TZ)
+        with self.assertRaises(ValidationError):
+            QuoteSnapshot(
+                symbol="000001",
+                name="平安银行",
+                sourceTime=timestamp,
+                fetchedAt=timestamp,
+                price=0.0,
+                marketCapSource=0.0,
+                marketCapCny=0.0,
+                marketCapUnitStatus=UnitVerificationStatus.VERIFIED,
+                totalSharesSource=0.0,
+                currency="CNY",
+            )
 
     def test_naive_timestamps_are_rejected(self):
         with self.assertRaises(ValidationError):

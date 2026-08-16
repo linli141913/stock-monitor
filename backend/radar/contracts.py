@@ -1,3 +1,4 @@
+import math
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, ClassVar, Dict, Generic, List, Optional, Tuple, TypeVar
@@ -534,6 +535,21 @@ class QuoteSnapshot(ContractModel):
         default=None,
         alias="marketCapSource",
     )
+    market_cap_cny: Optional[float] = Field(
+        default=None,
+        alias="marketCapCny",
+        ge=0,
+    )
+    market_cap_unit_status: UnitVerificationStatus = Field(
+        default=UnitVerificationStatus.UNVERIFIED,
+        alias="marketCapUnitStatus",
+    )
+    total_shares_source: Optional[float] = Field(
+        default=None,
+        alias="totalSharesSource",
+        ge=0,
+    )
+    currency: Optional[str] = None
     source: str = "tencent_finance"
 
     @property
@@ -548,7 +564,7 @@ class QuoteSnapshot(ContractModel):
         return value
 
     @model_validator(mode="after")
-    def validate_turnover_amount_unit(self):
+    def validate_monetary_units(self):
         if (
             self.turnover_amount_unit_status
             == UnitVerificationStatus.VERIFIED
@@ -561,6 +577,24 @@ class QuoteSnapshot(ContractModel):
             and self.turnover_amount_cny is not None
         ):
             raise ValueError("成交额单位未验证时人民币元值必须缺失")
+        if self.market_cap_unit_status == UnitVerificationStatus.VERIFIED:
+            market_cap_values = (
+                self.market_cap_source,
+                self.market_cap_cny,
+                self.price,
+                self.total_shares_source,
+            )
+            if any(value is None for value in market_cap_values):
+                raise ValueError("市值单位已验证时必须提供完整交叉校验字段")
+            if any(
+                not math.isfinite(float(value)) or float(value) <= 0
+                for value in market_cap_values
+            ):
+                raise ValueError("市值单位已验证时交叉校验字段必须为正数")
+            if self.currency != "CNY":
+                raise ValueError("市值单位已验证时币种必须为CNY")
+        elif self.market_cap_cny is not None:
+            raise ValueError("市值单位未验证时人民币元值必须缺失")
         return self
 
     def missing_fields(self) -> Tuple[str, ...]:

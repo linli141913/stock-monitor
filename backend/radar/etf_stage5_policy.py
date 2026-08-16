@@ -22,6 +22,15 @@ REQUIRED_RANKING_FIELDS: Tuple[str, ...] = (
     "trackingError",
     "indexCorrelation",
 )
+SUPPORTED_ETF_HISTORY_WINDOWS: Tuple[int, ...] = (20, 60)
+REQUIRED_ETF_EXCEPTION_SCENARIOS: Tuple[str, ...] = (
+    "source_failed",
+    "stale_data",
+    "incomplete_required_fields",
+    "duplicate_schedule",
+    "identity_drift",
+    "non_trading_session",
+)
 
 
 @dataclass(frozen=True)
@@ -69,7 +78,6 @@ class EtfRulePolicy:
 @dataclass(frozen=True)
 class EtfRetentionPolicy:
     intraday_detail_trading_days: int = 60
-    minimum_shadow_trading_days: int = 20
     keep_daily_facts: bool = True
     keep_candidate_summaries: bool = True
     keep_raw_upstream_payloads: bool = False
@@ -78,19 +86,70 @@ class EtfRetentionPolicy:
     def __post_init__(self):
         if self.intraday_detail_trading_days < 20:
             raise ValueError("ETF盘中特征保留期不得短于20个交易日")
-        if self.minimum_shadow_trading_days < 20:
-            raise ValueError("ETF最短影子观察不得少于20个交易日")
-        if (
-            self.minimum_shadow_trading_days
-            > self.intraday_detail_trading_days
-        ):
-            raise ValueError("ETF影子观察期不能长于盘中特征保留期")
         if not self.keep_daily_facts or not self.keep_candidate_summaries:
             raise ValueError("ETF日频事实和候选摘要必须长期保留")
         if self.keep_raw_upstream_payloads:
             raise ValueError("阶段5第一版不得长期保存上游原始响应")
         if self.automatic_cleanup_enabled:
             raise ValueError("生产清理任务未获授权，不能自动启用")
+
+
+@dataclass(frozen=True)
+class EtfObservationPolicy:
+    supported_history_windows: Tuple[int, ...] = (
+        SUPPORTED_ETF_HISTORY_WINDOWS
+    )
+    minimum_live_shadow_trading_days: int = 5
+    required_exception_scenarios: Tuple[str, ...] = (
+        REQUIRED_ETF_EXCEPTION_SCENARIOS
+    )
+
+    def __post_init__(self):
+        if (
+            not self.supported_history_windows
+            or len(self.supported_history_windows)
+            != len(set(self.supported_history_windows))
+            or tuple(sorted(self.supported_history_windows))
+            != self.supported_history_windows
+            or self.supported_history_windows[0] < 20
+        ):
+            raise ValueError("ETF历史窗口必须是不短于20日的递增唯一集合")
+        if self.minimum_live_shadow_trading_days < 5:
+            raise ValueError("ETF现场影子验收不得少于5个交易日")
+        if (
+            not self.required_exception_scenarios
+            or len(self.required_exception_scenarios)
+            != len(set(self.required_exception_scenarios))
+        ):
+            raise ValueError("ETF异常场景合同必须完整且不得重复")
+
+
+@dataclass(frozen=True)
+class EtfObservationEvidence:
+    available_history_trading_days: int
+    required_history_trading_days: int
+    point_in_time_history_verified: bool
+    live_shadow_trading_days: int
+    live_scheduled_runs_complete: bool
+    passed_exception_scenarios: Tuple[str, ...]
+
+    def __post_init__(self):
+        if self.available_history_trading_days < 0:
+            raise ValueError("ETF历史覆盖交易日不能为负数")
+        if self.required_history_trading_days <= 0:
+            raise ValueError("ETF规则历史窗口必须为正数")
+        if self.live_shadow_trading_days < 0:
+            raise ValueError("ETF现场影子交易日不能为负数")
+        if len(self.passed_exception_scenarios) != len(
+            set(self.passed_exception_scenarios)
+        ):
+            raise ValueError("ETF已通过异常场景不得重复")
+
+
+@dataclass(frozen=True)
+class EtfObservationDecision:
+    ready: bool
+    reasons: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -133,6 +192,7 @@ class EtfLowFrequencyDecision:
 
 DEFAULT_ETF_RULE_POLICY = EtfRulePolicy()
 DEFAULT_ETF_RETENTION_POLICY = EtfRetentionPolicy()
+DEFAULT_ETF_OBSERVATION_POLICY = EtfObservationPolicy()
 
 
 def evaluate_etf_formal_gate(
@@ -213,6 +273,43 @@ def evaluate_low_frequency_readiness(
         if not passed:
             reasons.append(reason)
     return EtfLowFrequencyDecision(
+        ready=not reasons,
+        reasons=tuple(reasons),
+    )
+
+
+def evaluate_observation_readiness(
+    evidence: EtfObservationEvidence,
+    *,
+    policy: EtfObservationPolicy = DEFAULT_ETF_OBSERVATION_POLICY,
+) -> EtfObservationDecision:
+    reasons = []
+    if (
+        evidence.required_history_trading_days
+        not in policy.supported_history_windows
+    ):
+        reasons.append("etf_history_window_not_supported")
+    if not evidence.point_in_time_history_verified:
+        reasons.append("etf_point_in_time_history_unverified")
+    if (
+        evidence.available_history_trading_days
+        < evidence.required_history_trading_days
+    ):
+        reasons.append("etf_history_coverage_insufficient")
+    if (
+        evidence.live_shadow_trading_days
+        < policy.minimum_live_shadow_trading_days
+    ):
+        reasons.append("etf_live_shadow_trading_days_insufficient")
+    if not evidence.live_scheduled_runs_complete:
+        reasons.append("etf_live_scheduled_runs_incomplete")
+    passed_scenarios = set(evidence.passed_exception_scenarios)
+    reasons.extend(
+        f"etf_exception_scenario_not_passed:{scenario}"
+        for scenario in policy.required_exception_scenarios
+        if scenario not in passed_scenarios
+    )
+    return EtfObservationDecision(
         ready=not reasons,
         reasons=tuple(reasons),
     )

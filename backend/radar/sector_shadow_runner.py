@@ -27,6 +27,7 @@ from radar.contracts import (
     SourceIssue,
     SourceStatus,
 )
+from radar.market_cap_unit_evidence import build_market_cap_unit_evidence
 from radar.repository import (
     RadarRepository,
     RadarRepositoryError,
@@ -39,6 +40,7 @@ from radar.source_health import (
     quote_item_time_reasons,
 )
 from radar.sources.tencent_quotes import fetch_tencent_quotes
+from radar.turnover_unit_evidence import build_turnover_unit_evidence
 
 
 UTC = timezone.utc
@@ -281,11 +283,23 @@ class SectorShadowRunner:
             )
 
             try:
+                turnover_unit_evidence = build_turnover_unit_evidence(
+                    tuple(quote_batch.items),
+                    stock_symbols=symbols,
+                )
+                market_cap_unit_evidence = build_market_cap_unit_evidence(
+                    tuple(quote_batch.items),
+                    stock_symbols=symbols,
+                )
                 features = build_sector_features(
                     classification,
                     quote_batch,
                     stock_symbols=symbols,
                     etf_symbols=(),
+                    market_cap_unit_status=(
+                        market_cap_unit_evidence.status
+                    ),
+                    turnover_unit_status=turnover_unit_evidence.status,
                     maximum_age_seconds=(
                         self._policy.maximum_quote_age_seconds
                     ),

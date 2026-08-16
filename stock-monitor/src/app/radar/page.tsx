@@ -24,6 +24,7 @@ import type {
   RadarLeaderReviewFormResponse,
   RadarLeaderReviewSubmissionDraft,
   RadarLeaderReviewQueueResponse,
+  RadarLeaderReviewVersionPreflightResponse,
   RadarLeadersResponse,
   RadarOverviewResponse,
   RadarSectorsResponse,
@@ -97,6 +98,37 @@ function blockerLabels(
   const visible = unique.slice(0, limit);
   if (unique.length > limit) visible.push(`另有 ${unique.length - limit} 项待补`);
   return visible;
+}
+
+function buildLeaderReviewRequestPayload(
+  reviewForm: RadarLeaderReviewFormResponse,
+  draft: RadarLeaderReviewSubmissionDraft,
+) {
+  return {
+    reviewBatchId: reviewForm.summary.reviewBatchId,
+    documentId: reviewForm.item.documentId,
+    candidateCategory: reviewForm.item.candidateCategory,
+    contentSha256: reviewForm.contentSha256,
+    candidateId: reviewForm.candidate.candidateId,
+    ...draft,
+    effectiveUntil: draft.effectiveUntil
+      ? new Date(draft.effectiveUntil).toISOString()
+      : null,
+    targetEvent: {
+      ...draft.targetEvent,
+      publishedAt: new Date(draft.targetEvent.publishedAt).toISOString(),
+      effectiveFrom: new Date(draft.targetEvent.effectiveFrom).toISOString(),
+      effectiveUntil: draft.targetEvent.effectiveUntil
+        ? new Date(draft.targetEvent.effectiveUntil).toISOString()
+        : null,
+    },
+    factSupplements: draft.factSupplements.map((fact) => ({
+      ...fact,
+      mappedDocumentId: fact.factKind === 'referenced_document_id'
+        ? draft.targetEvent.documentId
+        : null,
+    })),
+  };
 }
 
 export default function RadarPage() {
@@ -371,31 +403,10 @@ export default function RadarPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           cache: 'no-store',
-          body: JSON.stringify({
-            reviewBatchId: leaderReviewForm.summary.reviewBatchId,
-            documentId: leaderReviewForm.item.documentId,
-            candidateCategory: leaderReviewForm.item.candidateCategory,
-            contentSha256: leaderReviewForm.contentSha256,
-            candidateId: leaderReviewForm.candidate.candidateId,
-            ...draft,
-            effectiveUntil: draft.effectiveUntil
-              ? new Date(draft.effectiveUntil).toISOString()
-              : null,
-            targetEvent: {
-              ...draft.targetEvent,
-              publishedAt: new Date(draft.targetEvent.publishedAt).toISOString(),
-              effectiveFrom: new Date(draft.targetEvent.effectiveFrom).toISOString(),
-              effectiveUntil: draft.targetEvent.effectiveUntil
-                ? new Date(draft.targetEvent.effectiveUntil).toISOString()
-                : null,
-            },
-            factSupplements: draft.factSupplements.map((fact) => ({
-              ...fact,
-              mappedDocumentId: fact.factKind === 'referenced_document_id'
-                ? draft.targetEvent.documentId
-                : null,
-            })),
-          }),
+          body: JSON.stringify(buildLeaderReviewRequestPayload(
+            leaderReviewForm,
+            draft,
+          )),
         },
       );
       const payload = await response.json() as {
@@ -413,6 +424,36 @@ export default function RadarPage() {
       setLeaderReviewSubmitting(false);
     }
   }, [leaderReviewForm, loadLeaderReviewQueue]);
+
+  const preflightLeaderReview = useCallback(async (
+    draft: RadarLeaderReviewSubmissionDraft,
+  ) => {
+    if (!leaderReviewForm) {
+      throw new Error('人工审核表单尚未就绪');
+    }
+    const response = await fetch(
+      '/api/backend/api/radar/leaders/review-queue/review-version/preflight',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify(buildLeaderReviewRequestPayload(
+          leaderReviewForm,
+          draft,
+        )),
+      },
+    );
+    const payload = await response.json() as (
+      RadarLeaderReviewVersionPreflightResponse & { detail?: string }
+    );
+    if (!response.ok) {
+      throw new Error(payload.detail || '第二个D8版本预检失败');
+    }
+    if (payload.schemaVersion !== 'radar-leader-review-version-preflight-v1') {
+      throw new Error('第二个D8版本预检契约不匹配');
+    }
+    return payload;
+  }, [leaderReviewForm]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadOverview(false), 0);
@@ -843,6 +884,7 @@ export default function RadarPage() {
               reviewSubmitMessage={leaderReviewSubmitMessage}
               onReviewPageChange={(offset) => void loadLeaderReviewQueue(offset)}
               onReviewDocumentSelect={(item) => void loadLeaderReviewDocument(item)}
+              onReviewPreflight={preflightLeaderReview}
               onReviewSubmit={(draft) => void submitLeaderReview(draft)}
               formatTime={formatTime}
               renderedAt={renderedAt}

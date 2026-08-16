@@ -398,6 +398,26 @@ export interface RadarLeaderReviewSubmissionDraft {
   confirmOfficialEvidence: boolean;
 }
 
+export interface RadarLeaderReviewVersionPreflightResponse {
+  schemaVersion: 'radar-leader-review-version-preflight-v1';
+  checkedAt: string;
+  status: 'ready' | 'missing' | 'source_unverified' | 'stale' | 'source_failed';
+  reviewBatchId: string;
+  documentId: string;
+  candidateCategory: string;
+  proposedReviewVersion: string;
+  supersedesReviewVersion: string | null;
+  existingReviewVersionCount: number;
+  proposedReviewVersionCount: number;
+  materialChangePresent: boolean;
+  changeKinds: string[];
+  reasonCodes: string[];
+  writeEnabled: boolean;
+  submissionAllowed: boolean;
+  formalUsable: false;
+  stateTransitionAllowed: false;
+}
+
 export interface RadarLeaderModule {
   state: RadarModuleState;
   quality: RadarModuleQuality;

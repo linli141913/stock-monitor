@@ -56,7 +56,10 @@ def request_requires_backend_token(request: Request) -> bool:
         return True
     if (
         request.method == "POST"
-        and path == "/api/radar/leaders/review-queue/review-version"
+        and path in {
+            "/api/radar/leaders/review-queue/review-version",
+            "/api/radar/leaders/review-queue/review-version/preflight",
+        }
     ):
         return True
     if request.method == "POST" and path == "/api/radar/ai/analyze":

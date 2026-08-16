@@ -20,6 +20,7 @@ import type {
   RadarLeaderReviewFormResponse,
   RadarLeaderReviewSubmissionDraft,
   RadarLeaderReviewQueueResponse,
+  RadarLeaderReviewVersionPreflightResponse,
   RadarModuleState,
 } from '@/types/radar';
 import styles from './Radar.module.css';
@@ -36,6 +37,9 @@ interface LeaderObservationPanelProps {
   reviewSubmitMessage: string;
   onReviewPageChange: (offset: number) => void;
   onReviewDocumentSelect: (item: RadarLeaderReviewDocument) => void;
+  onReviewPreflight: (
+    draft: RadarLeaderReviewSubmissionDraft,
+  ) => Promise<RadarLeaderReviewVersionPreflightResponse>;
   onReviewSubmit: (draft: RadarLeaderReviewSubmissionDraft) => void;
   formatTime: (value: string | null | undefined, withSeconds?: boolean) => string;
   renderedAt: string | null;
@@ -96,6 +100,18 @@ const REVIEW_REPLAY_REASON_LABELS: Record<string, string> = {
   risk_evidence_bundle_audit_material_change_missing:
     '后续版本只有元数据变化，没有实质证据变化',
   risk_lifecycle_version_contract_unverified: '审核版本数据结构无法验证',
+};
+
+const REVIEW_PREFLIGHT_CHANGE_LABELS: Record<string, string> = {
+  deterministic_facts_changed: '自动事实变化',
+  manual_facts_changed: '人工事实变化',
+  merged_facts_changed: '合并事实变化',
+  relation_kind_changed: '事件关系变化',
+  replacement_event_changed: '更正或替代版本变化',
+  official_status_changed: '官方状态变化',
+  official_published_at_changed: '官方发布时间变化',
+  basis_facts_changed: '关联依据变化',
+  formal_gate_gaps_changed: '门禁缺口变化',
 };
 
 function reviewReplayReason(reviewForm: RadarLeaderReviewFormResponse) {
@@ -279,21 +295,35 @@ function ManualReviewForm({
   reviewForm,
   reviewSubmitting,
   reviewSubmitMessage,
+  onReviewPreflight,
   onReviewSubmit,
 }: {
   reviewForm: RadarLeaderReviewFormResponse;
   reviewSubmitting: boolean;
   reviewSubmitMessage: string;
+  onReviewPreflight: (
+    draft: RadarLeaderReviewSubmissionDraft,
+  ) => Promise<RadarLeaderReviewVersionPreflightResponse>;
   onReviewSubmit: (draft: RadarLeaderReviewSubmissionDraft) => void;
 }) {
   const [reviewDraft, setReviewDraft] = useState(
     () => createReviewDraft(reviewForm),
   );
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightResult, setPreflightResult] = useState<
+    RadarLeaderReviewVersionPreflightResponse | null
+  >(null);
+  const [preflightMessage, setPreflightMessage] = useState('');
+  const resetPreflight = () => {
+    setPreflightResult(null);
+    setPreflightMessage('');
+  };
   const updateFact = (
     index: number,
     field: 'sourceValue' | 'pageNumber' | 'sourceFragment',
     value: string | number,
   ) => {
+    resetPreflight();
     setReviewDraft((current) => ({
       ...current,
       factSupplements: current.factSupplements.map((fact, factIndex) => (
@@ -304,6 +334,7 @@ function ManualReviewForm({
   const updateTargetEvent = (
     patch: Partial<RadarLeaderReviewSubmissionDraft['targetEvent']>,
   ) => {
+    resetPreflight();
     setReviewDraft((current) => ({
       ...current,
       targetEvent: { ...current.targetEvent, ...patch },
@@ -311,7 +342,51 @@ function ManualReviewForm({
   };
   const updateDraft = (
     patch: Partial<RadarLeaderReviewSubmissionDraft>,
-  ) => setReviewDraft((current) => ({ ...current, ...patch }));
+  ) => {
+    resetPreflight();
+    setReviewDraft((current) => ({ ...current, ...patch }));
+  };
+  const requiresPreflight = reviewForm.supersedesReviewVersion !== null;
+  const preflightPassed = preflightResult?.status === 'ready';
+  const runPreflight = async () => {
+    setPreflightLoading(true);
+    setPreflightResult(null);
+    setPreflightMessage('');
+    try {
+      const result = await onReviewPreflight(reviewDraft);
+      setPreflightResult(result);
+      if (result.status === 'ready') {
+        const changes = result.changeKinds
+          .map((kind) => REVIEW_PREFLIGHT_CHANGE_LABELS[kind] || kind)
+          .join('·');
+        setPreflightMessage(
+          `预检通过：${result.proposedReviewVersion}包含${changes || '可追溯实质变化'}。${
+            result.writeEnabled
+              ? '可进入提交。'
+              : '当前D8写入开关仍关闭。'
+          }`,
+        );
+      } else if (
+        result.reasonCodes.includes(
+          'd8_review_version_preflight_material_change_missing',
+        )
+      ) {
+        setPreflightMessage(
+          `预检未通过：与${result.supersedesReviewVersion || '已有版本'}相比没有实质证据变化，D8-D9继续保持 history_insufficient / missing。`,
+        );
+      } else {
+        setPreflightMessage(
+          '预检未通过：候选版本仍未形成可重放的连续证据链。',
+        );
+      }
+    } catch (error) {
+      setPreflightMessage(
+        error instanceof Error ? error.message : '第二个D8版本预检失败',
+      );
+    } finally {
+      setPreflightLoading(false);
+    }
+  };
 
   return (
     <form
@@ -500,16 +575,41 @@ function ManualReviewForm({
           />
           <span>我已逐页核对官方正文、原公告和事件关系</span>
         </label>
-        <button
-          type="submit"
-          disabled={!reviewForm.writeEnabled
-            || !reviewDraft.confirmOfficialEvidence
-            || reviewSubmitting}
-        >
-          <Send size={14} />
-          {reviewSubmitting ? '校验中' : `提交 ${reviewForm.nextReviewVersion}`}
-        </button>
+        <div className={styles.manualReviewActions}>
+          <button
+            className={styles.reviewPreflightButton}
+            type="button"
+            disabled={!reviewDraft.confirmOfficialEvidence
+              || preflightLoading
+              || reviewSubmitting}
+            onClick={(event) => {
+              if (event.currentTarget.form?.reportValidity()) {
+                void runPreflight();
+              }
+            }}
+          >
+            <CheckCircle2 size={14} />
+            {preflightLoading ? '预检中' : '检查实质变化'}
+          </button>
+          <button
+            type="submit"
+            disabled={!reviewForm.writeEnabled
+              || !reviewDraft.confirmOfficialEvidence
+              || reviewSubmitting
+              || (requiresPreflight && !preflightPassed)}
+          >
+            <Send size={14} />
+            {reviewSubmitting ? '校验中' : `提交 ${reviewForm.nextReviewVersion}`}
+          </button>
+        </div>
       </div>
+      {preflightMessage && (
+        <div className={preflightResult?.status === 'ready'
+          ? styles.reviewPreflightReady
+          : styles.reviewPreflightMissing}>
+          {preflightMessage}
+        </div>
+      )}
       {reviewSubmitMessage && (
         <div className={styles.reviewSubmitMessage}>{reviewSubmitMessage}</div>
       )}
@@ -528,6 +628,7 @@ export default function LeaderObservationPanel({
   reviewSubmitMessage,
   onReviewPageChange,
   onReviewDocumentSelect,
+  onReviewPreflight,
   onReviewSubmit,
   formatTime,
   renderedAt,
@@ -774,9 +875,11 @@ export default function LeaderObservationPanel({
                 ))}
               </div>
               <ManualReviewForm
+                key={`${reviewForm.summary.reviewBatchId}:${reviewForm.item.documentId}:${reviewForm.item.candidateCategory}:${reviewForm.nextReviewVersion}`}
                 reviewForm={reviewForm}
                 reviewSubmitting={reviewSubmitting}
                 reviewSubmitMessage={reviewSubmitMessage}
+                onReviewPreflight={onReviewPreflight}
                 onReviewSubmit={onReviewSubmit}
               />
             </div>

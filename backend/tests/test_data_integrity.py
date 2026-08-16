@@ -2511,12 +2511,15 @@ class ApiSecurityTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(main.request_requires_backend_token(self._request(path)))
 
-    def test_d8_manual_review_write_stays_behind_server_proxy(self):
-        request = self._request(
-            "/api/radar/leaders/review-queue/review-version"
-        )
-        request.scope["method"] = "POST"
-        self.assertTrue(main.request_requires_backend_token(request))
+    def test_d8_manual_review_posts_stay_behind_server_proxy(self):
+        for path in (
+            "/api/radar/leaders/review-queue/review-version",
+            "/api/radar/leaders/review-queue/review-version/preflight",
+        ):
+            request = self._request(path)
+            request.scope["method"] = "POST"
+            with self.subTest(path=path):
+                self.assertTrue(main.request_requires_backend_token(request))
 
     def test_cors_does_not_allow_every_origin(self):
         cors_middleware = next(

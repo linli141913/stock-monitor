@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from radar.api_contracts import (
     RadarLeaderReviewReplayDiagnostic,
+    RadarLeaderReviewVersionPreflightResponse,
     RadarLeaderReviewVersionRequest,
 )
 from radar.leader_risk_review_repository import LeaderRiskReviewRepository
@@ -11,6 +12,7 @@ from radar.leader_risk_review_service import (
     build_manual_review_version,
     build_review_form_data,
     build_review_replay_diagnostic,
+    preflight_manual_review_version,
 )
 from radar.migrations import (
     STAGE6_REVIEW_RADAR_MIGRATIONS,
@@ -201,6 +203,137 @@ class LeaderRiskReviewServiceTests(unittest.TestCase):
                 self.request(second_form),
                 as_of=AS_OF + timedelta(minutes=2),
             )
+
+    def test_second_version_preflight_keeps_duplicate_evidence_missing(self):
+        form = self.form()
+        first, _ = build_manual_review_version(
+            self.repository,
+            self.request(form),
+            as_of=AS_OF,
+        )
+        self.assertTrue(self.repository.save_review_version(
+            self.batch["reviewBatchId"], first,
+        ))
+
+        second_form = self.form(AS_OF + timedelta(minutes=2))
+        result = preflight_manual_review_version(
+            self.repository,
+            self.request(second_form),
+            as_of=AS_OF + timedelta(minutes=2),
+        )
+
+        self.assertEqual(result["status"], "missing")
+        self.assertEqual(result["proposedReviewVersion"], "manual-review-v2")
+        self.assertEqual(result["supersedesReviewVersion"], "manual-review-v1")
+        self.assertEqual(result["existingReviewVersionCount"], 1)
+        self.assertEqual(result["proposedReviewVersionCount"], 2)
+        self.assertFalse(result["materialChangePresent"])
+        self.assertEqual(result["changeKinds"], [])
+        self.assertEqual(
+            result["reasonCodes"],
+            ["d8_review_version_preflight_material_change_missing"],
+        )
+        self.assertFalse(result["formalUsable"])
+        self.assertFalse(result["stateTransitionAllowed"])
+        self.assertEqual(
+            self.repository.list_review_versions(
+                self.batch["reviewBatchId"],
+                self.document.document_id,
+                self.document.candidate_category.value,
+            ),
+            (first,),
+        )
+
+    def test_second_version_preflight_accepts_traceable_fact_change_without_saving(self):
+        form = self.form()
+        first_payload = self.request(form).model_dump(
+            mode="json",
+            by_alias=True,
+        )
+        first_payload["factSupplements"] = [
+            first_payload["factSupplements"][0],
+            first_payload["factSupplements"][3],
+        ]
+        first, _ = build_manual_review_version(
+            self.repository,
+            RadarLeaderReviewVersionRequest.model_validate(first_payload),
+            as_of=AS_OF,
+        )
+        self.assertTrue(self.repository.save_review_version(
+            self.batch["reviewBatchId"], first,
+        ))
+
+        second_form = self.form(AS_OF + timedelta(minutes=2))
+        result = preflight_manual_review_version(
+            self.repository,
+            self.request(second_form),
+            as_of=AS_OF + timedelta(minutes=2),
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["materialChangePresent"])
+        self.assertIn("manual_facts_changed", result["changeKinds"])
+        self.assertIn("merged_facts_changed", result["changeKinds"])
+        self.assertEqual(result["reasonCodes"], [])
+        self.assertEqual(
+            len(self.repository.list_review_versions(
+                self.batch["reviewBatchId"],
+                self.document.document_id,
+                self.document.candidate_category.value,
+            )),
+            1,
+        )
+
+        contract_payload = RadarLeaderReviewVersionPreflightResponse(
+            checkedAt=AS_OF + timedelta(minutes=2),
+            reviewBatchId=self.batch["reviewBatchId"],
+            documentId=self.document.document_id,
+            candidateCategory=self.document.candidate_category.value,
+            writeEnabled=False,
+            submissionAllowed=False,
+            **result,
+        ).model_dump(mode="json", by_alias=True)
+        self.assertEqual(
+            contract_payload["schemaVersion"],
+            "radar-leader-review-version-preflight-v1",
+        )
+        self.assertFalse(contract_payload["writeEnabled"])
+        self.assertFalse(contract_payload["submissionAllowed"])
+
+    def test_second_version_preflight_accepts_official_status_change(self):
+        form = self.form()
+        first, _ = build_manual_review_version(
+            self.repository,
+            self.request(form),
+            as_of=AS_OF,
+        )
+        self.assertTrue(self.repository.save_review_version(
+            self.batch["reviewBatchId"], first,
+        ))
+
+        second_form = self.form(AS_OF + timedelta(minutes=2))
+        second_payload = self.request(second_form).model_dump(
+            mode="json",
+            by_alias=True,
+        )
+        second_payload["targetEvent"]["officialStatus"] = "completed"
+        result = preflight_manual_review_version(
+            self.repository,
+            RadarLeaderReviewVersionRequest.model_validate(second_payload),
+            as_of=AS_OF + timedelta(minutes=2),
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["changeKinds"], ["official_status_changed"])
+        self.assertTrue(result["materialChangePresent"])
+        self.assertEqual(
+            len(self.repository.list_review_versions(
+                self.batch["reviewBatchId"],
+                self.document.document_id,
+                self.document.candidate_category.value,
+            )),
+            1,
+        )
 
     def test_replay_diagnostic_reports_one_version_as_history_missing(self):
         form = self.form()

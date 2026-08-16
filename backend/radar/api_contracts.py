@@ -761,6 +761,49 @@ class RadarLeaderReviewVersionRequest(RadarApiModel):
     )
 
 
+class RadarLeaderReviewVersionPreflightResponse(RadarApiModel):
+    schema_version: Literal[
+        "radar-leader-review-version-preflight-v1"
+    ] = Field(
+        default="radar-leader-review-version-preflight-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    status: Literal[
+        "ready",
+        "missing",
+        "source_unverified",
+        "stale",
+        "source_failed",
+    ]
+    review_batch_id: str = Field(alias="reviewBatchId")
+    document_id: str = Field(alias="documentId")
+    candidate_category: str = Field(alias="candidateCategory")
+    proposed_review_version: str = Field(alias="proposedReviewVersion")
+    supersedes_review_version: Optional[str] = Field(
+        default=None,
+        alias="supersedesReviewVersion",
+    )
+    existing_review_version_count: int = Field(
+        alias="existingReviewVersionCount",
+        ge=0,
+    )
+    proposed_review_version_count: int = Field(
+        alias="proposedReviewVersionCount",
+        ge=1,
+    )
+    material_change_present: bool = Field(alias="materialChangePresent")
+    change_kinds: List[str] = Field(default_factory=list, alias="changeKinds")
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+    write_enabled: bool = Field(alias="writeEnabled")
+    submission_allowed: bool = Field(alias="submissionAllowed")
+    formal_usable: Literal[False] = Field(default=False, alias="formalUsable")
+    state_transition_allowed: Literal[False] = Field(
+        default=False,
+        alias="stateTransitionAllowed",
+    )
+
+
 class RadarLeaderReviewVersionResponse(RadarApiModel):
     schema_version: Literal["radar-leader-review-version-v1"] = Field(
         default="radar-leader-review-version-v1",

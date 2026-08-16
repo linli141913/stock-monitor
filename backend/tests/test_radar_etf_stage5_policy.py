@@ -9,14 +9,17 @@ from radar.contracts import (
     EtfRankingInputAudit,
 )
 from radar.etf_stage5_policy import (
+    DEFAULT_ETF_OBSERVATION_POLICY,
     DEFAULT_ETF_RETENTION_POLICY,
     DEFAULT_ETF_RULE_POLICY,
     REQUIRED_RANKING_FIELDS,
     EtfFormalGateEvidence,
     EtfLowFrequencyReadiness,
+    EtfObservationEvidence,
     EtfRulePolicy,
     evaluate_etf_formal_gate,
     evaluate_low_frequency_readiness,
+    evaluate_observation_readiness,
 )
 
 
@@ -96,15 +99,103 @@ class EtfStage5PolicyTests(unittest.TestCase):
             REQUIRED_RANKING_FIELDS,
         )
 
-    def test_retention_freezes_60_day_shadow_detail_and_long_term_summaries(self):
-        policy = DEFAULT_ETF_RETENTION_POLICY
+    def test_retention_and_observation_policies_are_independent(self):
+        retention = DEFAULT_ETF_RETENTION_POLICY
+        observation = DEFAULT_ETF_OBSERVATION_POLICY
 
-        self.assertEqual(policy.intraday_detail_trading_days, 60)
-        self.assertEqual(policy.minimum_shadow_trading_days, 20)
-        self.assertTrue(policy.keep_daily_facts)
-        self.assertTrue(policy.keep_candidate_summaries)
-        self.assertFalse(policy.keep_raw_upstream_payloads)
-        self.assertFalse(policy.automatic_cleanup_enabled)
+        self.assertEqual(retention.intraday_detail_trading_days, 60)
+        self.assertTrue(retention.keep_daily_facts)
+        self.assertTrue(retention.keep_candidate_summaries)
+        self.assertFalse(retention.keep_raw_upstream_payloads)
+        self.assertFalse(retention.automatic_cleanup_enabled)
+        self.assertEqual(observation.supported_history_windows, (20, 60))
+        self.assertEqual(observation.minimum_live_shadow_trading_days, 5)
+        self.assertEqual(
+            observation.required_exception_scenarios,
+            (
+                "source_failed",
+                "stale_data",
+                "incomplete_required_fields",
+                "duplicate_schedule",
+                "identity_drift",
+                "non_trading_session",
+            ),
+        )
+
+    def test_observation_accepts_verified_history_and_five_live_days(self):
+        decision = evaluate_observation_readiness(
+            EtfObservationEvidence(
+                available_history_trading_days=20,
+                required_history_trading_days=20,
+                point_in_time_history_verified=True,
+                live_shadow_trading_days=5,
+                live_scheduled_runs_complete=True,
+                passed_exception_scenarios=(
+                    "source_failed",
+                    "stale_data",
+                    "incomplete_required_fields",
+                    "duplicate_schedule",
+                    "identity_drift",
+                    "non_trading_session",
+                ),
+            )
+        )
+
+        self.assertTrue(decision.ready)
+        self.assertEqual(decision.reasons, ())
+
+    def test_observation_requires_the_metric_history_window(self):
+        decision = evaluate_observation_readiness(
+            EtfObservationEvidence(
+                available_history_trading_days=20,
+                required_history_trading_days=60,
+                point_in_time_history_verified=True,
+                live_shadow_trading_days=5,
+                live_scheduled_runs_complete=True,
+                passed_exception_scenarios=(
+                    DEFAULT_ETF_OBSERVATION_POLICY
+                    .required_exception_scenarios
+                ),
+            )
+        )
+
+        self.assertFalse(decision.ready)
+        self.assertEqual(
+            decision.reasons,
+            ("etf_history_coverage_insufficient",),
+        )
+
+    def test_observation_reports_each_operational_gap(self):
+        decision = evaluate_observation_readiness(
+            EtfObservationEvidence(
+                available_history_trading_days=19,
+                required_history_trading_days=30,
+                point_in_time_history_verified=False,
+                live_shadow_trading_days=4,
+                live_scheduled_runs_complete=False,
+                passed_exception_scenarios=("source_failed",),
+            )
+        )
+
+        self.assertFalse(decision.ready)
+        self.assertEqual(
+            decision.reasons,
+            (
+                "etf_history_window_not_supported",
+                "etf_point_in_time_history_unverified",
+                "etf_history_coverage_insufficient",
+                "etf_live_shadow_trading_days_insufficient",
+                "etf_live_scheduled_runs_incomplete",
+                "etf_exception_scenario_not_passed:stale_data",
+                (
+                    "etf_exception_scenario_not_passed:"
+                    "incomplete_required_fields"
+                ),
+                "etf_exception_scenario_not_passed:duplicate_schedule",
+                "etf_exception_scenario_not_passed:identity_drift",
+                "etf_exception_scenario_not_passed:non_trading_session",
+            ),
+        )
 
     def test_enabled_rule_requires_complete_normalized_weights_and_thresholds(self):
         with self.assertRaises(ValueError):

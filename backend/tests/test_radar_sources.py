@@ -33,12 +33,14 @@ def tencent_line(
     packed_amount=None,
     turnover_rate="2.30",
     market_cap="456.70",
+    total_shares="4567000000",
+    currency="CNY",
     upper_limit_price="10.89",
     lower_limit_price="8.91",
     volume_ratio="1.50",
     trading_status="",
 ):
-    fields = [""] * 50
+    fields = [""] * 83
     fields[1] = name
     fields[2] = code
     fields[3] = price
@@ -57,6 +59,8 @@ def tencent_line(
     fields[47] = upper_limit_price
     fields[48] = lower_limit_price
     fields[49] = volume_ratio
+    fields[73] = total_shares
+    fields[82] = currency
     return f'v_test_{code}="{"~".join(fields)}";'
 
 
@@ -388,6 +392,135 @@ class TencentQuoteSourceTests(unittest.TestCase):
             quote.turnover_amount_unit_status,
             UnitVerificationStatus.VERIFIED,
         )
+
+    def test_market_cap_unit_is_verified_by_same_response_total_shares(self):
+        session = FakeSession(lambda _url, _call: tencent_line(
+            "000001",
+            price="10.00",
+            market_cap="456.70",
+            total_shares="4567000000",
+            currency="CNY",
+        ))
+
+        batch = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=session,
+            clock=lambda: FETCHED_AT,
+        )
+        quote = batch.items[0]
+        payload = quote.model_dump(by_alias=True)
+
+        self.assertEqual(payload.get("marketCapCny"), 45_670_000_000.0)
+        self.assertEqual(payload.get("marketCapUnitStatus"), "verified")
+        self.assertEqual(payload.get("totalSharesSource"), 4_567_000_000.0)
+        self.assertEqual(payload.get("currency"), "CNY")
+        self.assertEqual(
+            batch.meta.required_field_coverage.get("market_cap_cny"),
+            1.0,
+        )
+        self.assertEqual(
+            batch.meta.required_field_coverage.get("total_shares_source"),
+            1.0,
+        )
+
+    def test_market_cap_cross_field_mismatch_stays_unverified(self):
+        quote = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=FakeSession(lambda _url, _call: tencent_line(
+                "000001",
+                price="10.00",
+                market_cap="456.70",
+                total_shares="1",
+                currency="CNY",
+            )),
+            clock=lambda: FETCHED_AT,
+        ).items[0]
+
+        self.assertIsNone(quote.market_cap_cny)
+        self.assertEqual(
+            quote.market_cap_unit_status,
+            UnitVerificationStatus.UNVERIFIED,
+        )
+
+    def test_market_cap_rounding_tolerance_accepts_first_party_snapshot(self):
+        quote = fetch_tencent_quotes(
+            ["000001"],
+            radar_run_id="run-1",
+            batch_id="quote-1",
+            as_of=AS_OF,
+            session=FakeSession(lambda _url, _call: tencent_line(
+                "000001",
+                price="11.19",
+                market_cap="2171.52",
+                total_shares="19405918198",
+                currency="CNY",
+            )),
+            clock=lambda: FETCHED_AT,
+        ).items[0]
+
+        self.assertEqual(
+            quote.market_cap_unit_status,
+            UnitVerificationStatus.VERIFIED,
+        )
+        self.assertEqual(quote.market_cap_cny, 217_152_000_000.0)
+
+    def test_missing_or_non_cny_market_cap_evidence_stays_unverified(self):
+        cases = (
+            {"total_shares": "", "currency": "CNY"},
+            {"total_shares": "4567000000", "currency": "USD"},
+            {"market_cap": "0", "total_shares": "0", "currency": "CNY"},
+        )
+        for values in cases:
+            with self.subTest(values=values):
+                quote = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=FakeSession(
+                        lambda _url, _call, row=values: tencent_line(
+                            "000001",
+                            **row,
+                        )
+                    ),
+                    clock=lambda: FETCHED_AT,
+                ).items[0]
+
+                self.assertIsNone(quote.market_cap_cny)
+                self.assertEqual(
+                    quote.market_cap_unit_status,
+                    UnitVerificationStatus.UNVERIFIED,
+                )
+
+    def test_invalid_market_cap_source_never_enters_quote_contract(self):
+        for raw_value in ("nan", "inf", "-1"):
+            with self.subTest(raw_value=raw_value):
+                quote = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=FakeSession(
+                        lambda _url, _call, value=raw_value: tencent_line(
+                            "000001",
+                            market_cap=value,
+                        )
+                    ),
+                    clock=lambda: FETCHED_AT,
+                ).items[0]
+
+                self.assertIsNone(quote.market_cap_source)
+                self.assertIsNone(quote.market_cap_cny)
+                self.assertEqual(
+                    quote.market_cap_unit_status,
+                    UnitVerificationStatus.UNVERIFIED,
+                )
 
     def test_unverifiable_turnover_amount_keeps_cny_missing(self):
         cases = (

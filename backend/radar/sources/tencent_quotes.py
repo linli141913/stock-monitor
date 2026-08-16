@@ -21,6 +21,8 @@ TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q={query}"
 TENCENT_REQUEST_ATTEMPTS = 2
 TURNOVER_AMOUNT_SCALE_TO_CNY = 10000.0
 TURNOVER_AMOUNT_CROSSCHECK_TOLERANCE_CNY = 10000.0
+MARKET_CAP_SCALE_TO_CNY = 100_000_000.0
+MARKET_CAP_CROSSCHECK_TOLERANCE_CNY = 500_000.0
 TENCENT_NON_TRADING_STATUSES = {
     "S": QuoteTradingStatus.SUSPENDED,
     "D": QuoteTradingStatus.DELISTED,
@@ -92,6 +94,36 @@ def _turnover_amount_cny(
     return exact_amount, UnitVerificationStatus.VERIFIED
 
 
+def _market_cap_cny(
+    raw_value,
+    price_value,
+    total_shares_value,
+    currency_value,
+) -> tuple[Optional[float], UnitVerificationStatus]:
+    raw_market_cap = _optional_non_negative_finite(raw_value)
+    price = _optional_non_negative_finite(price_value)
+    total_shares = _optional_non_negative_finite(total_shares_value)
+    currency = str(currency_value or "").strip().upper()
+    if (
+        raw_market_cap is None
+        or raw_market_cap <= 0
+        or price is None
+        or price <= 0
+        or total_shares is None
+        or total_shares <= 0
+        or currency != "CNY"
+        or abs(
+            raw_market_cap * MARKET_CAP_SCALE_TO_CNY
+            - price * total_shares
+        ) > MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
+    ):
+        return None, UnitVerificationStatus.UNVERIFIED
+    return (
+        raw_market_cap * MARKET_CAP_SCALE_TO_CNY,
+        UnitVerificationStatus.VERIFIED,
+    )
+
+
 def _field_coverage(items):
     if not items:
         return {
@@ -102,6 +134,9 @@ def _field_coverage(items):
             "turnover_rate_percent": 0.0,
             "volume_ratio": 0.0,
             "market_cap_source": 0.0,
+            "market_cap_cny": 0.0,
+            "total_shares_source": 0.0,
+            "currency": 0.0,
         }
     result = {}
     for field_name in (
@@ -112,6 +147,9 @@ def _field_coverage(items):
         "turnover_rate_percent",
         "volume_ratio",
         "market_cap_source",
+        "market_cap_cny",
+        "total_shares_source",
+        "currency",
     ):
         result[field_name] = sum(
             getattr(item, field_name) is not None
@@ -249,6 +287,12 @@ def fetch_tencent_quotes(
                     fields[35] if len(fields) > 35 else None,
                 )
             )
+            market_cap_cny, market_cap_unit_status = _market_cap_cny(
+                fields[45] if len(fields) > 45 else None,
+                fields[3] if len(fields) > 3 else None,
+                fields[73] if len(fields) > 73 else None,
+                fields[82] if len(fields) > 82 else None,
+            )
             items_by_symbol[symbol] = QuoteSnapshot(
                 symbol=symbol,
                 name=fields[1].strip() if len(fields) > 1 else "",
@@ -283,8 +327,18 @@ def fetch_tencent_quotes(
                 turnoverRatePercent=_optional_float(
                     fields[38] if len(fields) > 38 else None
                 ),
-                marketCapSource=_optional_float(
+                marketCapSource=_optional_non_negative_finite(
                     fields[45] if len(fields) > 45 else None
+                ),
+                marketCapCny=market_cap_cny,
+                marketCapUnitStatus=market_cap_unit_status,
+                totalSharesSource=_optional_non_negative_finite(
+                    fields[73] if len(fields) > 73 else None
+                ),
+                currency=(
+                    str(fields[82]).strip().upper()
+                    if len(fields) > 82 and str(fields[82]).strip()
+                    else None
                 ),
                 upperLimitPriceSource=_optional_non_negative_finite(
                     fields[47] if len(fields) > 47 else None

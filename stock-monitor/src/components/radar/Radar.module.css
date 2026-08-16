@@ -1593,6 +1593,12 @@
   font-size: 11px;
 }
 
+.manualReviewActions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .manualReviewConfirm button {
   min-height: 34px;
   padding: 7px 11px;
@@ -1608,6 +1614,12 @@
   font-weight: 700;
 }
 
+.manualReviewConfirm .reviewPreflightButton {
+  border-color: #8c9bae;
+  background: #ffffff;
+  color: #40516c;
+}
+
 .manualReviewConfirm button:disabled {
   cursor: not-allowed;
   border-color: #c9d2df;
@@ -1620,6 +1632,22 @@
   border-top: 1px solid #e7edf5;
   color: #53627a;
   font-size: 11px;
+}
+
+.reviewPreflightReady,
+.reviewPreflightMissing {
+  padding: 9px 15px;
+  border-top: 1px solid #dce8df;
+  background: #f4faf5;
+  color: #376045;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reviewPreflightMissing {
+  border-top-color: #eadbb9;
+  background: #fffaf1;
+  color: #7d5d1f;
 }
 
 .reviewPagination {
@@ -2048,6 +2076,20 @@
 
   .manualEventGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manualReviewConfirm {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .manualReviewActions {
+    width: 100%;
+  }
+
+  .manualReviewActions button {
+    min-width: 0;
+    flex: 1;
   }
 
   .progressStatePanel .stateBody {

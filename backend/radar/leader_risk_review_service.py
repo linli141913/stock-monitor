@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, Tuple
+from typing import Any, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
 from radar.api_contracts import RadarLeaderReviewVersionRequest
@@ -33,6 +33,8 @@ from radar.leader_risk_evidence_bundle import (
 )
 from radar.leader_risk_evidence_bundle_audit import (
     RiskResearchEvidenceBundleAuditInput,
+    RiskResearchEvidenceBundleAuditResult,
+    RiskResearchEvidenceBundleVersionDiff,
     audit_risk_research_evidence_bundle_versions,
 )
 from radar.leader_risk_review_artifacts import (
@@ -80,6 +82,10 @@ REQUIRED_FACT_KINDS = {
         RiskDocumentFactKind.REPORTING_PERIOD,
     ),
 }
+
+
+class ManualReviewMaterialChangeMissing(ValueError):
+    """候选后续版本只有非实质元数据变化。"""
 
 
 def _now(value: Any) -> datetime:
@@ -187,27 +193,36 @@ def _review_replay_diagnostic(
     }
 
 
-def build_review_replay_diagnostic(
+def _build_review_replay_audit(
     versions: Tuple[LeaderRiskLifecycleReviewVersion, ...],
-) -> Mapping[str, Any]:
-    """只读重建D5-D9版本链，并返回适合接口展示的压缩诊断。"""
+) -> Tuple[
+    Mapping[str, Any],
+    Optional[RiskResearchEvidenceBundleAuditResult],
+]:
+    """只读重建D5-D9版本链，并保留内部审计差异供预检复用。"""
 
     if not isinstance(versions, tuple) or any(
         not isinstance(version, LeaderRiskLifecycleReviewVersion)
         for version in versions
     ):
-        return _review_replay_diagnostic(
-            status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
-            versions=(),
-            bundles=(),
-            reasons=("risk_lifecycle_version_contract_unverified",),
+        return (
+            _review_replay_diagnostic(
+                status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+                versions=(),
+                bundles=(),
+                reasons=("risk_lifecycle_version_contract_unverified",),
+            ),
+            None,
         )
     if not versions:
-        return _review_replay_diagnostic(
-            status=ResearchFeatureStatus.MISSING,
-            versions=versions,
-            bundles=(),
-            reasons=("risk_lifecycle_version_history_insufficient",),
+        return (
+            _review_replay_diagnostic(
+                status=ResearchFeatureStatus.MISSING,
+                versions=versions,
+                bundles=(),
+                reasons=("risk_lifecycle_version_history_insufficient",),
+            ),
+            None,
         )
 
     artifacts = []
@@ -229,11 +244,14 @@ def build_review_replay_diagnostic(
             artifact_result.status != ResearchFeatureStatus.READY
             or artifact_result.artifact is None
         ):
-            return _review_replay_diagnostic(
-                status=artifact_result.status,
-                versions=versions,
-                bundles=tuple(bundles),
-                reasons=artifact_result.reasons,
+            return (
+                _review_replay_diagnostic(
+                    status=artifact_result.status,
+                    versions=versions,
+                    bundles=tuple(bundles),
+                    reasons=artifact_result.reasons,
+                ),
+                None,
             )
         artifacts.append(artifact_result.artifact)
 
@@ -264,23 +282,141 @@ def build_review_replay_diagnostic(
             bundle_result.status != ResearchFeatureStatus.READY
             or bundle_result.bundle is None
         ):
-            return _review_replay_diagnostic(
-                status=bundle_result.status,
-                versions=versions,
-                bundles=tuple(bundles),
-                reasons=bundle_result.reasons,
+            return (
+                _review_replay_diagnostic(
+                    status=bundle_result.status,
+                    versions=versions,
+                    bundles=tuple(bundles),
+                    reasons=bundle_result.reasons,
+                ),
+                None,
             )
         bundles.append(bundle_result.bundle)
 
     audit = audit_risk_research_evidence_bundle_versions(
         RiskResearchEvidenceBundleAuditInput(bundles=tuple(bundles))
     )
-    return _review_replay_diagnostic(
-        status=audit.status,
-        versions=versions,
-        bundles=tuple(bundles),
-        reasons=audit.reasons,
+    return (
+        _review_replay_diagnostic(
+            status=audit.status,
+            versions=versions,
+            bundles=tuple(bundles),
+            reasons=audit.reasons,
+        ),
+        audit,
     )
+
+
+def build_review_replay_diagnostic(
+    versions: Tuple[LeaderRiskLifecycleReviewVersion, ...],
+) -> Mapping[str, Any]:
+    """只读重建D5-D9版本链，并返回适合接口展示的压缩诊断。"""
+
+    diagnostic, _ = _build_review_replay_audit(versions)
+    return diagnostic
+
+
+def _preflight_change_kinds(
+    diff: Optional[RiskResearchEvidenceBundleVersionDiff],
+) -> list[str]:
+    if diff is None:
+        return []
+    changes = []
+    if any((
+        diff.facts.deterministic_added,
+        diff.facts.deterministic_removed,
+    )):
+        changes.append("deterministic_facts_changed")
+    if any((diff.facts.manual_added, diff.facts.manual_removed)):
+        changes.append("manual_facts_changed")
+    if any((diff.facts.merged_added, diff.facts.merged_removed)):
+        changes.append("merged_facts_changed")
+    relation_fields = {
+        change.field_name for change in diff.relation.field_changes
+    }
+    field_change_kinds = (
+        ("relation_kind", "relation_kind_changed"),
+        ("replacement_event_version", "replacement_event_changed"),
+        ("target_event_official_status", "official_status_changed"),
+        ("target_event_published_at", "official_published_at_changed"),
+    )
+    changes.extend(
+        change_kind
+        for field_name, change_kind in field_change_kinds
+        if field_name in relation_fields
+    )
+    if any((
+        diff.relation.basis_fact_ids_added,
+        diff.relation.basis_fact_ids_removed,
+        diff.relation.manual_basis_fact_ids_added,
+        diff.relation.manual_basis_fact_ids_removed,
+    )):
+        changes.append("basis_facts_changed")
+    if any((diff.formal_gate_gaps.added, diff.formal_gate_gaps.removed)):
+        changes.append("formal_gate_gaps_changed")
+    return changes
+
+
+def preflight_manual_review_version(
+    repository: LeaderRiskReviewRepository,
+    request: RadarLeaderReviewVersionRequest,
+    *,
+    as_of: datetime,
+) -> Mapping[str, Any]:
+    """构建但不保存候选版本，并用D9审计判断是否存在实质变化。"""
+
+    as_of = _now(as_of)
+    previous_versions = repository.list_review_versions(
+        request.review_batch_id,
+        request.document_id,
+        request.candidate_category,
+    )
+    proposed_review_version = f"manual-review-v{len(previous_versions) + 1}"
+    supersedes_review_version = (
+        previous_versions[-1].submission.review_version
+        if previous_versions else None
+    )
+    try:
+        version, _ = build_manual_review_version(
+            repository,
+            request,
+            as_of=as_of,
+        )
+    except ManualReviewMaterialChangeMissing:
+        return {
+            "status": ResearchFeatureStatus.MISSING.value,
+            "proposedReviewVersion": proposed_review_version,
+            "supersedesReviewVersion": supersedes_review_version,
+            "existingReviewVersionCount": len(previous_versions),
+            "proposedReviewVersionCount": len(previous_versions) + 1,
+            "materialChangePresent": False,
+            "changeKinds": [],
+            "reasonCodes": [
+                "d8_review_version_preflight_material_change_missing"
+            ],
+            "formalUsable": False,
+            "stateTransitionAllowed": False,
+        }
+
+    diagnostic, audit = _build_review_replay_audit(
+        (*previous_versions, version)
+    )
+    diff = audit.diffs[-1] if audit is not None and audit.diffs else None
+    change_kinds = _preflight_change_kinds(diff)
+    return {
+        "status": diagnostic["status"],
+        "proposedReviewVersion": version.submission.review_version,
+        "supersedesReviewVersion": (
+            version.submission.supersedes_review_version
+        ),
+        "existingReviewVersionCount": len(previous_versions),
+        "proposedReviewVersionCount": len(previous_versions) + 1,
+        "materialChangePresent": bool(change_kinds),
+        "changeKinds": change_kinds,
+        "reasonCodes": diagnostic["reasonCodes"],
+        "formalUsable": False,
+        "stateTransitionAllowed": False,
+    }
 
 
 def _fact_submissions(
@@ -601,7 +737,9 @@ def build_manual_review_version(
             event,
             relation,
         ):
-            raise ValueError("第二个人工审核版本缺少实质证据变化")
+            raise ManualReviewMaterialChangeMissing(
+                "第二个人工审核版本缺少实质证据变化"
+            )
     return LeaderRiskLifecycleReviewVersion(
         as_of=as_of,
         document=document,

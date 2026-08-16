@@ -150,7 +150,12 @@ class RadarNotificationTests(unittest.TestCase):
             )
         )
 
-        visible = alerts_api._watchlist_alerts(today_only=True)
+        with patch.object(
+            alerts_api.news_api,
+            "is_source_published_today",
+            return_value=True,
+        ):
+            visible = alerts_api._watchlist_alerts(today_only=True)
 
         self.assertEqual(result.status, "created")
         self.assertEqual(len(visible), 1)

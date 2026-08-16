@@ -11,6 +11,7 @@ from radar.contracts import (
     RadarBatchMeta,
     SecurityMasterRecord,
     SourceBatch,
+    UnitVerificationStatus,
 )
 from radar.migrations import apply_pending_migrations
 from radar.repository import RadarRepository
@@ -164,6 +165,7 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
         missing_turnover=False,
         non_trading_symbol=None,
         same_day_old_symbol=None,
+        verified_turnover=False,
     ):
         self.quote_calls.append((tuple(symbols), radar_run_id, batch_id, as_of))
         source_time = source_time or (as_of - timedelta(seconds=1))
@@ -189,6 +191,18 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
                 changePercent=0.0,
                 turnoverAmountSource=(
                     None if missing_turnover and index == 0 else 0.0
+                ),
+                turnoverAmountCny=(
+                    0.0
+                    if verified_turnover
+                    and not (missing_turnover and index == 0)
+                    else None
+                ),
+                turnoverAmountUnitStatus=(
+                    UnitVerificationStatus.VERIFIED
+                    if verified_turnover
+                    and not (missing_turnover and index == 0)
+                    else UnitVerificationStatus.UNVERIFIED
                 ),
                 turnoverRatePercent=0.0,
                 volumeRatio=0.0,
@@ -270,6 +284,31 @@ class RadarMarketShadowRunnerTests(unittest.TestCase):
             "market_environment_snapshots",
             "market_index_feature_snapshots",
         })
+
+    def test_verified_quote_amounts_promote_market_turnover_unit_evidence(self):
+        quotes = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            verified_turnover=True,
+        )
+
+        result = self.runner(quote_fetcher=quotes).run_once(
+            "verified-turnover-market-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        self.assertEqual(result.status, "succeeded")
+        row = self.repository.get_market_feature_row(
+            "verified-turnover-market-run"
+        )
+        self.assertEqual(row["turnover"]["unitStatus"], "verified")
+        self.assertNotIn(
+            "turnover_unit_unverified",
+            row["turnover"]["reasons"],
+        )
 
     def test_confirmed_non_trading_stock_does_not_reject_market_gate(self):
         quotes = lambda symbols, run_id, batch_id, as_of: self.quote_batch(

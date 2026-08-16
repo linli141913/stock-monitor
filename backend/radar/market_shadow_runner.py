@@ -34,6 +34,7 @@ from radar.sources.market_indices import (
     fetch_market_indices,
 )
 from radar.sources.tencent_quotes import fetch_tencent_quotes
+from radar.turnover_unit_evidence import build_turnover_unit_evidence
 
 
 UTC = timezone.utc
@@ -353,12 +354,16 @@ class MarketShadowRunner:
             )
 
             try:
+                turnover_unit_evidence = build_turnover_unit_evidence(
+                    tuple(quote_batch.items),
+                    stock_symbols=stock_symbols,
+                )
                 features = build_market_features(
                     index_batch,
                     quote_batch,
                     stock_symbols=stock_symbols,
                     etf_symbols=etf_symbols,
-                    turnover_unit_status=UnitVerificationStatus.UNVERIFIED,
+                    turnover_unit_status=turnover_unit_evidence.status,
                     minimum_row_coverage=(
                         self._policy.minimum_quote_row_coverage
                     ),
@@ -412,14 +417,30 @@ class MarketShadowRunner:
             write_result = self._repository.record_market_feature_snapshot(
                 features
             )
-            self._complete_degraded(
-                radar_run_id,
-                stock_symbols=stock_symbols,
-                etf_symbols=etf_symbols,
-                returned_stock_count=returned_stock_count,
-                returned_etf_count=returned_etf_count,
-                error_code="market_features_shadow_unit_unverified",
+            run_status = (
+                "succeeded"
+                if features.turnover.formal_usable
+                else "degraded"
             )
+            if run_status == "succeeded":
+                self._repository.complete_run(
+                    radar_run_id,
+                    status=run_status,
+                    completed_at=_aware_utc(self._clock(), "completed_at"),
+                    expected_stock_count=len(stock_symbols),
+                    returned_stock_count=returned_stock_count,
+                    expected_etf_count=len(etf_symbols),
+                    returned_etf_count=returned_etf_count,
+                )
+            else:
+                self._complete_degraded(
+                    radar_run_id,
+                    stock_symbols=stock_symbols,
+                    etf_symbols=etf_symbols,
+                    returned_stock_count=returned_stock_count,
+                    returned_etf_count=returned_etf_count,
+                    error_code="market_features_shadow_unit_unverified",
+                )
             leader_stage6_status = None
             leader_stage6_reasons = ()
             if self._leader_stage6_processor is not None:
@@ -463,7 +484,7 @@ class MarketShadowRunner:
             return MarketShadowRunResult(
                 radar_run_id=radar_run_id,
                 as_of=as_of,
-                status="degraded",
+                status=run_status,
                 gate_passed=True,
                 gate_reasons=(),
                 index_health=index_health,
@@ -719,10 +740,16 @@ class MarketShadowRunner:
             reasons.append("duplicate_quote_symbols")
         if features.unknown_symbols:
             reasons.append("unknown_quote_symbols")
-        if features.turnover.unit_status != UnitVerificationStatus.UNVERIFIED:
-            reasons.append("turnover_unit_status_must_remain_unverified")
-        if features.turnover.formal_usable:
-            reasons.append("formal_use_must_remain_false")
+        if (
+            features.turnover.unit_status == UnitVerificationStatus.VERIFIED
+            and not features.turnover.formal_usable
+        ):
+            reasons.append("verified_turnover_unit_must_be_formal_usable")
+        if (
+            features.turnover.unit_status == UnitVerificationStatus.UNVERIFIED
+            and features.turnover.formal_usable
+        ):
+            reasons.append("unverified_turnover_unit_must_not_be_formal_usable")
         return _dedupe(reasons)
 
     def _complete_degraded(

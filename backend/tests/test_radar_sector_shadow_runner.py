@@ -15,6 +15,7 @@ from radar.contracts import (
     SecurityMasterRecord,
     SourceBatch,
     SourceStatus,
+    UnitVerificationStatus,
 )
 from radar.migrations import apply_pending_migrations
 from radar.repository import RadarRepository
@@ -173,7 +174,14 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         change_percent=0.0,
         market_cap=100.0,
         trading_status=None,
+        verified_turnover=False,
+        verified_market_cap=False,
     ):
+        market_cap_verified = bool(
+            verified_market_cap
+            and market_cap is not None
+            and market_cap > 0
+        )
         return QuoteSnapshot(
             symbol=symbol,
             name=symbol,
@@ -182,9 +190,31 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
             price=10.0,
             changePercent=change_percent,
             turnoverAmountSource=0.0,
+            turnoverAmountCny=0.0 if verified_turnover else None,
+            turnoverAmountUnitStatus=(
+                UnitVerificationStatus.VERIFIED
+                if verified_turnover
+                else UnitVerificationStatus.UNVERIFIED
+            ),
             turnoverRatePercent=0.0,
             volumeRatio=0.0,
             marketCapSource=market_cap,
+            marketCapCny=(
+                market_cap * 100_000_000.0
+                if market_cap_verified
+                else None
+            ),
+            marketCapUnitStatus=(
+                UnitVerificationStatus.VERIFIED
+                if market_cap_verified
+                else UnitVerificationStatus.UNVERIFIED
+            ),
+            totalSharesSource=(
+                market_cap * 10_000_000.0
+                if market_cap_verified
+                else None
+            ),
+            currency="CNY" if market_cap_verified else None,
             tradingStatus=trading_status,
         )
 
@@ -200,6 +230,8 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
         non_trading_symbol=None,
         same_day_old_symbol=None,
         wrong_run_id=False,
+        verified_turnover=False,
+        verified_market_cap=False,
     ):
         self.quote_calls.append((tuple(symbols), radar_run_id, batch_id, as_of))
         source_time = source_time or as_of - timedelta(seconds=1)
@@ -220,6 +252,8 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
                     if symbol == non_trading_symbol
                     else None
                 ),
+                verified_turnover=verified_turnover,
+                verified_market_cap=verified_market_cap,
             )
             for index, symbol in enumerate(symbols)
         ]
@@ -288,6 +322,51 @@ class RadarSectorShadowRunnerTests(unittest.TestCase):
             ).fetchone()[0],
             1,
         )
+
+    def test_verified_quote_amounts_promote_sector_turnover_unit_evidence(self):
+        self.seed_classification()
+        fetcher = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            verified_turnover=True,
+        )
+
+        result = self.runner(fetcher).run_once(
+            "verified-turnover-sector-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        row = self.repository.list_sector_feature_rows(
+            "verified-turnover-sector-run"
+        )[0]
+        self.assertEqual(row["turnoverUnitStatus"], "verified")
+        self.assertNotIn("turnover_unit_unverified", row["reasons"])
+
+    def test_verified_market_caps_remove_only_the_unit_blocker(self):
+        self.seed_classification()
+        fetcher = lambda symbols, run_id, batch_id, as_of: self.quote_batch(
+            symbols,
+            run_id,
+            batch_id,
+            as_of,
+            verified_market_cap=True,
+        )
+
+        result = self.runner(fetcher).run_once(
+            "verified-market-cap-sector-run",
+            AS_OF,
+        )
+
+        self.assertTrue(result.gate_passed)
+        row = self.repository.list_sector_feature_rows(
+            "verified-market-cap-sector-run"
+        )[0]
+        self.assertEqual(row["marketCapUnitStatus"], "verified")
+        self.assertNotIn("market_cap_unit_unverified", row["reasons"])
+        self.assertIn("formal_use_not_approved", row["reasons"])
 
     def test_stale_quote_batch_records_degraded_run_without_sector_snapshot(self):
         self.seed_classification()

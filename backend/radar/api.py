@@ -16,6 +16,7 @@ from radar.api_contracts import (
     RadarLeaderReviewPage,
     RadarLeaderReviewCandidate,
     RadarLeaderReviewVersionRequest,
+    RadarLeaderReviewVersionPreflightResponse,
     RadarLeaderReviewVersionResponse,
     RadarOverviewResponse,
     RadarSectorsResponse,
@@ -28,6 +29,7 @@ from radar.leader_risk_review_repository import LeaderRiskReviewRepository
 from radar.leader_risk_review_service import (
     build_manual_review_version,
     build_review_form_data,
+    preflight_manual_review_version,
 )
 from radar.migrations import validate_applied_migrations
 from radar.read_service import RadarReadService
@@ -295,6 +297,71 @@ def get_radar_leader_review_form(
         raise HTTPException(
             status_code=503,
             detail="龙头风险人工审核预览暂不可用",
+        ) from exc
+
+
+@router.post(
+    "/leaders/review-queue/review-version/preflight",
+    response_model=RadarLeaderReviewVersionPreflightResponse,
+)
+def post_radar_leader_review_version_preflight(
+    response: Response,
+    payload: RadarLeaderReviewVersionRequest,
+):
+    """只读构建候选D8版本并审查实质变化，不保存任何版本。"""
+
+    _no_store(response)
+    try:
+        with open_radar_read_connection(_database_path()) as connection:
+            service = _service(connection)
+            repository = service.risk_review_repository
+            if repository is None:
+                raise ValueError("D8审核存储当前不可读")
+            summary = repository.get_latest_review_batch_summary()
+            if (
+                summary is None
+                or summary["reviewBatchId"] != payload.review_batch_id
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="审核批次已变化，请重新打开表单",
+                )
+            if not all((
+                summary["queryCategoriesComplete"],
+                summary["queryPagesComplete"],
+                summary["queryWindowContinuous"],
+            )):
+                raise HTTPException(
+                    status_code=409,
+                    detail="审核批次完整性门禁未通过",
+                )
+            checked_at = datetime.now(timezone.utc)
+            result = preflight_manual_review_version(
+                repository,
+                payload,
+                as_of=checked_at,
+            )
+            write_enabled = (
+                load_radar_settings().leader_d8_review_write_enabled
+            )
+            return RadarLeaderReviewVersionPreflightResponse(
+                checkedAt=checked_at,
+                reviewBatchId=payload.review_batch_id,
+                documentId=payload.document_id,
+                candidateCategory=payload.candidate_category,
+                writeEnabled=write_enabled,
+                submissionAllowed=(
+                    result["status"] == "ready"
+                    and write_enabled
+                ),
+                **result,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="人工审核草稿未通过正文、事件或关系预检",
         ) from exc
 
 
