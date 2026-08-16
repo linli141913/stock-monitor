@@ -25,6 +25,7 @@ from radar.etf_repository import EtfRepository
 from radar.migrations import (
     STAGE5_RADAR_MIGRATIONS,
     STAGE6_RADAR_MIGRATIONS,
+    STAGE6_REVIEW_RADAR_MIGRATIONS,
     apply_pending_migrations,
 )
 from radar.repository import RadarRepository
@@ -326,7 +327,12 @@ class RadarRuntimeTests(unittest.TestCase):
         provider=None,
         connection_factory=None,
         settings=None,
+        leader_history_input_provider=None,
+        leader_business_catalyst_input_provider=None,
+        leader_tradability_input_provider=None,
+        leader_sector_rule_input_provider=None,
         leader_research_input_provider=None,
+        leader_formal_research_source_provenance_provider=None,
     ):
         kwargs = {}
         if connection_factory is not None:
@@ -345,6 +351,19 @@ class RadarRuntimeTests(unittest.TestCase):
             market_status_provider=provider or market_provider(),
             leader_research_input_provider=(
                 leader_research_input_provider
+            ),
+            leader_history_input_provider=leader_history_input_provider,
+            leader_business_catalyst_input_provider=(
+                leader_business_catalyst_input_provider
+            ),
+            leader_tradability_input_provider=(
+                leader_tradability_input_provider
+            ),
+            leader_sector_rule_input_provider=(
+                leader_sector_rule_input_provider
+            ),
+            leader_formal_research_source_provenance_provider=(
+                leader_formal_research_source_provenance_provider
             ),
             **kwargs,
         )
@@ -628,6 +647,14 @@ class RadarRuntimeTests(unittest.TestCase):
             "leader_research_single_pass_provider_missing",
             market_result.leader_stage6_reasons,
         )
+        self.assertIn(
+            "leader_formal_research_runtime_component_history_not_configured",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertIn(
+            "leader_formal_research_runtime_component_risk_source_failed",
+            market_result.leader_stage6_reasons,
+        )
         self.assertEqual(self.market_quote_fetcher.call_count, 1)
         assembly_builder.assert_not_called()
         readiness_builder.assert_not_called()
@@ -647,6 +674,134 @@ class RadarRuntimeTests(unittest.TestCase):
         self.assertEqual(leader_health["itemCount"], 0)
         self.assertIn(
             "leader_research_single_pass_provider_missing",
+            leader_health["lastDegradationReasons"],
+        )
+        self.assertIn(
+            "leader_formal_research_runtime_component_history_not_configured",
+            leader_health["lastDegradationReasons"],
+        )
+        self.assertIn(
+            "leader_formal_research_production_acceptance_missing",
+            leader_health["lastDegradationReasons"],
+        )
+
+    def test_stage6_default_provider_uses_read_only_d8_bridge_when_available(self):
+        from radar.leader_formal_research_runtime_bridge import (
+            build_leader_formal_research_runtime_bridge,
+        )
+
+        with sqlite3.connect(self.database_path) as connection:
+            apply_pending_migrations(
+                connection,
+                migrations=STAGE6_REVIEW_RADAR_MIGRATIONS,
+            )
+        self.seed_universes()
+        self.seed_industry_classification()
+        history_provider = Mock(return_value=None)
+        business_provider = Mock(return_value=None)
+        tradability_provider = Mock(return_value=None)
+        sector_rule_provider = Mock(return_value=None)
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_history_input_provider=history_provider,
+            leader_business_catalyst_input_provider=business_provider,
+            leader_tradability_input_provider=tradability_provider,
+            leader_sector_rule_input_provider=sector_rule_provider,
+        )
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        with patch(
+            "radar.leader_formal_research_runtime_assembly."
+            "build_leader_formal_research_runtime_bridge",
+            wraps=build_leader_formal_research_runtime_bridge,
+        ) as bridge_builder:
+            market_result = runtime.execute_market(
+                "market-run",
+                TRADE_AS_OF,
+            )
+
+        bridge_builder.assert_called_once()
+        history_provider.assert_called_once()
+        business_provider.assert_called_once()
+        tradability_provider.assert_called_once()
+        sector_rule_provider.assert_called_once()
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        self.assertIn(
+            "leader_research_single_pass_provider_missing",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertIn(
+            "leader_formal_research_runtime_component_history_missing",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertNotIn(
+            "leader_formal_research_runtime_component_history_not_configured",
+            market_result.leader_stage6_reasons,
+        )
+
+    def test_stage6_provenance_provider_failure_is_degraded_without_gate_open(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        provenance_provider = Mock(
+            side_effect=RuntimeError("private provenance detail")
+        )
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_formal_research_source_provenance_provider=(
+                provenance_provider
+            ),
+        )
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        market_result = runtime.execute_market(
+            "market-run",
+            TRADE_AS_OF,
+        )
+
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        self.assertIn(
+            "leader_formal_research_production_provenance_provider_failed",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertIn(
+            "leader_formal_research_production_acceptance_missing",
+            market_result.leader_stage6_reasons,
+        )
+        provenance_provider.assert_called_once()
+
+    def test_stage6_granular_provider_failure_has_stable_health_reason(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        history_provider = Mock(
+            side_effect=RuntimeError("private upstream detail")
+        )
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_history_input_provider=history_provider,
+        )
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        market_result = runtime.execute_market(
+            "market-run",
+            TRADE_AS_OF,
+        )
+
+        history_provider.assert_called_once()
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        self.assertIn(
+            "leader_formal_research_runtime_component_history_source_failed",
+            market_result.leader_stage6_reasons,
+        )
+        self.assertNotIn(
+            "private upstream detail",
+            str(market_result.leader_stage6_reasons),
+        )
+        leader_health = monitoring_health.get_task_states()[
+            "radarLeaderStage6"
+        ]
+        self.assertEqual(leader_health["status"], "degraded")
+        self.assertIn(
+            "leader_formal_research_runtime_component_history_source_failed",
             leader_health["lastDegradationReasons"],
         )
 
@@ -721,9 +876,19 @@ class RadarRuntimeTests(unittest.TestCase):
             )
 
         provider = Mock(side_effect=verified_provider)
+        business_provider = Mock(
+            side_effect=AssertionError("explicit provider must win")
+        )
+        tradability_provider = Mock(
+            side_effect=AssertionError("explicit provider must win")
+        )
+        sector_rule_provider = Mock(return_value=None)
         runtime = self.runtime(
             now=leader_helpers.AS_OF,
             settings=self.leader_stage6_settings(),
+            leader_business_catalyst_input_provider=business_provider,
+            leader_tradability_input_provider=tradability_provider,
+            leader_sector_rule_input_provider=sector_rule_provider,
             leader_research_input_provider=provider,
         )
 
@@ -734,6 +899,9 @@ class RadarRuntimeTests(unittest.TestCase):
         )
 
         provider.assert_called_once()
+        business_provider.assert_not_called()
+        tradability_provider.assert_not_called()
+        sector_rule_provider.assert_called_once()
         provider_context = provider.call_args.args[0]
         self.assertEqual(
             provider_context.quote_batch_id,

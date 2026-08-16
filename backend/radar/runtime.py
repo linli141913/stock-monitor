@@ -29,7 +29,11 @@ from radar.market_shadow_runner import (
     build_default_market_index_fetcher,
     build_default_market_quote_fetcher,
 )
-from radar.repository import RadarRepository, RadarRepositoryError
+from radar.repository import (
+    RadarRepository,
+    RadarRepositoryError,
+    RepositoryStateError,
+)
 from radar.scheduler import (
     ScheduleRegistration,
     ScheduleRegistrationState,
@@ -241,7 +245,14 @@ class RadarRuntime:
             RADAR_ETF_PRODUCT_MASTER_RUNTIME_LOCK_PATH
         ),
         etf_product_master_fetcher: Optional[Callable] = None,
+        leader_history_input_provider: Optional[Callable] = None,
+        leader_business_catalyst_input_provider: Optional[Callable] = None,
+        leader_tradability_input_provider: Optional[Callable] = None,
+        leader_sector_rule_input_provider: Optional[Callable] = None,
         leader_research_input_provider: Optional[Callable] = None,
+        leader_formal_research_source_provenance_provider: Optional[
+            Callable
+        ] = None,
         clock: Callable[[], datetime] = _utc_now,
         market_status_provider: MarketStatusProvider = (
             market_calendar.get_market_status
@@ -278,8 +289,23 @@ class RadarRuntime:
             )
         )
         self.etf_product_master_fetcher = etf_product_master_fetcher
+        self.leader_history_input_provider = (
+            leader_history_input_provider
+        )
+        self.leader_business_catalyst_input_provider = (
+            leader_business_catalyst_input_provider
+        )
+        self.leader_tradability_input_provider = (
+            leader_tradability_input_provider
+        )
+        self.leader_sector_rule_input_provider = (
+            leader_sector_rule_input_provider
+        )
         self.leader_research_input_provider = (
             leader_research_input_provider
+        )
+        self.leader_formal_research_source_provenance_provider = (
+            leader_formal_research_source_provenance_provider
         )
         if (
             self.settings.etf_stage5_enabled
@@ -465,6 +491,16 @@ class RadarRuntime:
                     from radar.leader_input_gate import (
                         LeaderInputGatePolicy,
                     )
+                    from radar.leader_formal_research_runtime_assembly import (
+                        build_leader_formal_research_runtime_assembly,
+                    )
+                    from radar.leader_formal_research_production_acceptance import (
+                        LeaderFormalResearchProductionAcceptanceInput,
+                        build_leader_formal_research_production_acceptance,
+                    )
+                    from radar.sector_rule_runtime_bridge import (
+                        build_sector_rule_runtime_bridge,
+                    )
                     from radar.leader_repository import LeaderRepository
                     from radar.leader_research_input_provider_batch import (
                         LeaderResearchInputProviderBatchStatus,
@@ -472,7 +508,9 @@ class RadarRuntime:
                     )
                     from radar.leader_research_runtime_provider import (
                         build_leader_research_runtime_source_context,
-                        build_explicit_missing_leader_research_provider_input,
+                    )
+                    from radar.leader_risk_review_repository import (
+                        LeaderRiskReviewRepository,
                     )
                     from radar.leader_research_single_pass_orchestration import (
                         LeaderResearchSinglePassInput,
@@ -536,10 +574,6 @@ class RadarRuntime:
                             )
                             return plan
 
-                        provider = (
-                            self.leader_research_input_provider
-                            or build_explicit_missing_leader_research_provider_input
-                        )
                         source_context = (
                             build_leader_research_runtime_source_context(
                                 candidate_plan=plan,
@@ -549,7 +583,103 @@ class RadarRuntime:
                                 industry_records=industry_records,
                             )
                         )
-                        provider_input = provider(source_context)
+                        runtime_assembly_health_reasons = ()
+                        runtime_production_acceptance = None
+                        runtime_production_acceptance_health_reasons = ()
+                        if self.leader_research_input_provider is not None:
+                            sector_rule_admission_value = None
+                            if (
+                                self.leader_sector_rule_input_provider
+                                is not None
+                            ):
+                                try:
+                                    sector_rule_bridge = (
+                                        build_sector_rule_runtime_bridge(
+                                            source_context,
+                                            source_batch=(
+                                                self.leader_sector_rule_input_provider(
+                                                    source_context
+                                                )
+                                            ),
+                                        )
+                                    )
+                                    sector_rule_admission_value = (
+                                        sector_rule_bridge
+                                        .sector_rule_admission_value
+                                    )
+                                except Exception:
+                                    sector_rule_admission_value = None
+                            provider_input = self.leader_research_input_provider(
+                                source_context
+                            )
+                        else:
+                            try:
+                                risk_review_repository = (
+                                    LeaderRiskReviewRepository(
+                                        connection,
+                                        clock=self.clock,
+                                    )
+                                )
+                            except (
+                                RepositoryStateError,
+                                sqlite3.OperationalError,
+                            ):
+                                risk_review_repository = None
+                            runtime_assembly = (
+                                build_leader_formal_research_runtime_assembly(
+                                    source_context,
+                                    repository=risk_review_repository,
+                                    sector_rule_provider=(
+                                        self.leader_sector_rule_input_provider
+                                    ),
+                                    history_provider=(
+                                        self.leader_history_input_provider
+                                    ),
+                                    business_catalyst_provider=(
+                                        self.leader_business_catalyst_input_provider
+                                    ),
+                                    tradability_provider=(
+                                        self.leader_tradability_input_provider
+                                    ),
+                                )
+                            )
+                            provider_input = runtime_assembly.provider_input
+                            sector_rule_admission_value = (
+                                runtime_assembly.sector_rule_readiness
+                            )
+                            runtime_assembly_health_reasons = (
+                                runtime_assembly.health_reasons
+                            )
+                            provenance = ()
+                            if (
+                                self.leader_formal_research_source_provenance_provider
+                                is not None
+                            ):
+                                try:
+                                    provenance = (
+                                        self.leader_formal_research_source_provenance_provider(
+                                            source_context,
+                                            runtime_assembly,
+                                        )
+                                    )
+                                except Exception:
+                                    runtime_production_acceptance_health_reasons = (
+                                        "leader_formal_research_production_provenance_provider_failed",
+                                    )
+                            runtime_production_acceptance = (
+                                build_leader_formal_research_production_acceptance(
+                                    LeaderFormalResearchProductionAcceptanceInput(
+                                        assembly=runtime_assembly,
+                                        provenance=provenance,
+                                    )
+                                )
+                            )
+                            runtime_production_acceptance_health_reasons = tuple(
+                                dict.fromkeys((
+                                    *runtime_production_acceptance_health_reasons,
+                                    *runtime_production_acceptance.health_reasons,
+                                ))
+                            )
                         provider_result = (
                             build_leader_research_input_provider_batch_from_plan(
                                 provider_input
@@ -566,6 +696,9 @@ class RadarRuntime:
                             sector_rows=sector_rows,
                             industry_records=industry_records,
                             security_records=security_records,
+                            sector_rule_readiness=(
+                                sector_rule_admission_value
+                            ),
                         )
                         if provider_result.status in (
                             LeaderResearchInputProviderBatchStatus.BLOCKED,
@@ -573,6 +706,17 @@ class RadarRuntime:
                         ):
                             single_pass = build_leader_research_single_pass(
                                 orchestration_input
+                            )
+                            single_pass = replace(
+                                single_pass,
+                                reasons=tuple(dict.fromkeys((
+                                    *single_pass.reasons,
+                                    *runtime_assembly_health_reasons,
+                                    *runtime_production_acceptance_health_reasons,
+                                ))),
+                                production_acceptance=(
+                                    runtime_production_acceptance
+                                ),
                             )
                             monitoring_health.record_task_degraded(
                                 RADAR_LEADER_STAGE6_TASK_NAME,
@@ -594,6 +738,17 @@ class RadarRuntime:
                                 orchestration_input,
                                 previous_states=previous_states,
                             )
+                        )
+                        single_pass = replace(
+                            single_pass,
+                            reasons=tuple(dict.fromkeys((
+                                *single_pass.reasons,
+                                *runtime_assembly_health_reasons,
+                                *runtime_production_acceptance_health_reasons,
+                            ))),
+                            production_acceptance=(
+                                runtime_production_acceptance
+                            ),
                         )
                         if single_pass.runtime_assembly is None:
                             monitoring_health.record_task_degraded(
@@ -861,7 +1016,14 @@ def register_production_shadow_jobs(
     market_index_fetcher: Optional[MarketIndexFetcher] = None,
     market_quote_fetcher: Optional[MarketQuoteFetcher] = None,
     etf_product_master_fetcher: Optional[Callable] = None,
+    leader_history_input_provider: Optional[Callable] = None,
+    leader_business_catalyst_input_provider: Optional[Callable] = None,
+    leader_tradability_input_provider: Optional[Callable] = None,
+    leader_sector_rule_input_provider: Optional[Callable] = None,
     leader_research_input_provider: Optional[Callable] = None,
+    leader_formal_research_source_provenance_provider: Optional[
+        Callable
+    ] = None,
     clock: Callable[[], datetime] = _utc_now,
     market_status_provider: MarketStatusProvider = (
         market_calendar.get_market_status
@@ -905,7 +1067,20 @@ def register_production_shadow_jobs(
         market_index_fetcher=market_index_fetcher,
         market_quote_fetcher=market_quote_fetcher,
         etf_product_master_fetcher=etf_product_master_fetcher,
+        leader_history_input_provider=leader_history_input_provider,
+        leader_business_catalyst_input_provider=(
+            leader_business_catalyst_input_provider
+        ),
+        leader_tradability_input_provider=(
+            leader_tradability_input_provider
+        ),
+        leader_sector_rule_input_provider=(
+            leader_sector_rule_input_provider
+        ),
         leader_research_input_provider=leader_research_input_provider,
+        leader_formal_research_source_provenance_provider=(
+            leader_formal_research_source_provenance_provider
+        ),
         clock=clock,
         market_status_provider=market_status_provider,
         connection_factory=connection_factory,

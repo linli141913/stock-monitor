@@ -8,6 +8,10 @@ from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from radar.contracts import QuoteSnapshot, RadarBatchMeta, SourceBatch
+from radar.leader_formal_research_batch import (
+    LeaderFormalResearchBatchResult,
+    provide_leader_formal_research_batch,
+)
 from radar.leader_research_input_provider_batch import (
     LeaderResearchInputProviderBatchResult,
     LeaderResearchInputProviderBatchStatus,
@@ -70,6 +74,7 @@ class LeaderResearchSinglePassInput:
         default=None,
         repr=False,
     )
+    sector_rule_readiness: Any = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,9 @@ class LeaderResearchSinglePassResult:
     readiness_result: Optional[
         LeaderResearchReadinessRuntimeBatchResult
     ] = field(default=None, repr=False)
+    formal_research_result: Optional[
+        LeaderFormalResearchBatchResult
+    ] = field(default=None, repr=False)
     runtime_assembly: Optional[LeaderRuntimeAssembly] = field(
         default=None,
         repr=False,
@@ -95,6 +103,7 @@ class LeaderResearchSinglePassResult:
     formal_gate_ready: bool = False
     formal_usable: bool = False
     state_transition_allowed: bool = False
+    production_acceptance: Any = field(default=None, repr=False)
 
     @property
     def gate_reasons(self) -> Tuple[str, ...]:
@@ -116,6 +125,16 @@ class LeaderResearchSinglePassResult:
             "readinessStatus": (
                 self.readiness_result.status.value
                 if self.readiness_result is not None
+                else None
+            ),
+            "formalResearchStatus": (
+                self.formal_research_result.status.value
+                if self.formal_research_result is not None
+                else None
+            ),
+            "productionAcceptanceStatus": (
+                self.production_acceptance.status.value
+                if self.production_acceptance is not None
                 else None
             ),
             "reasons": list(self.reasons),
@@ -153,7 +172,11 @@ def _result(
     readiness_result: Optional[
         LeaderResearchReadinessRuntimeBatchResult
     ] = None,
+    formal_research_result: Optional[
+        LeaderFormalResearchBatchResult
+    ] = None,
     runtime_assembly: Optional[LeaderRuntimeAssembly] = None,
+    production_acceptance: Any = None,
 ) -> LeaderResearchSinglePassResult:
     return LeaderResearchSinglePassResult(
         status=status,
@@ -165,7 +188,9 @@ def _result(
         candidate_count=(plan.candidate_count if plan is not None else 0),
         provider_result=provider_result,
         readiness_result=readiness_result,
+        formal_research_result=formal_research_result,
         runtime_assembly=runtime_assembly,
+        production_acceptance=production_acceptance,
         reasons=_dedupe(reasons),
     )
 
@@ -416,11 +441,17 @@ def _build_leader_research_single_pass(
             ),
         )
     )
+    formal_research = provide_leader_formal_research_batch(
+        candidate_plan=plan,
+        sector_rule_readiness=input_value.sector_rule_readiness,
+        research_readiness_batch=readiness.audit_batch,
+    )
     return _result(
         status=_status(readiness.status),
         plan=plan,
         provider_result=provider_result,
         readiness_result=readiness,
+        formal_research_result=formal_research,
         runtime_assembly=readiness.runtime_assembly,
         reasons=_readiness_reasons(readiness),
     )

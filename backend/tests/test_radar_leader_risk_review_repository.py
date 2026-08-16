@@ -414,6 +414,48 @@ class LeaderRiskReviewRepositoryTests(unittest.TestCase):
                 skipped,
             )
 
+    def test_review_version_chain_reader_preserves_symbol_order_and_is_read_only(self):
+        self.save_batch()
+        self.repository.save_review_version(
+            "risk-review-batch-1",
+            self.version,
+        )
+        first_artifact = build_manual_risk_review_artifact(
+            ManualRiskReviewArtifactInput(
+                as_of=self.version.as_of,
+                document=self.version.document,
+                content=self.version.content,
+                facts=self.version.facts,
+                candidate=self.version.candidate,
+                event_versions=self.version.event_versions,
+                submission=self.version.submission,
+                previous_artifacts=(),
+            )
+        ).artifact
+        second = self.make_version(2, (first_artifact,))
+        self.repository.save_review_version(
+            "risk-review-batch-1",
+            second,
+        )
+        changes_before = self.connection.total_changes
+
+        first_only = self.repository.list_review_version_chains(
+            (self.document.symbol, "300082"),
+            self.version.as_of,
+        )
+        complete = self.repository.list_review_version_chains(
+            ("300082", self.document.symbol),
+            second.as_of,
+        )
+
+        self.assertEqual(self.connection.total_changes, changes_before)
+        self.assertEqual(len(first_only), 1)
+        self.assertEqual(first_only[0].symbol, self.document.symbol)
+        self.assertEqual(first_only[0].versions, (self.version,))
+        self.assertEqual(len(complete), 1)
+        self.assertEqual(complete[0].symbol, self.document.symbol)
+        self.assertEqual(complete[0].versions, (self.version, second))
+
     def test_invalid_content_rolls_back_all_review_rows(self):
         self.save_batch()
         oversized = replace(

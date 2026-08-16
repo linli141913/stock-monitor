@@ -172,6 +172,14 @@ def _enum_value(enum_type, value: Any, field_name: str):
 
 
 @dataclass(frozen=True)
+class LeaderRiskReviewVersionChain:
+    symbol: str
+    document_id: str
+    candidate_id: str
+    versions: Tuple[LeaderRiskLifecycleReviewVersion, ...]
+
+
+@dataclass(frozen=True)
 class _PreparedDocument:
     document: OfficialRiskDocumentMetadata
     catalog_payload: Mapping[str, Any]
@@ -1683,3 +1691,61 @@ class LeaderRiskReviewRepository:
                 item.submission.review_version,
             ),
         ))
+
+    def list_review_version_chains(
+        self,
+        symbols: Tuple[str, ...],
+        as_of: datetime,
+    ) -> Tuple[LeaderRiskReviewVersionChain, ...]:
+        """按证券读取截止时点前的D8版本链，不产生任何写入。"""
+
+        if (
+            not isinstance(symbols, tuple)
+            or len(symbols) != len(set(symbols))
+        ):
+            raise ValueError("symbols必须是无重复元组")
+        normalized_symbols = tuple(_symbol(value) for value in symbols)
+        if not normalized_symbols:
+            return ()
+        as_of_text = _datetime_text(as_of, "asOf")
+        normalized_as_of = _parse_datetime(as_of_text, "as_of")
+        placeholders = ",".join("?" for _ in normalized_symbols)
+        rows = self._connection.execute(
+            f"""
+            SELECT DISTINCT symbol, document_id, candidate_id
+            FROM radar_leader_risk_manual_review_versions
+            WHERE symbol IN ({placeholders}) AND as_of<=?
+            ORDER BY symbol, document_id, candidate_id
+            """,
+            (*normalized_symbols, as_of_text),
+        ).fetchall()
+        chains_by_symbol = {symbol: [] for symbol in normalized_symbols}
+        for symbol, document_id, candidate_id in rows:
+            if symbol not in chains_by_symbol:
+                raise RepositoryStateError("风险审核版本链包含越界证券")
+            versions = tuple(
+                version
+                for _, version in self._history(document_id, candidate_id)
+                if version.as_of <= normalized_as_of
+            )
+            if not versions:
+                continue
+            if any(
+                version.document.symbol != symbol
+                or version.document.document_id != document_id
+                for version in versions
+            ):
+                raise RepositoryStateError("风险审核版本链身份不一致")
+            chains_by_symbol[symbol].append(
+                LeaderRiskReviewVersionChain(
+                    symbol=symbol,
+                    document_id=document_id,
+                    candidate_id=candidate_id,
+                    versions=versions,
+                )
+            )
+        return tuple(
+            chain
+            for symbol in normalized_symbols
+            for chain in chains_by_symbol[symbol]
+        )
