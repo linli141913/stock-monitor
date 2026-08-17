@@ -111,6 +111,10 @@ class LeaderFormalResearchRuntimeBridgeResult:
     provider_input: LeaderResearchInputProviderPlanBatchInput = field(
         repr=False
     )
+    review_chains: Tuple[LeaderRiskReviewVersionChain, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
     contract_id: str = LEADER_FORMAL_RESEARCH_RUNTIME_BRIDGE_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -427,4 +431,5 @@ def build_leader_formal_research_runtime_bridge(
         risk_projection_batch=risk_batch,
         source_admission=source_admission,
         provider_input=provider_input,
+        review_chains=chains,
     )

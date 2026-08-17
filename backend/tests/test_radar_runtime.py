@@ -769,6 +769,30 @@ class RadarRuntimeTests(unittest.TestCase):
         )
         provenance_provider.assert_called_once()
 
+    def test_stage6_external_provenance_cannot_replace_bound_source_proofs(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        provenance_provider = Mock(return_value=())
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_formal_research_source_provenance_provider=(
+                provenance_provider
+            ),
+        )
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        market_result = runtime.execute_market(
+            "market-run",
+            TRADE_AS_OF,
+        )
+
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        self.assertIn(
+            "leader_formal_research_production_provenance_unbound",
+            market_result.leader_stage6_reasons,
+        )
+        provenance_provider.assert_called_once()
+
     def test_stage6_granular_provider_failure_has_stable_health_reason(self):
         self.seed_universes()
         self.seed_industry_classification()

@@ -17,6 +17,12 @@ from radar.leader_formal_research_runtime_bridge import (
     LeaderFormalResearchRuntimeBridgeResult,
     build_leader_formal_research_runtime_bridge,
 )
+from radar.leader_formal_research_production_provider import (
+    LeaderFormalResearchProductionDeliveryResolutionStatus,
+    build_leader_formal_research_risk_source_proof,
+    is_leader_formal_research_production_delivery,
+    resolve_leader_formal_research_production_delivery,
+)
 from radar.leader_history_runtime_bridge import (
     SOURCE_UNVERIFIED as HISTORY_SOURCE_UNVERIFIED,
     build_leader_history_runtime_bridge,
@@ -107,6 +113,10 @@ class LeaderFormalResearchRuntimeAssemblyResult:
         repr=False,
     )
     sector_rule_readiness: Any = field(default=None, repr=False)
+    production_source_proofs: Tuple[Any, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
     contract_id: str = LEADER_FORMAL_RESEARCH_RUNTIME_ASSEMBLY_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -145,7 +155,9 @@ class LeaderFormalResearchRuntimeAssemblyResult:
 class _ProviderResolution:
     configured: bool
     failed: bool
+    source_unverified: bool = False
     bridge: Any = field(default=None, repr=False)
+    proof: Any = field(default=None, repr=False)
 
 
 class _UnavailableReviewRepository:
@@ -164,11 +176,47 @@ def _resolve_provider(
     provider: Optional[Provider],
     bridge_builder: Callable[..., Any],
     value_key: str,
+    component_name: str,
 ) -> _ProviderResolution:
     if provider is None:
         return _ProviderResolution(configured=False, failed=False)
     try:
         source_value = provider(context)
+        proof = None
+        if is_leader_formal_research_production_delivery(source_value):
+            delivery = resolve_leader_formal_research_production_delivery(
+                context,
+                component_name=component_name,
+                value=source_value,
+            )
+            proof = (
+                delivery.proof
+                if getattr(delivery.proof, "component_name", None)
+                == component_name
+                else None
+            )
+            if (
+                delivery.status
+                == LeaderFormalResearchProductionDeliveryResolutionStatus
+                .SOURCE_FAILED
+            ):
+                return _ProviderResolution(
+                    configured=True,
+                    failed=True,
+                    proof=proof,
+                )
+            if (
+                delivery.status
+                == LeaderFormalResearchProductionDeliveryResolutionStatus
+                .SOURCE_UNVERIFIED
+            ):
+                return _ProviderResolution(
+                    configured=True,
+                    failed=False,
+                    source_unverified=True,
+                    proof=proof,
+                )
+            source_value = delivery.payload
         bridge = bridge_builder(context, **{value_key: source_value})
     except Exception:
         return _ProviderResolution(configured=True, failed=True)
@@ -176,6 +224,7 @@ def _resolve_provider(
         configured=True,
         failed=False,
         bridge=bridge,
+        proof=proof,
     )
 
 
@@ -236,6 +285,18 @@ def _provider_component(
                 f"leader_formal_research_runtime_{name}_provider_not_configured",
             ),
         )
+    if resolution.source_unverified:
+        return LeaderFormalResearchRuntimeComponent(
+            name=name,
+            status=(
+                LeaderFormalResearchRuntimeComponentStatus.SOURCE_UNVERIFIED
+            ),
+            candidate_count=candidate_count,
+            ready_count=0,
+            reasons=(
+                f"leader_formal_research_runtime_{name}_source_unverified",
+            ),
+        )
     if resolution.failed or resolution.bridge is None:
         return LeaderFormalResearchRuntimeComponent(
             name=name,
@@ -283,6 +344,18 @@ def _sector_component(
             ready_count=0,
             reasons=(
                 "leader_formal_research_runtime_sector_rule_provider_not_configured",
+            ),
+        )
+    if resolution.source_unverified:
+        return LeaderFormalResearchRuntimeComponent(
+            name="sector_rule",
+            status=(
+                LeaderFormalResearchRuntimeComponentStatus.SOURCE_UNVERIFIED
+            ),
+            candidate_count=candidate_count,
+            ready_count=0,
+            reasons=(
+                "leader_formal_research_runtime_sector_rule_source_unverified",
             ),
         )
     if resolution.failed or resolution.bridge is None:
@@ -385,24 +458,28 @@ def build_leader_formal_research_runtime_assembly(
         sector_rule_provider,
         build_sector_rule_runtime_bridge,
         "source_batch",
+        "sector_rule",
     )
     history = _resolve_provider(
         context,
         history_provider,
         build_leader_history_runtime_bridge,
         "history_entries",
+        "history",
     )
     business = _resolve_provider(
         context,
         business_catalyst_provider,
         build_leader_business_catalyst_runtime_bridge,
         "source_batch",
+        "business_catalyst",
     )
     tradability = _resolve_provider(
         context,
         tradability_provider,
         build_leader_tradability_runtime_bridge,
         "tradability_bundle",
+        "tradability",
     )
 
     repository_failed = False
@@ -477,6 +554,18 @@ def build_leader_formal_research_runtime_assembly(
             sector.bridge.sector_rule_admission_value
             if sector.bridge is not None
             else None
+        ),
+        production_source_proofs=tuple(
+            (
+                resolution.proof
+                for resolution in (sector, history, business, tradability)
+                if resolution.proof is not None
+            )
+        ) + (
+            build_leader_formal_research_risk_source_proof(
+                context,
+                bridge=formal_bridge,
+            ),
         ),
         formal_bridge=formal_bridge,
     )

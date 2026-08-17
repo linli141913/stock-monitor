@@ -17,6 +17,10 @@ from radar.leader_formal_research_runtime_assembly import (
     LeaderFormalResearchRuntimeAssemblyStatus,
     LeaderFormalResearchRuntimeComponentStatus,
 )
+from radar.leader_formal_research_production_provider import (
+    LeaderFormalResearchProductionSourceProof,
+    LeaderFormalResearchProductionSourceStatus,
+)
 
 
 LEADER_FORMAL_RESEARCH_PRODUCTION_ACCEPTANCE_CONTRACT_ID = (
@@ -39,6 +43,9 @@ PROVENANCE_IDENTITY_UNVERIFIED = (
 )
 PROVENANCE_TIME_UNVERIFIED = (
     "leader_formal_research_production_provenance_time_unverified"
+)
+PROVENANCE_UNBOUND = (
+    "leader_formal_research_production_provenance_unbound"
 )
 ASSEMBLY_UNVERIFIED = (
     "leader_formal_research_production_assembly_unverified"
@@ -72,7 +79,7 @@ class LeaderFormalResearchSourceProvenance:
     candidate_plan_id: str
     as_of: datetime
     source_time: Optional[datetime]
-    fetched_at: datetime
+    fetched_at: Optional[datetime]
     candidate_count: int
     ready_count: int
     provenance_contract_id: str = PROVENANCE_CONTRACT_ID
@@ -184,6 +191,56 @@ def _provenance_index(
 def _assembly_as_of(assembly: LeaderFormalResearchRuntimeAssemblyResult) -> Optional[datetime]:
     admission = getattr(getattr(assembly, "formal_bridge", None), "source_admission", None)
     return _aware_utc(getattr(admission, "as_of", None))
+
+
+def build_leader_formal_research_source_provenance_from_assembly(
+    assembly: Any,
+) -> Tuple[LeaderFormalResearchSourceProvenance, ...]:
+    """只从总装保留的来源证明生成验收输入，拒绝外部自由拼接。"""
+
+    if not isinstance(assembly, LeaderFormalResearchRuntimeAssemblyResult):
+        return ()
+    component_by_name = {
+        item.name: item
+        for item in assembly.components
+        if item.name in COMPONENT_NAMES
+    }
+    proofs = getattr(assembly, "production_source_proofs", ())
+    if not isinstance(proofs, tuple):
+        return ()
+    result = []
+    for proof in proofs:
+        if not isinstance(proof, LeaderFormalResearchProductionSourceProof):
+            continue
+        component = component_by_name.get(proof.component_name)
+        if component is None:
+            continue
+        try:
+            status = LeaderFormalResearchSourceProvenanceStatus(
+                proof.status.value
+            )
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if proof.expected_count != assembly.candidate_count:
+            continue
+        if (
+            proof.status == LeaderFormalResearchProductionSourceStatus.COMPLETED
+            and proof.returned_count != component.ready_count
+        ):
+            continue
+        result.append(LeaderFormalResearchSourceProvenance(
+            component_name=proof.component_name,
+            contract_id=proof.source_contract_id,
+            status=status,
+            radar_run_id=proof.radar_run_id,
+            candidate_plan_id=proof.candidate_plan_id,
+            as_of=proof.as_of,
+            source_time=proof.source_time,
+            fetched_at=proof.fetched_at,
+            candidate_count=assembly.candidate_count,
+            ready_count=component.ready_count,
+        ))
+    return tuple(result)
 
 
 def build_leader_formal_research_production_acceptance(

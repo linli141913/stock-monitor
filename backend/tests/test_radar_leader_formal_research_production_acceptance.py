@@ -7,7 +7,12 @@ from radar.leader_formal_research_production_acceptance import (
     LeaderFormalResearchProductionAcceptanceStatus,
     LeaderFormalResearchSourceProvenance,
     LeaderFormalResearchSourceProvenanceStatus,
+    build_leader_formal_research_source_provenance_from_assembly,
     build_leader_formal_research_production_acceptance,
+)
+from radar.leader_formal_research_production_provider import (
+    LeaderFormalResearchProductionSourceProof,
+    LeaderFormalResearchProductionSourceStatus,
 )
 from radar.leader_formal_research_runtime_assembly import (
     LeaderFormalResearchRuntimeAssemblyResult,
@@ -131,6 +136,47 @@ class LeaderFormalResearchProductionAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             result.to_evidence()["contractId"],
             LEADER_FORMAL_RESEARCH_PRODUCTION_ACCEPTANCE_CONTRACT_ID,
+        )
+
+    def test_bound_assembly_proofs_are_the_only_auto_provenance(self):
+        proofs = tuple(
+            LeaderFormalResearchProductionSourceProof(
+                component_name=name,
+                source_contract_id=f"source-{name}-v1",
+                status=LeaderFormalResearchProductionSourceStatus.COMPLETED,
+                radar_run_id=self.plan.radar_run_id,
+                candidate_plan_id=self.plan.candidate_set_id,
+                quote_batch_id=self.plan.quote_batch_id,
+                as_of=self.plan.as_of,
+                source_time=self.plan.as_of - timedelta(seconds=1),
+                fetched_at=self.plan.as_of,
+                expected_count=self.plan.candidate_count,
+                returned_count=self.plan.candidate_count,
+            )
+            for name in (
+                "sector_rule",
+                "history",
+                "business_catalyst",
+                "tradability",
+                "risk",
+            )
+        )
+        assembly = replace(
+            self.assembly(),
+            production_source_proofs=proofs,
+        )
+
+        provenance = build_leader_formal_research_source_provenance_from_assembly(
+            assembly
+        )
+        result = build_leader_formal_research_production_acceptance(
+            self.input(assembly=assembly, provenance=provenance)
+        )
+
+        self.assertEqual(len(provenance), 5)
+        self.assertEqual(
+            result.status,
+            LeaderFormalResearchProductionAcceptanceStatus.READY_FOR_REVIEW,
         )
 
     def test_not_run_failed_and_unverified_sources_never_pass(self):

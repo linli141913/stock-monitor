@@ -496,6 +496,8 @@ class RadarRuntime:
                     )
                     from radar.leader_formal_research_production_acceptance import (
                         LeaderFormalResearchProductionAcceptanceInput,
+                        PROVENANCE_UNBOUND,
+                        build_leader_formal_research_source_provenance_from_assembly,
                         build_leader_formal_research_production_acceptance,
                     )
                     from radar.sector_rule_runtime_bridge import (
@@ -650,18 +652,26 @@ class RadarRuntime:
                             runtime_assembly_health_reasons = (
                                 runtime_assembly.health_reasons
                             )
-                            provenance = ()
+                            provenance = (
+                                build_leader_formal_research_source_provenance_from_assembly(
+                                    runtime_assembly
+                                )
+                            )
                             if (
                                 self.leader_formal_research_source_provenance_provider
                                 is not None
                             ):
                                 try:
-                                    provenance = (
+                                    external_provenance = (
                                         self.leader_formal_research_source_provenance_provider(
                                             source_context,
                                             runtime_assembly,
                                         )
                                     )
+                                    if tuple(external_provenance) != provenance:
+                                        runtime_production_acceptance_health_reasons = (
+                                            PROVENANCE_UNBOUND,
+                                        )
                                 except Exception:
                                     runtime_production_acceptance_health_reasons = (
                                         "leader_formal_research_production_provenance_provider_failed",
