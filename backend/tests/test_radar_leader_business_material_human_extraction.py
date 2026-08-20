@@ -166,6 +166,30 @@ class LeaderBusinessMaterialHumanExtractionTests(unittest.TestCase):
             )
             self.assertEqual(result.material_entries, ())
 
+    def test_non_string_human_fields_and_review_before_sources_fail_closed(self):
+        first = self.plan.items[0]
+        cases = (
+            self.extraction(first, reviewer_key=7),
+            self.extraction(first, fact_summary=7),
+            self.extraction(
+                first,
+                reviewed_at=self.plan.as_of - timedelta(days=40),
+            ),
+        )
+
+        for malformed in cases:
+            result = build_leader_business_material_human_extraction_batch(
+                self.plan,
+                self.queue,
+                (malformed,),
+                validated_at=self.plan.as_of,
+            )
+            self.assertEqual(
+                result.status,
+                LeaderBusinessMaterialHumanExtractionStatus.BLOCKED,
+            )
+            self.assertEqual(result.material_entries, ())
+
 
 if __name__ == "__main__":
     unittest.main()

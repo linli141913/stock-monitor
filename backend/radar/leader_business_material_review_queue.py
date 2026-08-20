@@ -113,7 +113,14 @@ def build_leader_business_material_review_queue(
         or set(actual) != set(expected)
         or any(
             batch.query.candidate_plan_id != candidate_plan.candidate_set_id
-            or not batch.coverage_complete
+            or (
+                batch.status
+                in {
+                    OfficialBusinessMaterialDiscoveryStatus.READY,
+                    OfficialBusinessMaterialDiscoveryStatus.MISSING,
+                }
+                and not batch.coverage_complete
+            )
             for batch in batches
         )
     ):

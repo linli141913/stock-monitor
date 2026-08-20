@@ -93,7 +93,15 @@ def build_leader_business_material_human_extraction_batch(
     candidate_plan: Any,
     review_queue: Any,
     extractions: Any,
+    *,
+    validated_at: Any = None,
 ) -> LeaderBusinessMaterialHumanExtractionBatch:
+    actual_validated_at = (
+        candidate_plan.as_of
+        if validated_at is None
+        and isinstance(candidate_plan, LeaderRuntimeCandidatePlan)
+        else validated_at
+    )
     if (
         not isinstance(candidate_plan, LeaderRuntimeCandidatePlan)
         or not is_leader_runtime_candidate_plan_valid(candidate_plan)
@@ -102,6 +110,7 @@ def build_leader_business_material_human_extraction_batch(
         or review_queue.status == LeaderBusinessMaterialReviewQueueStatus.BLOCKED
         or not isinstance(extractions, tuple)
         or any(type(item) is not LeaderBusinessMaterialHumanExtractionEntry for item in extractions)
+        or not _aware(actual_validated_at)
     ):
         return _blocked("", "business_material_human_extraction_contract_unverified")
     expected = tuple(item.symbol for item in candidate_plan.items)
@@ -129,10 +138,12 @@ def build_leader_business_material_human_extraction_batch(
         if (
             queue_item is None
             or queue_item.status != LeaderBusinessMaterialReviewItemStatus.PENDING_REVIEW
+            or not isinstance(extraction.reviewer_key, str)
             or not extraction.reviewer_key.strip()
             or not _aware(extraction.reviewed_at)
-            or extraction.reviewed_at > candidate_plan.as_of
+            or extraction.reviewed_at > actual_validated_at
             or not isinstance(extraction.proof_type, BusinessProofType)
+            or not isinstance(extraction.fact_summary, str)
             or not extraction.fact_summary.strip()
             or type(extraction.catalyst_artifact) is not LeaderOfficialCatalystArtifact
             or extraction.catalyst_artifact.industry_code != plan_item.industry_code
@@ -153,6 +164,17 @@ def build_leader_business_material_human_extraction_batch(
             return _blocked(
                 candidate_plan.candidate_set_id,
                 "business_material_human_extraction_document_unverified",
+            )
+        if (
+            not _aware(document.published_at)
+            or not _aware(extraction.catalyst_artifact.published_at)
+            or extraction.reviewed_at < document.published_at
+            or extraction.reviewed_at
+            < extraction.catalyst_artifact.published_at
+        ):
+            return _blocked(
+                candidate_plan.candidate_set_id,
+                "business_material_human_extraction_time_unverified",
             )
         proof = LeaderOfficialBusinessProofArtifact(
             platform=OfficialDisclosurePlatform.CNINFO,

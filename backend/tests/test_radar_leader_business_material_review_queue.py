@@ -97,6 +97,37 @@ class LeaderBusinessMaterialReviewQueueTests(unittest.TestCase):
             for item in result.items
         ))
 
+    def test_source_failure_is_preserved_without_relabelling_blocked(self):
+        first = self.batch(
+            self.plan.items[0],
+            documents=False,
+            status=OfficialBusinessMaterialDiscoveryStatus.SOURCE_FAILED,
+        )
+        first = OfficialBusinessMaterialDiscoveryBatch(
+            **{**first.__dict__, "coverage_complete": False}
+        )
+        batches = (
+            first,
+            *tuple(
+                self.batch(item, documents=False)
+                for item in self.plan.items[1:]
+            ),
+        )
+
+        result = build_leader_business_material_review_queue(
+            self.plan,
+            batches,
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderBusinessMaterialReviewQueueStatus.SOURCE_FAILED,
+        )
+        self.assertEqual(
+            result.items[0].status,
+            LeaderBusinessMaterialReviewItemStatus.SOURCE_FAILED,
+        )
+
     def test_missing_duplicate_and_cross_plan_batches_are_blocked(self):
         batches = tuple(self.batch(item) for item in self.plan.items)
         cross = self.batch(self.plan.items[0])
