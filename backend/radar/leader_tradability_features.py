@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 import math
@@ -433,7 +433,9 @@ def build_leader_tradability_features(
     lifecycle_published, lifecycle_from, lifecycle_until, lifecycle_fetched = (
         lifecycle_times
     )
-    if lifecycle_published > as_of:
+    if (
+        lifecycle_published - as_of
+    ).total_seconds() > MAXIMUM_FUTURE_SKEW_SECONDS:
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -448,7 +450,11 @@ def build_leader_tradability_features(
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
             reason="lifecycle_effective_interval_invalid",
         )
-    if lifecycle_fetched < lifecycle_published:
+    if (
+        lifecycle_fetched
+        + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        < lifecycle_published
+    ):
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -527,7 +533,11 @@ def build_leader_tradability_features(
             status=ResearchFeatureStatus.STALE,
             reason="trading_status_stale",
         )
-    if trading_fetched_at < trading_source_time:
+    if (
+        trading_fetched_at
+        + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        < trading_source_time
+    ):
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -561,7 +571,11 @@ def build_leader_tradability_features(
             status=ResearchFeatureStatus.STALE,
             reason="quote_source_stale",
         )
-    if quote_fetched_at < quote_source_time:
+    if (
+        quote_fetched_at
+        + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        < quote_source_time
+    ):
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,

@@ -75,6 +75,7 @@ class PublicHistoryPocQuery:
     board_index_symbol: str
     membership: PointInTimeIndustryMembership
     series_by_symbol: Mapping[str, PublicHistorySeries] = field(repr=False)
+    maximum_member_count: int = MAXIMUM_INDUSTRY_MEMBER_COUNT
 
 
 @dataclass(frozen=True)
@@ -317,7 +318,14 @@ def run_public_history_input_poc(
         or any(not _valid_symbol(symbol) for symbol in members)
     ):
         reasons.append("industry_membership_identity_invalid")
-    if len(members) > MAXIMUM_INDUSTRY_MEMBER_COUNT:
+    if (
+        not isinstance(query.maximum_member_count, int)
+        or isinstance(query.maximum_member_count, bool)
+        or query.maximum_member_count < 1
+        or query.maximum_member_count > 10000
+    ):
+        reasons.append("industry_member_budget_invalid")
+    elif len(members) > query.maximum_member_count:
         reasons.append("industry_member_budget_exceeded")
     if (
         not membership.release_id.strip()

@@ -359,7 +359,7 @@ class LeaderTradabilityFeatureTests(unittest.TestCase):
                     value,
                     lifecycle=replace(
                         value.lifecycle,
-                        published_at=AS_OF + timedelta(seconds=1),
+                        published_at=AS_OF + timedelta(seconds=6),
                     ),
                 ),
                 ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -553,7 +553,7 @@ class LeaderTradabilityFeatureTests(unittest.TestCase):
                     trading_status=replace(
                         value.trading_status,
                         source_time=AS_OF - timedelta(seconds=5),
-                        fetched_at=AS_OF - timedelta(seconds=10),
+                        fetched_at=AS_OF - timedelta(seconds=11),
                     ),
                 ),
                 ResearchFeatureStatus.SOURCE_UNVERIFIED,

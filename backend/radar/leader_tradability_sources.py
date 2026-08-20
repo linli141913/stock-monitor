@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 import math
@@ -706,7 +706,10 @@ def build_leader_tradability_source_input(
             reason="official_reference_stale",
             references=base_reference,
         )
-    if fetched_at < source_time:
+    if (
+        fetched_at + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        < source_time
+    ):
         return _resolution(
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
             reason="official_reference_fetched_before_source",

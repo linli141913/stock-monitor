@@ -244,6 +244,33 @@ class PublicHistoryPocTests(unittest.TestCase):
             result.reasons,
         )
 
+    def test_explicit_production_budget_keeps_full_large_membership(self):
+        members = ("600519",) + tuple(
+            f"{index:06d}" for index in range(1, 81)
+        )
+        values = {
+            symbol: history_series(symbol, (100.0,) * 21)
+            for symbol in members
+        }
+        values["sh000001"] = query().series_by_symbol["sh000001"]
+        large_membership = replace(
+            membership(),
+            member_symbols=members,
+        )
+        value = replace(
+            query(
+                membership_value=large_membership,
+                series_by_symbol=values,
+            ),
+            maximum_member_count=len(members),
+        )
+
+        result = run_public_history_input_poc(value)
+
+        self.assertEqual(result.resolution_status, "ready", result.reasons)
+        self.assertEqual(result.member_count, len(members))
+        self.assertEqual(result.complete_series_count, len(members) + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

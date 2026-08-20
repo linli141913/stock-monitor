@@ -82,6 +82,43 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
         self.assertFalse(result.formal_usable)
         self.assertFalse(result.state_transition_allowed)
 
+    def test_sina_quote_status_crosschecks_lifecycle_and_trading(self):
+        quote = self.quote()
+        official = self.complete_official()
+        aggregator = self.aggregator(
+            source_contract_id="sina-public-quote-status-v1",
+            source_name="新浪财经公开行情",
+            source_url="https://finance.sina.com.cn/realstock/",
+            upstream_source_name="新浪财经A股实时行情",
+            upstream_source_url="https://hq.sinajs.cn/",
+            upstream_document_id="sina-quote-status-20260803T095930",
+            lifecycle_status=SecurityLifecycleStatus.NORMAL,
+            trading_status=TradingSessionStatus.TRADING,
+            special_session=None,
+        )
+
+        report = self.run_poc(
+            quotes=(quote,),
+            official_observations=(official,),
+            aggregator_observations=(aggregator,),
+        )
+
+        self.assertEqual(
+            report.fixture_resolution_status,
+            PublicCompositePocStatus.FIELD_CANDIDATE,
+        )
+        self.assertEqual(report.status, PublicCompositePocStatus.NOT_RUN)
+        self.assertNotIn("public_source_contract_mismatch", report.reasons)
+        self.assertNotIn("public_aggregator_upstream_untrusted", report.reasons)
+        self.assertNotIn(
+            "public_trading_status_crosscheck_missing",
+            report.reasons,
+        )
+        self.assertNotIn(
+            "public_special_session_crosscheck_missing",
+            report.reasons,
+        )
+
     def test_runtime_input_rejects_forged_or_partial_report(self):
         query, quotes, official, aggregator, report = (
             self.field_candidate_payload()
@@ -232,6 +269,23 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
                 content_sha256="sha256:" + "e" * 64,
             ),
         )
+
+    def test_composite_replay_accepts_bounded_production_scope(self):
+        query = self.query()
+        securities = tuple(
+            replace(
+                query.securities[0],
+                symbol=f"{index:06d}",
+                identity_document_id=f"szse-security-{index:06d}",
+            )
+            for index in range(1, 386)
+        )
+
+        reasons = public_poc_module._query_reasons(
+            replace(query, securities=securities)
+        )
+
+        self.assertNotIn("public_query_sample_count_invalid", reasons)
 
     def official(self, **overrides):
         values = {
@@ -488,6 +542,48 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
         ))
         self.assertFalse(report.formal_usable)
 
+    def test_source_clock_skew_within_contract_tolerance_is_accepted(self):
+        fetched_at = datetime(
+            2026, 8, 3, 9, 59, 40, tzinfo=SHANGHAI_TZ
+        )
+        source_time = datetime(
+            2026, 8, 3, 9, 59, 44, tzinfo=SHANGHAI_TZ
+        )
+        report = self.run_poc(
+            quotes=(self.quote(
+                source_time=source_time,
+                fetched_at=fetched_at,
+            ),),
+            official_observations=(self.complete_official(
+                source_time=source_time,
+                fetched_at=fetched_at,
+            ),),
+        )
+
+        self.assertNotIn("public_quote_fetch_before_source", report.reasons)
+        self.assertNotIn("public_source_fetch_before_source", report.reasons)
+
+    def test_source_clock_skew_beyond_contract_tolerance_is_rejected(self):
+        fetched_at = datetime(
+            2026, 8, 3, 9, 59, 40, tzinfo=SHANGHAI_TZ
+        )
+        source_time = datetime(
+            2026, 8, 3, 9, 59, 46, tzinfo=SHANGHAI_TZ
+        )
+        report = self.run_poc(
+            quotes=(self.quote(
+                source_time=source_time,
+                fetched_at=fetched_at,
+            ),),
+            official_observations=(self.complete_official(
+                source_time=source_time,
+                fetched_at=fetched_at,
+            ),),
+        )
+
+        self.assertIn("public_quote_fetch_before_source", report.reasons)
+        self.assertIn("public_source_fetch_before_source", report.reasons)
+
     def test_explicit_suspension_conflict_blocks_record(self):
         report = self.run_poc(
             quotes=(self.quote(
@@ -532,6 +628,74 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
             PublicCompositePocStatus.PARTIAL,
         )
         self.assertIn("public_quote_stale", report.reasons)
+
+    def test_lunch_break_keeps_the_1130_exchange_snapshot_current(self):
+        lunch_time = datetime(
+            2026, 8, 3, 12, 42, tzinfo=SHANGHAI_TZ
+        )
+        boundary = datetime(
+            2026, 8, 3, 11, 30, tzinfo=SHANGHAI_TZ
+        )
+        report = self.run_poc(
+            query=replace(self.query(), as_of=lunch_time),
+            quotes=(self.quote(
+                source_time=boundary,
+                fetched_at=boundary,
+            ),),
+            official_observations=(self.complete_official(
+                source_time=boundary,
+                fetched_at=boundary,
+            ),),
+            aggregator_observations=(self.aggregator(
+                source_time=boundary,
+                fetched_at=boundary,
+                upstream_source_time=boundary,
+                lifecycle_status=SecurityLifecycleStatus.NORMAL,
+                trading_status=TradingSessionStatus.TRADING,
+                special_session=PriceLimitSpecialSession.NONE,
+            ),),
+        )
+
+        self.assertEqual(
+            report.fixture_resolution_status,
+            PublicCompositePocStatus.FIELD_CANDIDATE,
+        )
+        self.assertNotIn("public_quote_stale", report.reasons)
+        self.assertNotIn("public_trading_status_stale", report.reasons)
+
+    def test_1130_snapshot_is_stale_again_after_afternoon_open(self):
+        afternoon = datetime(
+            2026, 8, 3, 13, 2, tzinfo=SHANGHAI_TZ
+        )
+        boundary = datetime(
+            2026, 8, 3, 11, 30, tzinfo=SHANGHAI_TZ
+        )
+        report = self.run_poc(
+            query=replace(self.query(), as_of=afternoon),
+            quotes=(self.quote(
+                source_time=boundary,
+                fetched_at=boundary,
+            ),),
+            official_observations=(self.complete_official(
+                source_time=boundary,
+                fetched_at=boundary,
+            ),),
+            aggregator_observations=(self.aggregator(
+                source_time=boundary,
+                fetched_at=boundary,
+                upstream_source_time=boundary,
+                lifecycle_status=SecurityLifecycleStatus.NORMAL,
+                trading_status=TradingSessionStatus.TRADING,
+                special_session=PriceLimitSpecialSession.NONE,
+            ),),
+        )
+
+        self.assertEqual(
+            report.fixture_resolution_status,
+            PublicCompositePocStatus.PARTIAL,
+        )
+        self.assertIn("public_quote_stale", report.reasons)
+        self.assertIn("public_trading_status_stale", report.reasons)
 
     def test_static_suspension_evidence_does_not_use_90_second_window(self):
         aggregate = self.aggregator(
@@ -999,7 +1163,10 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
 
     def test_special_session_single_source_stays_partial(self):
         report = self.run_poc(
-            quotes=(self.quote(),),
+            quotes=(self.quote(
+                upper_limit_price_source=None,
+                lower_limit_price_source=None,
+            ),),
             official_observations=(self.complete_official(),),
             aggregator_observations=(self.aggregator(
                 lifecycle_status=SecurityLifecycleStatus.NORMAL,
@@ -1021,6 +1188,35 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
             if item.field_name == "special_session"
         )
         self.assertEqual(special_evidence.resolution, "single_source")
+
+    def test_bounded_quote_crosschecks_no_special_session(self):
+        report = self.run_poc(
+            quotes=(self.quote(),),
+            official_observations=(self.complete_official(),),
+            aggregator_observations=(self.aggregator(
+                lifecycle_status=SecurityLifecycleStatus.NORMAL,
+                trading_status=TradingSessionStatus.TRADING,
+            ),),
+        )
+
+        self.assertEqual(
+            report.fixture_resolution_status,
+            PublicCompositePocStatus.FIELD_CANDIDATE,
+        )
+        self.assertNotIn(
+            "public_special_session_crosscheck_missing",
+            report.reasons,
+        )
+        special_evidence = next(
+            item
+            for item in report.records[0].field_evidence
+            if item.field_name == "special_session"
+        )
+        self.assertEqual(special_evidence.resolution, "consistent")
+        self.assertEqual(
+            {item.source_kind for item in special_evidence.sources},
+            {"exchange_official", "tencent_quote"},
+        )
 
     def test_aggregator_cannot_replace_missing_official_primary_fields(self):
         report = self.run_poc(

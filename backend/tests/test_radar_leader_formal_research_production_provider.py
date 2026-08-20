@@ -101,6 +101,34 @@ class LeaderFormalResearchProductionProviderTests(unittest.TestCase):
         self.assertNotIn("real-history-payload", evidence)
         self.assertNotIn(self.plan.items[0].symbol, evidence)
 
+    def test_one_second_source_server_clock_lead_is_accepted(self):
+        proof = replace(
+            self.proof(),
+            source_time=self.plan.as_of,
+            fetched_at=self.plan.as_of - timedelta(seconds=1),
+        )
+
+        result = self.resolve(self.delivery(proof=proof))
+
+        self.assertEqual(
+            result.status,
+            LeaderFormalResearchProductionDeliveryResolutionStatus.READY,
+        )
+
+    def test_six_second_source_server_clock_lead_is_rejected(self):
+        proof = replace(
+            self.proof(),
+            source_time=self.plan.as_of,
+            fetched_at=self.plan.as_of - timedelta(seconds=6),
+        )
+
+        result = self.resolve(self.delivery(proof=proof))
+
+        self.assertEqual(
+            result.status,
+            LeaderFormalResearchProductionDeliveryResolutionStatus.SOURCE_UNVERIFIED,
+        )
+
     def test_cross_plan_or_quote_batch_is_source_unverified(self):
         cases = (
             replace(self.proof(), candidate_plan_id="other-plan"),

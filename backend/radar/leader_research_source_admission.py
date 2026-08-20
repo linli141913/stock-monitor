@@ -432,10 +432,24 @@ def _admit_history(
     for plan_item, entry in zip(plan.items, value):
         query = entry.query
         membership = getattr(query, "membership", None)
-        expected_members = (
+        all_expected_members = (
             context.industry_constituent_symbols_by_code.get(
                 plan_item.industry_code
             )
+        )
+        expected_members = (
+            tuple(
+                symbol
+                for symbol in all_expected_members
+                if re.fullmatch(r"[036][0-9]{5}", symbol) is not None
+            )
+            if isinstance(all_expected_members, tuple)
+            else None
+        )
+        expected_excluded_count = (
+            len(all_expected_members) - len(expected_members)
+            if expected_members is not None
+            else None
         )
         if (
             entry.candidate_plan_id != plan.candidate_set_id
@@ -450,6 +464,8 @@ def _admit_history(
             or membership.release_id != plan_item.industry_release_id
             or expected_members is None
             or membership.member_symbols != expected_members
+            or membership.excluded_out_of_scope_count
+            != expected_excluded_count
         ):
             return None, _component(
                 "history",

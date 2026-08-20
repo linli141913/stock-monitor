@@ -1,4 +1,5 @@
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 from typing import Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -377,6 +378,148 @@ def fetch_tencent_quotes(
         asOf=as_of,
         sourceTime=max(source_times) if source_times else None,
         fetchedAt=last_fetched_at,
+        expectedCount=expected_count,
+        returnedCount=len(items),
+        rowCoverage=row_coverage,
+        requiredFieldCoverage=_field_coverage(items),
+        issues=issues,
+    )
+    return SourceBatch[QuoteSnapshot](meta=meta, items=items)
+
+
+def fetch_tencent_quotes_concurrent(
+    symbols: Iterable[str],
+    radar_run_id: str,
+    batch_id: str,
+    as_of: datetime,
+    chunk_size: int = 100,
+    max_workers: int = 8,
+    timeout_seconds: float = 5.0,
+    clock: Callable[[], datetime] = _now,
+) -> SourceBatch[QuoteSnapshot]:
+    """并行采集腾讯行情，保留每个子批次的真实来源时间。
+
+    该入口只缩短网络采集窗口，不改写子批次返回的 sourceTime/fetchedAt。
+    聚合批次仍使用调用方冻结的 as_of，来源健康门禁会据此拒绝未来或过期数据。
+    """
+    if not 1 <= chunk_size <= 100:
+        raise ValueError("chunk_size必须在1到100之间")
+    if not 1 <= max_workers <= 32:
+        raise ValueError("max_workers必须在1到32之间")
+    if not 0 < timeout_seconds <= 30:
+        raise ValueError("timeout_seconds必须在0到30秒之间")
+
+    valid_symbols = []
+    invalid_symbols = []
+    for value in symbols:
+        normalized = asset_context.normalize_symbol(value)
+        if normalized.isdigit() and len(normalized) == 6:
+            if normalized not in valid_symbols:
+                valid_symbols.append(normalized)
+        else:
+            invalid_symbols.append(str(value))
+
+    issues = []
+    if invalid_symbols:
+        issues.append(SourceIssue(
+            code="invalid_symbols",
+            source="tencent_finance",
+            message=f"忽略{len(invalid_symbols)}个无效或非A股/ETF代码",
+            symbols=invalid_symbols,
+        ))
+
+    chunks = [
+        valid_symbols[start:start + chunk_size]
+        for start in range(0, len(valid_symbols), chunk_size)
+    ]
+    child_batches = {}
+    if chunks:
+        with ThreadPoolExecutor(
+            max_workers=min(max_workers, len(chunks)),
+            thread_name_prefix="tencent-quotes",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    fetch_tencent_quotes,
+                    chunk,
+                    radar_run_id=radar_run_id,
+                    batch_id=f"{batch_id}-{index}",
+                    as_of=as_of,
+                    batch_size=len(chunk),
+                    timeout_seconds=timeout_seconds,
+                ): (index, chunk)
+                for index, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                index, chunk = futures[future]
+                try:
+                    child_batches[index] = future.result()
+                except Exception as exc:
+                    issues.append(SourceIssue(
+                        code="parallel_batch_failed",
+                        source="tencent_finance",
+                        batchIndex=index,
+                        message=(
+                            "腾讯并行行情子批次失败："
+                            f"{type(exc).__name__}"
+                        ),
+                        symbols=chunk,
+                    ))
+
+    items_by_symbol = {}
+    fetched_at = clock()
+    for index in range(len(chunks)):
+        child_batch = child_batches.get(index)
+        if child_batch is None:
+            continue
+        fetched_at = max(fetched_at, child_batch.meta.fetched_at)
+        for issue in child_batch.meta.issues:
+            child_batch_index = issue.batch_index
+            absolute_batch_index = (
+                index
+                if child_batch_index is None
+                else index + child_batch_index
+            )
+            issues.append(issue.model_copy(
+                update={"batch_index": absolute_batch_index},
+            ))
+        for item in child_batch.items:
+            if item.symbol in items_by_symbol:
+                issues.append(SourceIssue(
+                    code="duplicate_quote",
+                    source="tencent_finance",
+                    message=f"腾讯行情重复返回{item.symbol}",
+                    symbols=[item.symbol],
+                ))
+                continue
+            items_by_symbol[item.symbol] = item
+
+    items = [
+        items_by_symbol[symbol]
+        for symbol in valid_symbols
+        if symbol in items_by_symbol
+    ]
+    missing_symbols = [
+        symbol for symbol in valid_symbols if symbol not in items_by_symbol
+    ]
+    if missing_symbols:
+        issues.append(SourceIssue(
+            code="missing_symbols",
+            source="tencent_finance",
+            message=f"腾讯行情未返回{len(missing_symbols)}只证券",
+            symbols=missing_symbols,
+        ))
+
+    source_times = [item.source_time for item in items if item.source_time]
+    expected_count = len(valid_symbols)
+    row_coverage = len(items) / expected_count if expected_count else 0.0
+    meta = RadarBatchMeta(
+        radarRunId=radar_run_id,
+        batchId=batch_id,
+        source="tencent_finance",
+        asOf=as_of,
+        sourceTime=max(source_times) if source_times else None,
+        fetchedAt=fetched_at,
         expectedCount=expected_count,
         returnedCount=len(items),
         rowCoverage=row_coverage,

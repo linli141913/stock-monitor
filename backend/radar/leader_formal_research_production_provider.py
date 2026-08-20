@@ -261,7 +261,9 @@ def resolve_leader_formal_research_production_delivery(
             or fetched_at is None
             or source_time
             > context.as_of + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
-            or fetched_at < source_time
+            or fetched_at + timedelta(
+                seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            ) < source_time
         ):
             reasons.append(DELIVERY_TIME_UNVERIFIED)
         if value.payload is None:
@@ -314,6 +316,7 @@ class LeaderFormalResearchProductionCollectedSource:
     fetched_at: Optional[datetime]
     symbols: Tuple[str, ...]
     payload: Any = field(repr=False)
+    reasons: Tuple[str, ...] = ()
     contract_id: str = (
         LEADER_FORMAL_RESEARCH_PRODUCTION_COLLECTED_SOURCE_CONTRACT_ID
     )
@@ -335,6 +338,7 @@ class LeaderFormalResearchProductionCollectedSource:
                 else None
             ),
             "returnedCount": len(self.symbols),
+            "reasons": list(self.reasons),
         }
 
 

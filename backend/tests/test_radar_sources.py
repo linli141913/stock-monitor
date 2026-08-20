@@ -1,17 +1,27 @@
 import unittest
 from datetime import date, datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from radar.contracts import QuoteTradingStatus, UnitVerificationStatus
+from radar.contracts import (
+    QuoteSnapshot,
+    QuoteTradingStatus,
+    RadarBatchMeta,
+    SourceBatch,
+    UnitVerificationStatus,
+)
 from radar.sources.etf_registry import EtfRegistryProviders, fetch_etf_registry
 from radar.sources.security_master import (
     SecurityMasterProviders,
     fetch_security_master,
 )
-from radar.sources.tencent_quotes import fetch_tencent_quotes
+from radar.sources import tencent_quotes as tencent_quotes_module
+from radar.sources.tencent_quotes import (
+    fetch_tencent_quotes,
+    fetch_tencent_quotes_concurrent,
+)
 
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
@@ -368,6 +378,113 @@ class TencentQuoteSourceTests(unittest.TestCase):
         )
         self.assertEqual(first.missing_fields(), ())
         self.assertFalse(session.trust_env)
+
+    def test_concurrent_quotes_keep_original_source_times(self):
+        calls = []
+
+        def fake_fetch(symbols, **kwargs):
+            calls.append((tuple(symbols), kwargs["as_of"]))
+            index = len(calls)
+            source_time = AS_OF.replace(second=AS_OF.second + index)
+            fetched_at = FETCHED_AT.replace(second=FETCHED_AT.second + index)
+            items = [QuoteSnapshot(
+                symbol=symbol,
+                name=f"证券{symbol}",
+                sourceTime=source_time,
+                fetchedAt=fetched_at,
+                price=10.0,
+                changePercent=1.0,
+            ) for symbol in symbols]
+            return SourceBatch[QuoteSnapshot](
+                meta=RadarBatchMeta(
+                    radarRunId=kwargs["radar_run_id"],
+                    batchId=kwargs["batch_id"],
+                    source="tencent_finance",
+                    asOf=kwargs["as_of"],
+                    sourceTime=source_time,
+                    fetchedAt=fetched_at,
+                    expectedCount=len(items),
+                    returnedCount=len(items),
+                    rowCoverage=1.0,
+                ),
+                items=items,
+            )
+
+        with patch.object(
+            tencent_quotes_module,
+            "fetch_tencent_quotes",
+            side_effect=fake_fetch,
+        ):
+            batch = fetch_tencent_quotes_concurrent(
+                ["000001", "000002", "000003"],
+                radar_run_id="run-1",
+                batch_id="quote-1",
+                as_of=AS_OF,
+                chunk_size=2,
+                max_workers=2,
+                clock=lambda: FETCHED_AT,
+            )
+
+        self.assertEqual(batch.meta.as_of, AS_OF)
+        self.assertEqual(
+            batch.meta.source_time,
+            AS_OF.replace(second=AS_OF.second + 2),
+        )
+        self.assertEqual(
+            batch.meta.fetched_at,
+            FETCHED_AT.replace(second=FETCHED_AT.second + 2),
+        )
+        self.assertEqual(batch.meta.returned_count, 3)
+        self.assertEqual(batch.meta.row_coverage, 1.0)
+        self.assertEqual({as_of for _symbols, as_of in calls}, {AS_OF})
+
+    def test_concurrent_quotes_fail_closed_when_child_batch_raises(self):
+        def fake_fetch(symbols, **_kwargs):
+            if "000003" in symbols:
+                raise TimeoutError("request timed out")
+            items = [QuoteSnapshot(
+                symbol=symbol,
+                name=f"证券{symbol}",
+                sourceTime=AS_OF,
+                fetchedAt=FETCHED_AT,
+                price=10.0,
+                changePercent=1.0,
+            ) for symbol in symbols]
+            return SourceBatch[QuoteSnapshot](
+                meta=RadarBatchMeta(
+                    radarRunId="run-1",
+                    batchId="quote-child",
+                    source="tencent_finance",
+                    asOf=AS_OF,
+                    sourceTime=AS_OF,
+                    fetchedAt=FETCHED_AT,
+                    expectedCount=len(items),
+                    returnedCount=len(items),
+                    rowCoverage=1.0,
+                ),
+                items=items,
+            )
+
+        with patch.object(
+            tencent_quotes_module,
+            "fetch_tencent_quotes",
+            side_effect=fake_fetch,
+        ):
+            batch = fetch_tencent_quotes_concurrent(
+                ["000001", "000002", "000003", "000004"],
+                radar_run_id="run-1",
+                batch_id="quote-1",
+                as_of=AS_OF,
+                chunk_size=2,
+                max_workers=2,
+                clock=lambda: FETCHED_AT,
+            )
+
+        issue_codes = {issue.code for issue in batch.meta.issues}
+        self.assertIn("parallel_batch_failed", issue_codes)
+        self.assertIn("missing_symbols", issue_codes)
+        self.assertEqual(batch.meta.expected_count, 4)
+        self.assertEqual(batch.meta.returned_count, 2)
 
     def test_turnover_amount_unit_is_verified_by_same_response_amount(self):
         session = FakeSession(lambda _url, _call: tencent_line(

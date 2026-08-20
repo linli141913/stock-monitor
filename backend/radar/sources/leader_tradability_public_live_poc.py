@@ -33,6 +33,9 @@ from radar.sources.leader_tradability_public_poc import (
     quote_batch_content_sha256,
     run_public_composite_tradability_poc,
 )
+from radar.sources.leader_tradability_exchange_official import (
+    collect_exchange_official_observations,
+)
 from radar.sources.security_master import (
     SecurityMasterProviders,
     fetch_security_master,
@@ -60,9 +63,29 @@ EASTMONEY_ST_API_URL = (
 )
 EASTMONEY_SUSPENSION_URL = "https://data.eastmoney.com/tfpxx/"
 TENCENT_SOURCE_URL = "https://qt.gtimg.cn/"
+SINA_A_SHARE_QUOTE_URL = "https://hq.sinajs.cn/"
+SINA_A_SHARE_PAGE_URL = "https://finance.sina.com.cn/realstock/"
 MAXIMUM_SAMPLE_COUNT = 8
 MAXIMUM_COLLECTION_SECONDS = 40
+PUBLIC_CALENDAR_REQUEST_ATTEMPTS = 2
+SINA_LIFECYCLE_BATCH_SIZE = 100
+SINA_LIFECYCLE_REQUEST_ATTEMPTS = 2
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+SINA_TRADING_STATUS_BY_CODE = {
+    "00": TradingSessionStatus.TRADING,
+    "01": TradingSessionStatus.SUSPENDED,
+    "02": TradingSessionStatus.SUSPENDED,
+    "03": TradingSessionStatus.SUSPENDED,
+    "04": TradingSessionStatus.SUSPENDED,
+    "05": TradingSessionStatus.SUSPENDED,
+    "07": TradingSessionStatus.ABNORMAL,
+    "-2": TradingSessionStatus.ABNORMAL,
+    "-3": TradingSessionStatus.ABNORMAL,
+}
+SINA_LIFECYCLE_STATUS_BY_CODE = {
+    "-2": SecurityLifecycleStatus.ABNORMAL,
+    "-3": SecurityLifecycleStatus.DELISTING,
+}
 
 
 class PublicLivePocSourceError(RuntimeError):
@@ -359,8 +382,25 @@ def build_public_security_contexts(
 
 def build_public_quote_evidence(
     batch: SourceBatch,
+    *,
+    symbols: Optional[Tuple[str, ...]] = None,
 ) -> Tuple[Tuple[QuoteSnapshot, ...], PublicQuoteBatchEvidence]:
     quotes = tuple(batch.items)
+    if symbols is not None:
+        if (
+            not isinstance(symbols, tuple)
+            or not symbols
+            or len(symbols) != len(set(symbols))
+        ):
+            raise PublicLivePocSourceError(
+                "public_live_quote_scope_invalid"
+            )
+        quotes_by_symbol = {item.symbol: item for item in quotes}
+        if any(symbol not in quotes_by_symbol for symbol in symbols):
+            raise PublicLivePocSourceError(
+                "public_live_quote_batch_incomplete"
+            )
+        quotes = tuple(quotes_by_symbol[symbol] for symbol in symbols)
     batch_id = str(batch.meta.batch_id or "").strip()
     if not batch_id:
         raise PublicLivePocSourceError(
@@ -406,6 +446,7 @@ def _fetch_eastmoney_st_frame(
     session: Optional[requests.Session] = None,
 ) -> pd.DataFrame:
     active_session = session or requests.Session()
+    active_session.trust_env = False
     base_params = {
         "pz": "100",
         "po": "1",
@@ -493,6 +534,124 @@ def _fetch_eastmoney_st_frame(
     )
 
 
+def _fetch_sina_lifecycle_frame(
+    *,
+    contexts: Tuple[PublicSecurityContext, ...],
+    session: Optional[requests.Session] = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(SHANGHAI_TZ),
+) -> pd.DataFrame:
+    if not contexts:
+        return pd.DataFrame(
+            columns=(
+                "代码", "名称", "上游时间", "抓取时间", "状态代码"
+            )
+        )
+    expected = []
+    for context in contexts:
+        symbol = str(context.symbol or "").strip()
+        exchange = str(context.exchange or "").strip().lower()
+        if (
+            STAGE6_SHENZHEN_SHANGHAI_SYMBOL_PATTERN.fullmatch(symbol)
+            is None
+            or exchange not in {"sse", "szse"}
+        ):
+            raise PublicLivePocSourceError(
+                "public_live_sina_lifecycle_scope_invalid"
+            )
+        expected.append((symbol, "sh" if exchange == "sse" else "sz"))
+    if len(expected) != len(set(expected)):
+        raise PublicLivePocSourceError(
+            "public_live_sina_lifecycle_scope_invalid"
+        )
+
+    active_session = session or requests.Session()
+    active_session.trust_env = False
+    rows = {}
+    for offset in range(0, len(expected), SINA_LIFECYCLE_BATCH_SIZE):
+        batch = expected[offset:offset + SINA_LIFECYCLE_BATCH_SIZE]
+        query_codes = tuple(f"{prefix}{symbol}" for symbol, prefix in batch)
+        batch_rows = None
+        last_error = None
+        for _ in range(SINA_LIFECYCLE_REQUEST_ATTEMPTS):
+            try:
+                response = active_session.get(
+                    SINA_A_SHARE_QUOTE_URL,
+                    params=f"list={','.join(query_codes)}",
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://finance.sina.com.cn/",
+                    },
+                    timeout=5,
+                )
+                response.raise_for_status()
+                response.encoding = "gbk"
+                fetched_at = clock()
+                if not _aware(fetched_at):
+                    raise ValueError("sina_fetch_time_invalid")
+                parsed = {}
+                for prefix, symbol, payload in re.findall(
+                    r'hq_str_(sh|sz)(\d{6})="([^"]*)"',
+                    str(response.text or ""),
+                ):
+                    query_code = f"{prefix}{symbol}"
+                    if query_code not in query_codes or query_code in parsed:
+                        raise ValueError("sina_response_scope_invalid")
+                    values = payload.split(",")
+                    name = str(values[0] if values else "").strip()
+                    if len(values) < 33 or not name:
+                        raise ValueError("sina_response_row_invalid")
+                    status_code = str(values[32] or "").strip()
+                    if status_code not in SINA_TRADING_STATUS_BY_CODE:
+                        raise ValueError("sina_response_status_invalid")
+                    source_time = datetime.strptime(
+                        f"{values[30]} {values[31]}",
+                        "%Y-%m-%d %H:%M:%S",
+                    ).replace(tzinfo=SHANGHAI_TZ)
+                    if source_time > fetched_at + timedelta(seconds=5):
+                        raise ValueError("sina_response_time_invalid")
+                    parsed[query_code] = {
+                        "代码": symbol,
+                        "名称": name,
+                        "上游时间": source_time,
+                        "抓取时间": fetched_at,
+                        "状态代码": status_code,
+                    }
+                if set(parsed) != set(query_codes):
+                    raise ValueError("sina_response_incomplete")
+                batch_rows = parsed
+                break
+            except ValueError as exc:
+                last_error = exc
+            except Exception as exc:
+                last_error = exc
+        if batch_rows is None:
+            reason = (
+                "public_live_sina_lifecycle_incomplete"
+                if isinstance(last_error, ValueError)
+                else "public_live_sina_lifecycle_request_failed"
+            )
+            raise PublicLivePocSourceError(
+                reason,
+                private_detail=(
+                    type(last_error).__name__
+                    if last_error is not None
+                    else "UnknownError"
+                ),
+            ) from last_error
+        rows.update(batch_rows)
+
+    ordered = [
+        rows[f"{prefix}{symbol}"]
+        for symbol, prefix in expected
+    ]
+    return pd.DataFrame(
+        ordered,
+        columns=(
+            "代码", "名称", "上游时间", "抓取时间", "状态代码"
+        ),
+    )
+
+
 def build_public_aggregator_observations(
     *,
     contexts: Tuple[PublicSecurityContext, ...],
@@ -500,6 +659,7 @@ def build_public_aggregator_observations(
     fetched_at: datetime,
     st_frame: Optional[pd.DataFrame],
     suspension_frame: Optional[pd.DataFrame],
+    lifecycle_frame: Optional[pd.DataFrame] = None,
     source_time: Optional[datetime] = None,
     upstream_source_time: Optional[datetime] = None,
 ) -> Tuple[PublicTradabilityObservation, ...]:
@@ -515,22 +675,30 @@ def build_public_aggregator_observations(
         or upstream_source_time > source_time
     ):
         return ()
+    expected_symbols = {item.symbol for item in contexts}
     st_rows = {}
     if st_frame is not None:
         for _, row in st_frame.iterrows():
             symbol = str(row.get("代码") or "").strip().zfill(6)
-            if symbol in {item.symbol for item in contexts}:
+            if symbol in expected_symbols:
                 st_rows[symbol] = row
+    lifecycle_rows = {}
+    if lifecycle_frame is not None:
+        for _, row in lifecycle_frame.iterrows():
+            symbol = str(row.get("代码") or "").strip().zfill(6)
+            if symbol in expected_symbols:
+                lifecycle_rows[symbol] = row
     suspension_rows = {}
     if suspension_frame is not None:
         for _, row in suspension_frame.iterrows():
             symbol = str(row.get("代码") or "").strip().zfill(6)
-            if symbol in {item.symbol for item in contexts}:
+            if symbol in expected_symbols:
                 suspension_rows[symbol] = row
 
     observations = []
     for context in contexts:
         suspension = suspension_rows.get(context.symbol)
+        lifecycle_row = lifecycle_rows.get(context.symbol)
         st = st_rows.get(context.symbol)
         if suspension is not None:
             if (
@@ -583,6 +751,69 @@ def build_public_aggregator_observations(
                     trading_status=TradingSessionStatus.SUSPENDED,
                 ))
                 continue
+        if lifecycle_row is not None:
+            lifecycle_source_time = lifecycle_row.get("上游时间")
+            lifecycle_fetched_at = lifecycle_row.get("抓取时间")
+            if (
+                not _aware(lifecycle_source_time)
+                or not _aware(lifecycle_fetched_at)
+                or lifecycle_source_time
+                > lifecycle_fetched_at + timedelta(seconds=5)
+                or lifecycle_fetched_at
+                > fetched_at + timedelta(seconds=5)
+            ):
+                continue
+            name = re.sub(
+                r"\s+", "", str(lifecycle_row.get("名称") or "").upper()
+            )
+            status_code = str(
+                lifecycle_row.get("状态代码") or ""
+            ).strip()
+            trading_status = SINA_TRADING_STATUS_BY_CODE.get(
+                status_code
+            )
+            if not name or trading_status is None:
+                continue
+            lifecycle_status = SINA_LIFECYCLE_STATUS_BY_CODE.get(
+                status_code
+            )
+            if lifecycle_status is None:
+                if "退" in name:
+                    continue
+                lifecycle_status = SecurityLifecycleStatus.NORMAL
+                if name.startswith("*ST"):
+                    lifecycle_status = SecurityLifecycleStatus.STAR_ST
+                elif name.startswith("ST"):
+                    lifecycle_status = SecurityLifecycleStatus.ST
+            document_id = (
+                "sina-quote-status-"
+                f"{lifecycle_source_time:%Y%m%dT%H%M%S}"
+            )
+            observations.append(PublicTradabilityObservation(
+                symbol=context.symbol,
+                exchange=context.exchange,
+                board=context.board,
+                trading_date=trading_date,
+                source_kind=PublicSourceKind.PUBLIC_AGGREGATOR,
+                source_contract_id="sina-public-quote-status-v1",
+                source_name="新浪财经公开行情",
+                source_url=SINA_A_SHARE_PAGE_URL,
+                document_id=document_id,
+                source_time=lifecycle_source_time,
+                fetched_at=lifecycle_fetched_at,
+                content_sha256=_canonical_sha256(
+                    _row_values(lifecycle_row)
+                ),
+                effective_from=trading_date,
+                effective_until=trading_date,
+                upstream_source_name="新浪财经A股实时行情",
+                upstream_source_url=SINA_A_SHARE_QUOTE_URL,
+                upstream_document_id=document_id,
+                upstream_source_time=lifecycle_source_time,
+                lifecycle_status=lifecycle_status,
+                trading_status=trading_status,
+            ))
+            continue
         if st is not None:
             row_time = st.get("上游时间")
             st_source_time = (
@@ -641,54 +872,71 @@ def _fetch_calendar_document(
 ) -> PublicCalendarDocument:
     active_session = session or requests.Session()
     active_session.trust_env = False
-    try:
-        response = active_session.get(
-            SSE_CALENDAR_URL,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=5,
-        )
-        response.raise_for_status()
-    except Exception as exc:
-        raise PublicLivePocSourceError(
-            "public_live_calendar_request_failed",
-            private_detail=type(exc).__name__,
-        ) from exc
-    fetched_at = datetime.now(SHANGHAI_TZ)
-    encoding = response.apparent_encoding or response.encoding or "utf-8"
-    text = response.content.decode(encoding, errors="replace")
-    source_time = None
-    last_modified = response.headers.get("Last-Modified")
-    if last_modified:
+    last_error = None
+    last_document = None
+    for _attempt in range(PUBLIC_CALENDAR_REQUEST_ATTEMPTS):
         try:
-            parsed = parsedate_to_datetime(last_modified)
-            if parsed.tzinfo is not None:
-                parsed_source_time = parsed.astimezone(SHANGHAI_TZ)
-                if parsed_source_time <= fetched_at:
-                    source_time = parsed_source_time
-        except (TypeError, ValueError, OverflowError):
-            pass
-    if source_time is None:
-        annual_notice = re.search(
-            rf'title="[^"]*{as_of.year}年部分节假日休市安排[^"]*"'
-            r"[^>]*>.*?</a>\s*<span>\s*"
-            r"(\d{4}-\d{2}-\d{2})\s*</span>",
-            text,
-            flags=re.DOTALL,
+            response = active_session.get(
+                SSE_CALENDAR_URL,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=5,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        fetched_at = datetime.now(SHANGHAI_TZ)
+        encoding = (
+            response.apparent_encoding
+            or response.encoding
+            or "utf-8"
         )
-        if annual_notice is not None:
+        text = response.content.decode(encoding, errors="replace")
+        source_time = None
+        last_modified = response.headers.get("Last-Modified")
+        if last_modified:
             try:
-                source_time = datetime.fromisoformat(
-                    annual_notice.group(1)
-                ).replace(tzinfo=SHANGHAI_TZ)
-            except ValueError:
-                source_time = None
-    return PublicCalendarDocument(
-        source_url=SSE_CALENDAR_URL,
-        document_id=f"sse-a-share-calendar-{as_of.year}",
-        text=text,
-        source_time=source_time,
-        fetched_at=fetched_at,
-    )
+                parsed = parsedate_to_datetime(last_modified)
+                if parsed.tzinfo is not None:
+                    parsed_source_time = parsed.astimezone(SHANGHAI_TZ)
+                    if parsed_source_time <= fetched_at:
+                        source_time = parsed_source_time
+            except (TypeError, ValueError, OverflowError):
+                pass
+        if source_time is None:
+            annual_notice = re.search(
+                rf'title="[^"]*{as_of.year}年部分节假日休市安排[^"]*"'
+                r"[^>]*>.*?</a>\s*<span>\s*"
+                r"(\d{4}-\d{2}-\d{2})\s*</span>",
+                text,
+                flags=re.DOTALL,
+            )
+            if annual_notice is not None:
+                try:
+                    source_time = datetime.fromisoformat(
+                        annual_notice.group(1)
+                    ).replace(tzinfo=SHANGHAI_TZ)
+                except ValueError:
+                    source_time = None
+        last_document = PublicCalendarDocument(
+            source_url=SSE_CALENDAR_URL,
+            document_id=f"sse-a-share-calendar-{as_of.year}",
+            text=text,
+            source_time=source_time,
+            fetched_at=fetched_at,
+        )
+        if source_time is not None:
+            return last_document
+
+    if last_document is not None:
+        return last_document
+    raise PublicLivePocSourceError(
+        "public_live_calendar_request_failed",
+        private_detail=(
+            type(last_error).__name__ if last_error else "UnknownError"
+        ),
+    ) from last_error
 
 
 def collect_default_public_live_sources(
@@ -711,6 +959,10 @@ def collect_default_public_live_sources(
     contexts = build_public_security_contexts(
         batch=master_batch,
         symbols=symbols,
+    )
+    official_batch = collect_exchange_official_observations(
+        contexts=contexts,
+        trading_date=as_of.astimezone(SHANGHAI_TZ).date(),
     )
     document = _fetch_calendar_document(as_of=as_of)
     calendars = build_public_calendar_evidence(
@@ -737,8 +989,19 @@ def collect_default_public_live_sources(
         f"tencent_quote:{issue.code}"
         for issue in quote_batch.meta.issues
     )
+    failures.extend(
+        f"official_tradability:{reason}"
+        for reason in official_batch.reasons
+    )
     st_frame = None
     suspension_frame = None
+    lifecycle_frame = None
+    try:
+        lifecycle_frame = _fetch_sina_lifecycle_frame(
+            contexts=contexts
+        )
+    except PublicLivePocSourceError as exc:
+        failures.append(f"public_aggregator:{exc.reason_code}")
     try:
         st_frame = _fetch_eastmoney_st_frame()
     except Exception:
@@ -755,6 +1018,7 @@ def collect_default_public_live_sources(
         fetched_at=datetime.now(SHANGHAI_TZ),
         st_frame=st_frame,
         suspension_frame=suspension_frame,
+        lifecycle_frame=lifecycle_frame,
     )
     if suspension_frame is not None:
         failures.append(
@@ -762,7 +1026,11 @@ def collect_default_public_live_sources(
         )
     aggregator_status = (
         "degraded"
-        if st_frame is not None or suspension_frame is not None
+        if (
+            lifecycle_frame is not None
+            or st_frame is not None
+            or suspension_frame is not None
+        )
         else "failed"
     )
     query_as_of = datetime.now(SHANGHAI_TZ)
@@ -775,7 +1043,11 @@ def collect_default_public_live_sources(
             quote_batch_evidence=quote_evidence,
         ),
         quotes=quotes,
-        official_observations=(),
+        official_observations=(
+            official_batch.observations
+            if official_batch.status == "completed"
+            else ()
+        ),
         aggregator_observations=aggregator_observations,
         requested_symbols=symbols,
         source_statuses={
@@ -788,8 +1060,11 @@ def collect_default_public_live_sources(
             "tencentQuote": (
                 "degraded" if quote_batch.meta.issues else "completed"
             ),
-            "officialTradability": "not_available",
+            "officialTradability": official_batch.status,
             "publicAggregator": aggregator_status,
+            "sinaLifecycle": (
+                "completed" if lifecycle_frame is not None else "failed"
+            ),
         },
         source_failures=tuple(dict.fromkeys(failures)),
     )

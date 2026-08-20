@@ -313,6 +313,28 @@ class TradabilitySourceAssemblyTests(unittest.TestCase):
         self.assertFalse(feature.to_evidence()["scoreReady"])
         self.assertFalse(feature.to_evidence()["formalUsable"])
 
+    def test_official_clock_skew_within_five_seconds_builds_input(self):
+        result = self.build_resolution(
+            official_reference=official_reference(
+                source_time=AS_OF + timedelta(seconds=1),
+                fetched_at=AS_OF,
+            ),
+        )
+
+        self.assertEqual(result.status, ResearchFeatureStatus.READY)
+        self.assertIsNotNone(result.feature_input)
+
+    def test_quote_clock_skew_within_five_seconds_builds_input(self):
+        result = self.build_resolution(
+            quote=quote(
+                sourceTime=AS_OF + timedelta(seconds=1),
+                fetchedAt=AS_OF,
+            ),
+        )
+
+        self.assertEqual(result.status, ResearchFeatureStatus.READY)
+        self.assertIsNotNone(result.feature_input)
+
     def test_non_primary_source_grade_cannot_build_input(self):
         result = self.build_resolution(
             official_reference=official_reference(

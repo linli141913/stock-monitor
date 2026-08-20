@@ -21,11 +21,13 @@ from radar.sources.leader_tradability_public_live_poc import (
     PublicLivePocSourceError,
     build_public_aggregator_observations,
     build_public_calendar_evidence,
+    build_public_quote_evidence,
     build_public_security_contexts,
     run_public_live_poc,
     validate_public_live_symbols,
     _fetch_calendar_document,
     _fetch_eastmoney_st_frame,
+    _fetch_sina_lifecycle_frame,
 )
 from radar.sources.leader_tradability_public_poc import (
     PublicCompositePocStatus,
@@ -141,6 +143,47 @@ def bundle(source_statuses=None):
 
 
 class PublicLivePocTests(unittest.TestCase):
+    def test_quote_evidence_can_select_the_candidate_subset(self):
+        quotes = [
+            quote(),
+            QuoteSnapshot(
+                symbol="600000",
+                name="浦发银行",
+                sourceTime=AS_OF,
+                fetchedAt=AS_OF,
+                source="tencent_finance",
+                price=8.5,
+            ),
+        ]
+        batch = SourceBatch(
+            meta=RadarBatchMeta(
+                radarRunId="run-1",
+                batchId="quote-1",
+                source="tencent_finance",
+                asOf=AS_OF,
+                sourceTime=AS_OF,
+                fetchedAt=AS_OF,
+                expectedCount=2,
+                returnedCount=2,
+                rowCoverage=1.0,
+            ),
+            items=quotes,
+        )
+
+        selected, evidence = build_public_quote_evidence(
+            batch,
+            symbols=(SYMBOL,),
+        )
+
+        self.assertEqual(tuple(item.symbol for item in selected), (SYMBOL,))
+        self.assertEqual(
+            evidence.content_sha256,
+            quote_batch_content_sha256(
+                batch_id="quote-1",
+                quotes=selected,
+            ),
+        )
+
     def test_invalid_query_never_calls_collector(self):
         calls = []
 
@@ -426,6 +469,51 @@ class PublicLivePocTests(unittest.TestCase):
             datetime(2025, 12, 22, tzinfo=SHANGHAI_TZ),
         )
 
+    def test_calendar_retries_once_when_first_page_lacks_source_time(self):
+        incomplete = b"<strong>2026\xe5\xb9\xb4\xe4\xbc\x91\xe5\xb8\x82\xe5\xae\x89\xe6\x8e\x92</strong>"
+        complete = """
+            <a title="关于上海证券交易所2026年部分节假日休市安排的通知">
+                关于上海证券交易所2026年部分节假日休市安排的通知
+            </a>
+            <span>2025-12-22</span>
+        """.encode("utf-8")
+
+        class Response:
+            apparent_encoding = "utf-8"
+            encoding = "utf-8"
+            headers = {}
+
+            def __init__(self, content):
+                self.content = content
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+        class Session:
+            trust_env = True
+
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, *args, **kwargs):
+                self.calls += 1
+                return Response(
+                    incomplete if self.calls == 1 else complete
+                )
+
+        session = Session()
+        document = _fetch_calendar_document(
+            as_of=AS_OF,
+            session=session,
+        )
+
+        self.assertEqual(session.calls, 2)
+        self.assertEqual(
+            document.source_time,
+            datetime(2025, 12, 22, tzinfo=SHANGHAI_TZ),
+        )
+
     def test_eastmoney_st_fetch_retains_row_source_time(self):
         class Response:
             @staticmethod
@@ -447,17 +535,202 @@ class PublicLivePocTests(unittest.TestCase):
                 }
 
         class Session:
+            def __init__(self):
+                self.trust_env = True
+
+            @staticmethod
+            def get(*args, **kwargs):
+                return Response()
+
+        session = Session()
+        frame = _fetch_eastmoney_st_frame(session=session)
+
+        self.assertFalse(session.trust_env)
+        self.assertEqual(frame.iloc[0]["代码"], SYMBOL)
+        self.assertEqual(frame.iloc[0]["名称"], "*ST京东方")
+        self.assertEqual(frame.iloc[0]["上游时间"], AS_OF)
+
+    def test_sina_lifecycle_fetch_preserves_full_scope_and_source_time(self):
+        class Response:
+            encoding = None
+            text = (
+                'var hq_str_sz000725="京东方Ａ,0,0,0,0,0,0,0,0,0,0,'
+                '0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'
+                '2026-08-03,10:00:00,00";\n'
+                'var hq_str_sh600000="ST浦发,0,0,0,0,0,0,0,0,0,0,'
+                '0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'
+                '2026-08-03,10:00:01,03";'
+            )
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+        class Session:
+            def __init__(self):
+                self.trust_env = True
+                self.params = None
+
+            def get(self, *args, **kwargs):
+                self.params = kwargs.get("params")
+                return Response()
+
+        session = Session()
+        contexts = (
+            context(),
+            replace(
+                context(),
+                symbol="600000",
+                exchange="sse",
+                identity_source_contract_id=(
+                    "sse-public-security-list-v1"
+                ),
+            ),
+        )
+
+        frame = _fetch_sina_lifecycle_frame(
+            contexts=contexts,
+            session=session,
+            clock=lambda: AS_OF,
+        )
+
+        self.assertFalse(session.trust_env)
+        self.assertEqual(tuple(frame["代码"]), (SYMBOL, "600000"))
+        self.assertEqual(tuple(frame["名称"]), ("京东方Ａ", "ST浦发"))
+        self.assertEqual(tuple(frame["状态代码"]), ("00", "03"))
+        self.assertEqual(frame.iloc[0]["上游时间"], AS_OF)
+        self.assertEqual(
+            session.params,
+            "list=sz000725,sh600000",
+        )
+
+    def test_sina_lifecycle_fetch_fails_closed_on_missing_symbol(self):
+        class Response:
+            encoding = None
+            text = (
+                'var hq_str_sz000725="京东方Ａ,0,0,0,0,0,0,0,0,0,0,'
+                '0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'
+                '2026-08-03,10:00:00,00";'
+            )
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+        class Session:
             trust_env = True
 
             @staticmethod
             def get(*args, **kwargs):
                 return Response()
 
-        frame = _fetch_eastmoney_st_frame(session=Session())
+        contexts = (
+            context(),
+            replace(
+                context(),
+                symbol="600000",
+                exchange="sse",
+                identity_source_contract_id=(
+                    "sse-public-security-list-v1"
+                ),
+            ),
+        )
 
-        self.assertEqual(frame.iloc[0]["代码"], SYMBOL)
-        self.assertEqual(frame.iloc[0]["名称"], "*ST京东方")
-        self.assertEqual(frame.iloc[0]["上游时间"], AS_OF)
+        with self.assertRaisesRegex(
+            PublicLivePocSourceError,
+            "public_live_sina_lifecycle_incomplete",
+        ):
+            _fetch_sina_lifecycle_frame(
+                contexts=contexts,
+                session=Session(),
+                clock=lambda: AS_OF,
+            )
+
+    def test_sina_names_and_status_emit_verified_fields_only(self):
+        values = build_public_aggregator_observations(
+            contexts=(context(),),
+            trading_date=AS_OF.date(),
+            fetched_at=AS_OF,
+            st_frame=None,
+            suspension_frame=None,
+            lifecycle_frame=pd.DataFrame([{
+                "代码": SYMBOL,
+                "名称": "*ST京东方",
+                "上游时间": AS_OF,
+                "抓取时间": AS_OF,
+                "状态代码": "03",
+            }]),
+        )
+
+        self.assertEqual(len(values), 1)
+        self.assertEqual(
+            values[0].source_contract_id,
+            "sina-public-quote-status-v1",
+        )
+        self.assertEqual(
+            values[0].lifecycle_status,
+            SecurityLifecycleStatus.STAR_ST,
+        )
+        self.assertEqual(
+            values[0].trading_status,
+            TradingSessionStatus.SUSPENDED,
+        )
+        self.assertIsNone(values[0].special_session)
+
+    def test_sina_normal_status_maps_to_trading(self):
+        values = build_public_aggregator_observations(
+            contexts=(context(),),
+            trading_date=AS_OF.date(),
+            fetched_at=AS_OF,
+            st_frame=None,
+            suspension_frame=None,
+            lifecycle_frame=pd.DataFrame([{
+                "代码": SYMBOL,
+                "名称": "京东方Ａ",
+                "上游时间": AS_OF,
+                "抓取时间": AS_OF,
+                "状态代码": "00",
+            }]),
+        )
+
+        self.assertEqual(
+            values[0].trading_status,
+            TradingSessionStatus.TRADING,
+        )
+        self.assertEqual(
+            values[0].lifecycle_status,
+            SecurityLifecycleStatus.NORMAL,
+        )
+
+    def test_sina_lifecycle_fetch_rejects_unknown_status_code(self):
+        class Response:
+            encoding = None
+            text = (
+                'var hq_str_sz000725="京东方Ａ,0,0,0,0,0,0,0,0,0,0,'
+                '0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'
+                '2026-08-03,10:00:00,99";'
+            )
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+        class Session:
+            trust_env = True
+
+            @staticmethod
+            def get(*args, **kwargs):
+                return Response()
+
+        with self.assertRaisesRegex(
+            PublicLivePocSourceError,
+            "public_live_sina_lifecycle_incomplete",
+        ):
+            _fetch_sina_lifecycle_frame(
+                contexts=(context(),),
+                session=Session(),
+                clock=lambda: AS_OF,
+            )
 
     def test_static_aggregator_rows_keep_conservative_field_scope(self):
         suspension = pd.DataFrame([{

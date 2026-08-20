@@ -38,6 +38,7 @@ PUBLIC_COMPOSITE_TRADABILITY_CONTRACT_ID = (
 )
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
 MAXIMUM_DYNAMIC_SOURCE_AGE_SECONDS = 90
+MAXIMUM_COMPOSITE_SCOPE_COUNT = 6000
 _SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 STAGE6_SHENZHEN_SHANGHAI_SYMBOL_PATTERN = re.compile(
     r"[036][0-9]{5}"
@@ -48,6 +49,7 @@ _PUBLIC_AGGREGATOR_UPSTREAM_HOSTS = {
     "data.eastmoney.com",
     "quote.eastmoney.com",
     "push2.eastmoney.com",
+    "hq.sinajs.cn",
 }
 UTC = timezone.utc
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
@@ -117,7 +119,7 @@ _PUBLIC_SOURCE_CONTRACTS = {
     "sse-public-status-v1": _PublicSourceContract(
         source_kind=PublicSourceKind.EXCHANGE_OFFICIAL,
         source_name="上海证券交易所",
-        allowed_hosts=("www.sse.com.cn",),
+        allowed_hosts=("www.sse.com.cn", "yunhq.sse.com.cn"),
         exchanges=("sse",),
         capabilities=("tradability_observation",),
         allowed_fields=(
@@ -181,6 +183,15 @@ _PUBLIC_SOURCE_CONTRACTS = {
         exchanges=("sse", "szse"),
         capabilities=("tradability_observation",),
         allowed_fields=("lifecycle_status",),
+    ),
+    "sina-public-quote-status-v1": _PublicSourceContract(
+        source_kind=PublicSourceKind.PUBLIC_AGGREGATOR,
+        source_name="新浪财经公开行情",
+        allowed_hosts=("finance.sina.com.cn",),
+        exchanges=("sse", "szse"),
+        capabilities=("tradability_observation",),
+        allowed_fields=("lifecycle_status", "trading_status"),
+        dynamic_fields=("trading_status",),
     ),
     "szse-public-trading-calendar-v1": _PublicSourceContract(
         source_kind=PublicSourceKind.EXCHANGE_OFFICIAL,
@@ -605,7 +616,7 @@ def _query_reasons(
         reasons.append("public_query_as_of_timezone_missing")
     elif _shanghai_date(query.as_of) != query.trading_date:
         reasons.append("public_query_as_of_date_mismatch")
-    if not 1 <= len(query.securities) <= 8:
+    if not 1 <= len(query.securities) <= MAXIMUM_COMPOSITE_SCOPE_COUNT:
         reasons.append("public_query_sample_count_invalid")
 
     symbols = []
@@ -772,7 +783,9 @@ def _observation_reasons(
             or fetched_at > maximum_time
         ):
             reasons.append("public_source_future_time")
-        elif fetched_at < source_time:
+        elif fetched_at + timedelta(
+            seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+        ) < source_time:
             reasons.append("public_source_fetch_before_source")
         effective_from = item.effective_from
         effective_until = item.effective_until
@@ -972,7 +985,9 @@ def _quote_reasons(
         if (
             source_time is not None
             and fetched_at is not None
-            and fetched_at < source_time
+            and fetched_at + timedelta(
+                seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            ) < source_time
         ):
             reasons.append("public_quote_fetch_before_source")
     return _unique_reasons(reasons)
@@ -1050,6 +1065,25 @@ def _dynamic_age_reason(
         return missing_reason
     if _shanghai_date(source_time) != _shanghai_date(as_of):
         return stale_reason
+    source_local = source_time.astimezone(SHANGHAI_TZ)
+    as_of_local = as_of.astimezone(SHANGHAI_TZ)
+    lunch_start = datetime.combine(
+        as_of_local.date(),
+        time(11, 30),
+        tzinfo=SHANGHAI_TZ,
+    )
+    lunch_end = datetime.combine(
+        as_of_local.date(),
+        time(13, 0),
+        tzinfo=SHANGHAI_TZ,
+    )
+    if (
+        lunch_start <= as_of_local < lunch_end
+        and source_local >= lunch_start - timedelta(
+            seconds=MAXIMUM_DYNAMIC_SOURCE_AGE_SECONDS
+        )
+    ):
+        return None
     if (
         as_of_utc - source_utc
     ).total_seconds() > MAXIMUM_DYNAMIC_SOURCE_AGE_SECONDS:
@@ -1101,6 +1135,30 @@ def _quote_lifecycle(
     return None
 
 
+def _quote_special_session(
+    quote: QuoteSnapshot,
+    *,
+    listed_trading_day_count: int,
+    lifecycle_status: Optional[SecurityLifecycleStatus],
+) -> Optional[PriceLimitSpecialSession]:
+    upper = quote.upper_limit_price_source
+    lower = quote.lower_limit_price_source
+    if (
+        listed_trading_day_count <= 5
+        or lifecycle_status == SecurityLifecycleStatus.DELISTING
+        or not isinstance(upper, (int, float))
+        or isinstance(upper, bool)
+        or not isinstance(lower, (int, float))
+        or isinstance(lower, bool)
+        or not math.isfinite(float(upper))
+        or not math.isfinite(float(lower))
+        or float(upper) <= float(lower)
+        or float(lower) <= 0
+    ):
+        return None
+    return PriceLimitSpecialSession.NONE
+
+
 def _field_coverage(
     records: Tuple[PublicCompositeTradabilityRecord, ...],
 ) -> Mapping[str, float]:
@@ -1149,6 +1207,7 @@ def _field_evidence(
     quote: Optional[QuoteSnapshot],
     quote_batch_evidence: Optional[PublicQuoteBatchEvidence],
     quote_current: bool,
+    quote_special_session: Optional[PriceLimitSpecialSession],
     catalog_rule: Any,
     as_of: datetime,
     resolved_values: Mapping[str, Any],
@@ -1233,6 +1292,8 @@ def _field_evidence(
                 quote_has_field = _quote_lifecycle(quote) is not None
             elif field_name == "trading_status":
                 quote_has_field = _quote_status(quote) is not None
+            elif field_name == "special_session":
+                quote_has_field = quote_special_session is not None
             elif field_name == "upper_limit_price":
                 quote_has_field = (
                     quote.upper_limit_price_source is not None
@@ -1260,6 +1321,7 @@ def _field_evidence(
                 observed_value=_audit_value({
                     "lifecycle_status": _quote_lifecycle(quote),
                     "trading_status": _quote_status(quote),
+                    "special_session": quote_special_session,
                     "upper_limit_price": (
                         quote.upper_limit_price_source
                     ),
@@ -1352,6 +1414,7 @@ def _resolve_record(
             if (
                 getattr(official, field_name) is not None
                 and getattr(aggregator, field_name) is None
+                and field_name != "special_session"
             ):
                 reasons.append(
                     f"public_{field_name}_crosscheck_missing"
@@ -1475,6 +1538,7 @@ def _resolve_record(
             trading_status = None
 
     quote_current = False
+    quote_special_session = None
     if quote is None:
         reasons.append("public_quote_missing")
     else:
@@ -1511,6 +1575,26 @@ def _resolve_record(
             elif lifecycle is None and quote_lifecycle is not None:
                 lifecycle = quote_lifecycle
                 reasons.append("public_lifecycle_status_official_missing")
+
+            quote_special_session = _quote_special_session(
+                quote,
+                listed_trading_day_count=listed_trading_day_count,
+                lifecycle_status=lifecycle,
+            )
+
+    if (
+        official is not None
+        and official.special_session is not None
+        and (
+            aggregator is None
+            or aggregator.special_session is None
+        )
+    ):
+        if quote_special_session is None:
+            reasons.append("public_special_session_crosscheck_missing")
+        elif quote_special_session != official.special_session:
+            reasons.append("public_special_session_conflict")
+            blocked = True
 
     catalog_rule = None
     if lifecycle is not None and special_session is not None:
@@ -1633,6 +1717,7 @@ def _resolve_record(
             quote=quote,
             quote_batch_evidence=query.quote_batch_evidence,
             quote_current=quote_current,
+            quote_special_session=quote_special_session,
             catalog_rule=catalog_rule,
             as_of=query.as_of,
             resolved_values=resolved_values,
