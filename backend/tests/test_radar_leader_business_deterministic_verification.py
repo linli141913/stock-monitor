@@ -4,9 +4,11 @@ from datetime import datetime, timedelta, timezone
 
 from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
+    OfficialBusinessDocumentKind,
 )
 from radar.leader_business_catalyst_facts import (
     OfficialBusinessCatalystFactResult,
+    extract_official_business_catalyst_facts,
 )
 from radar.leader_business_catalyst_features import BusinessCatalystRelation
 from radar.leader_business_deterministic_verification import (
@@ -18,7 +20,12 @@ from radar.leader_business_document_facts import (
 )
 from radar.leader_runtime_candidate_plan import LeaderRuntimeCandidatePlanItem
 from radar.sources.leader_business_catalyst_official import (
+    OfficialBusinessCatalystDocument,
     OfficialBusinessCatalystKind,
+)
+from radar.sources.leader_business_document_content import (
+    OfficialBusinessDocumentContentResult,
+    OfficialBusinessDocumentPage,
 )
 
 
@@ -104,7 +111,7 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
         self.assertEqual(result.artifact.matched_terms, ("工业软件",))
         self.assertEqual(
             result.artifact.rule_version,
-            "radar-leader-business-deterministic-relation-v13",
+            "radar-leader-business-deterministic-relation-v19",
         )
         self.assertRegex(result.artifact.verification_id, r"^business-auto:[0-9a-f]{64}$")
         self.assertFalse(result.artifact.formal_usable)
@@ -135,6 +142,17 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
             (annual_facts(terms=("水牛奶",)), catalyst_facts(terms=("乳业",))),
             (annual_facts(terms=("钨锡铅锌矿开采",)), catalyst_facts(terms=("钨矿",))),
             (annual_facts(terms=("数智能源",)), catalyst_facts(terms=("50MW分散式风电项目",))),
+            (
+                annual_facts(terms=("建筑施工",)),
+                catalyst_facts(terms=(
+                    "乐平市农产品智慧仓储和物流设施建设"
+                    "项目勘察、设计、采购、施工总承包",
+                )),
+            ),
+            (
+                annual_facts(terms=("医疗器械",)),
+                catalyst_facts(terms=("江西省鹰潭市人民医院病房改造项目",)),
+            ),
         )
 
         for annual, catalyst in cases:
@@ -167,6 +185,53 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
             result.status,
             AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
         )
+        self.assertEqual(
+            result.reasons,
+            ("business_deterministic_relation_unconfirmed",),
+        )
+        self.assertIsNone(result.artifact)
+
+    def test_parsed_confirmed_project_does_not_fuzzily_match_annual_business(self):
+        catalyst_document = OfficialBusinessCatalystDocument(
+            document_id="cninfo:1225386997",
+            document_version="cninfo:1225386997:v1",
+            symbol="000001",
+            issuer_identity="cninfo-org:9900000001",
+            title="项目中标公告",
+            published_at=VALIDATED_AT - timedelta(days=1),
+            source_url="https://static.cninfo.com.cn/1225386997.pdf",
+            event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD,
+        )
+        catalyst_content = OfficialBusinessDocumentContentResult(
+            status=AutomaticBusinessEvidenceStatus.READY,
+            document_id=catalyst_document.document_id,
+            document_version=catalyst_document.document_version,
+            symbol=catalyst_document.symbol,
+            issuer_identity=catalyst_document.issuer_identity,
+            document_kind=OfficialBusinessDocumentKind.CATALYST,
+            content_sha256="b" * 64,
+            byte_count=1200,
+            page_count=1,
+            pages=(OfficialBusinessDocumentPage(
+                1,
+                "公司被确定为“乐平市农产品智慧仓储和物流设施建设"
+                "项目勘察、设计、采购、施工总承包”的中标单位。",
+            ),),
+            fetched_at=VALIDATED_AT - timedelta(minutes=1),
+        )
+        parsed = extract_official_business_catalyst_facts(
+            catalyst_document,
+            catalyst_content,
+        )
+
+        result = build_deterministic_official_business_verification(
+            plan_item(),
+            annual_facts(terms=("建筑施工",)),
+            (parsed,),
+            validated_at=VALIDATED_AT,
+        )
+
+        self.assertEqual(parsed.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(
             result.reasons,
             ("business_deterministic_relation_unconfirmed",),

@@ -4,6 +4,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
@@ -363,6 +364,48 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertEqual(second.reused_count, 2)
             self.assertEqual(len(calls), initial_call_count + 6)
             self.assertEqual(third.reused_count, 1)
+
+    def test_checkpoint_reuse_rejects_a_changed_rule_version(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            packet = source_packet(1)
+            calls = []
+            first = self.run_batch(
+                packet,
+                directory,
+                sources=ready_sources(calls=calls),
+            )
+            initial_call_count = len(calls)
+
+            with (
+                patch(
+                    "radar.leader_business_automatic_evidence."
+                    "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
+                    "radar-leader-business-deterministic-relation-v20",
+                ),
+                patch(
+                    "radar.leader_business_deterministic_verification."
+                    "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
+                    "radar-leader-business-deterministic-relation-v20",
+                ),
+            ):
+                second = self.run_batch(
+                    packet,
+                    directory,
+                    sources=ready_sources(calls=calls),
+                )
+
+            self.assertEqual(first.reused_count, 0)
+            self.assertEqual(second.reused_count, 0)
+            self.assertEqual(len(calls), initial_call_count + 3)
+            self.assertNotEqual(
+                first.items[0].checkpoint_path,
+                second.items[0].checkpoint_path,
+            )
+            self.assertIsNotNone(second.items[0].artifact)
+            self.assertEqual(
+                second.items[0].artifact.rule_version,
+                "radar-leader-business-deterministic-relation-v20",
+            )
 
 
 if __name__ == "__main__":

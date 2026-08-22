@@ -184,7 +184,32 @@ class LeaderBusinessOfficialVerificationAdapterTests(unittest.TestCase):
             result.items[0].input_value.reviews[0].review_method,
             "deterministic_official",
         )
+        self.assertEqual(
+            result.items[0].input_value.reviews[0].mapping_version,
+            "radar-leader-business-deterministic-relation-v19",
+        )
         self.assertFalse(result.formal_gate_ready)
+
+        stale_version = (
+            "radar-leader-business-deterministic-relation-v18"
+        )
+        stale_review = replace(
+            result.items[0].input_value.reviews[0],
+            mapping_version=stale_version,
+            reviewer_key=stale_version,
+        )
+        stale_feature = build_leader_business_catalyst_features(replace(
+            result.items[0].input_value,
+            reviews=(stale_review,),
+        ))
+        self.assertEqual(
+            stale_feature.status,
+            ResearchFeatureStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            stale_feature.reasons,
+            ("business_review_method_unverified",),
+        )
 
     def test_tampered_artifact_is_rejected_without_input(self):
         entries = tuple(

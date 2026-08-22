@@ -18,6 +18,7 @@ from radar.leader_business_annual_report_selector import (
 )
 from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
+    DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
     OfficialBusinessDocumentKind,
 )
 from radar.leader_business_catalyst_facts import (
@@ -26,7 +27,6 @@ from radar.leader_business_catalyst_facts import (
 )
 from radar.leader_business_catalyst_features import BusinessCatalystRelation
 from radar.leader_business_deterministic_verification import (
-    DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
     DeterministicOfficialBusinessVerificationArtifact,
     build_deterministic_official_business_verification,
     replay_deterministic_official_business_verification,

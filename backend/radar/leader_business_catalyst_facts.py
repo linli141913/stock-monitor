@@ -36,13 +36,76 @@ GENERIC_TERMS = frozenset({
 NEGATIVE_MARKERS = ("终止", "取消", "未中标", "不再履行")
 TERM_SPLIT_PATTERN = re.compile(r"、|以及|及|和")
 EARNINGS_DIRECTION_PATTERN = r"(?:增长|提升|增加|上升|下降|减少|承压|回落|扭亏)"
+EXPLICIT_METRIC_DIRECTION_PATTERN = (
+    r"(?:增长|提升|增加|上升|下降|减少|承压|回落|扭亏|"
+    r"上涨|下滑|下调)"
+)
 PROSPECTIVE_MARKERS = ("拟", "计划", "意向", "预计")
+NEGATIVE_CONFIRMATION_MARKERS = ("未", "不", "无法", "不能")
+UNEXECUTED_CONTRACT_MARKERS = (
+    *PROSPECTIVE_MARKERS,
+    *NEGATIVE_CONFIRMATION_MARKERS,
+)
+PRELIMINARY_AWARD_MARKERS = ("预中标", "候选")
+UNCONFIRMED_AWARD_MARKERS = (
+    *PROSPECTIVE_MARKERS,
+    *NEGATIVE_CONFIRMATION_MARKERS,
+    "是否",
+    "尚待",
+    "有待",
+    "待确定",
+    "初步确定",
+    "暂时确定",
+    "临时确定",
+    "预先确定",
+)
+EARNINGS_REASON_HEADING_MARKERS = ("业绩变动原因说明",)
+EARNINGS_REASON_INTRO_PATTERN = re.compile(
+    r"(?:主要原因(?:是|为)?|主要是|主要系)[:：]?"
+)
+FORECASTED_FINANCIAL_RESULT_PATTERN = re.compile(
+    r"(?:"
+    r"预计[^。;；!?！？]{0,100}(?:净利润|利润总额|业绩)"
+    r"|(?:净利润|利润总额|业绩)[^。;；!?！？]{0,40}预计"
+    r")[^。;；!?！？]{0,40}$"
+)
 SENTENCE_END_MARKERS = ("。", "!", "！", "?", "？")
 QUOTED_EPC_CONTRACT_PATTERN = re.compile(
     r"(?:^|[，,。.;；：:])"
     r"(?:(?!(?:拟|计划|意向|预计))[^，,。.;；：:]){0,120}?"
     r"就[“\"]([^”\"]{2,60}?项目)[”\"]"
     r"签署EPC承包合同"
+)
+CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN = re.compile(
+    r"(?:被(?:确认|确定)为|(?:确认|确定)公司为|"
+    r"确定[^“”\"。!?！？]{2,240}?组成的联合体为)"
+    r"[“\"]([^”\"]{2,60}?项目[^”\"]{0,30})[”\"]"
+    r"的中标(?:单位|供应商)"
+    r"(?=$|[，,。.;；：:!?！？])"
+)
+REASON_PREFIX_BUSINESS_METRIC_PATTERN = re.compile(
+    r"(?:业绩变动原因主要是|主要原因(?:是|为)|主要是|主要系)本期"
+    r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)(?:业务|产品)(?:的)?"
+    r"(?:营业收入|收入|毛利率|毛利|利润)"
+    r"[^。!?！？]{0,12}"
+    + EXPLICIT_METRIC_DIRECTION_PATTERN
+)
+NAMED_PRODUCT_AVERAGE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])报告期内[，,]"
+    r"(?!公司|行业|市场|产品|原材料|能源|运输|采购|成本)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)(?:销售)?均价(?:同比)?"
+    r"[^。!?！？]{0,6}"
+    + EXPLICIT_METRIC_DIRECTION_PATTERN
+    + r"[，,]公司\1(?:及[一-鿿A-Za-z0-9]{2,12})?产品盈利"
+    + r"[^。!?！？]{0,6}"
+    + EARNINGS_DIRECTION_PATTERN
+)
+NAMED_PRODUCT_DELIVERY_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:]|业绩变动原因说明)报告期内[，,](?:受益于|得益于)"
+    r"(?!公司|行业|市场|主营|主要|整体|相关|新|核心|产品)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)产品交付量的同比(?:大幅)?增加"
+    r"[，,]公司营业收入同比增长"
 )
 OBJECT_PATTERNS = {
     OfficialBusinessCatalystKind.MAJOR_CONTRACT: (
@@ -58,6 +121,7 @@ OBJECT_PATTERNS = {
     ),
     OfficialBusinessCatalystKind.PROJECT_AWARD: (
         QUOTED_EPC_CONTRACT_PATTERN,
+        CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN,
         re.compile(
             r"第[0-9一二三四五六七八九十、，至和及-]{1,16}标段"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:项目)"
@@ -84,16 +148,21 @@ OBJECT_PATTERNS = {
         ),
     ),
     OfficialBusinessCatalystKind.EARNINGS_FORECAST: (
+        REASON_PREFIX_BUSINESS_METRIC_PATTERN,
+        NAMED_PRODUCT_AVERAGE_PATTERN,
+        NAMED_PRODUCT_DELIVERY_PATTERN,
         re.compile(
             r"(?:导致|致使)公司(?:报告期内)?"
             r"(?!报告期内|项目|公司|整体)"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,16}?养殖)(?:业务)?"
-            r"(?:利润|毛利).{0,8}" + EARNINGS_DIRECTION_PATTERN
+            r"(?:利润|毛利)[^。!?！？]{0,8}"
+            + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
             r"(?:推动|带动)(?!公司|行业|主营|整体)"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,16}?)板块"
-            r"(?:营业收入|收入)(?:实现)?(?:同比)?.{0,4}"
+            r"(?:营业收入|收入)(?:实现)?(?:同比)?"
+            r"[^。!?！？]{0,4}"
             + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
@@ -115,12 +184,14 @@ OBJECT_PATTERNS = {
             r"(?!度|上半年|下半年|一季度|前三季度|公司|市场|"
             r"原材料|能源|运输|采购|成本)"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,24}?)"
-            r"(?:销售价格|销售均价|销售单价).{0,12}上涨"
+            r"(?:销售价格|销售均价|销售单价)"
+            r"[^。!?！？]{0,12}上涨"
         ),
         re.compile(
             r"(?:公司)?主要产品"
             r"([\u4e00-\u9fffA-Za-z0-9、及和]{2,48}?)(?:产品)?(?:的)?(?:市场)?"
-            r"(?:销售价格|销售均价|销售单价|销量|产量|产销量).{0,12}"
+            r"(?:销售价格|销售均价|销售单价|销量|产量|产销量)"
+            r"[^。!?！？]{0,12}"
             + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
@@ -128,21 +199,22 @@ OBJECT_PATTERNS = {
             r"(?!公司主营|公司主要产品|主营|主要产品|净利润)(?:公司)?"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,24}?)(?:业务|产品)(?:的)?"
             r"(?:销售价格|销售均价|销售单价|销量|产量|产销量|"
-            r"收入|营业收入|毛利率|毛利|利润).{0,12}"
+            r"收入|营业收入|毛利率|毛利|利润)"
+            r"[^。!?！？]{0,12}"
             + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
             r"(?:^|[，,。.;；：:])(?:报告期内)?"
             r"(?!公司主营业务|公司主要产品|主营业务|主要产品|净利润)(?:公司)?"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,24}?)(?:销售价格|销售均价|销售单价|"
-            r"销量|产量|产销量).{0,12}"
+            r"销量|产量|产销量)[^。!?！？]{0,12}"
             + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
             r"(?:^|[，,。.;；：:])(?:报告期内)?本期"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,20}(?:及|和)"
             r"[\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:营业收入|毛利率|毛利)"
-            r".{0,12}" + EARNINGS_DIRECTION_PATTERN
+            r"[^。!?！？]{0,12}" + EARNINGS_DIRECTION_PATTERN
         ),
         re.compile(
             r"(?:主要)?(?:受益于|得益于)"
@@ -285,6 +357,7 @@ def _clean_term(value: str, *, maximum_length: int = 20) -> Optional[str]:
             "净利润", "归属于", "股东", "业绩", "预计", "万元",
             "扣除非经常", "同比", "本年度", "影响该", "当事人之间",
             "权利义务", "招标人洽谈", "签订上述",
+            "交付量",
         ))
         or not re.search(r"[\u4e00-\u9fffA-Za-z0-9]", term)
     ):
@@ -331,6 +404,80 @@ def _has_prospective_sentence_context(value: str, match_start: int) -> bool:
     )
 
 
+def _has_unconfirmed_award_context(value: str, match: re.Match) -> bool:
+    context = _sentence_context(value, match)
+    return any(
+        marker in context
+        for marker in UNCONFIRMED_AWARD_MARKERS
+    )
+
+
+def _has_unexecuted_contract_context(value: str, match: re.Match) -> bool:
+    sentence_start = max(
+        (
+            value.rfind(marker, 0, match.start())
+            for marker in SENTENCE_END_MARKERS
+        ),
+        default=-1,
+    ) + 1
+    return any(
+        marker in value[sentence_start:match.start(1)]
+        for marker in UNEXECUTED_CONTRACT_MARKERS
+    )
+
+
+def _has_preliminary_award_context(value: str, match: re.Match) -> bool:
+    context = _sentence_context(value, match)
+    return any(marker in context for marker in PRELIMINARY_AWARD_MARKERS)
+
+
+def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
+    # PDF 文本常丢失句号：页首的“预计净利润”不能否掉后续
+    # “业绩变动原因说明”中已发生的经营事实。同理，明确的
+    # 财务结果预测可由“主要是/主要原因”引出已发生的对象事实。
+    sentence_start = max(
+        (value.rfind(marker, 0, match.start()) for marker in SENTENCE_END_MARKERS),
+        default=-1,
+    ) + 1
+    logical_start = sentence_start
+    for heading in EARNINGS_REASON_HEADING_MARKERS:
+        position = value.rfind(heading, sentence_start, match.end())
+        if position < 0 or position > match.start():
+            continue
+        immediate_prefix = value[max(sentence_start, position - 8):position]
+        if not any(
+            marker in immediate_prefix
+            for marker in UNCONFIRMED_AWARD_MARKERS
+        ):
+            logical_start = max(logical_start, position)
+    prefix_and_match = value[logical_start:match.end()]
+    for intro in EARNINGS_REASON_INTRO_PATTERN.finditer(prefix_and_match):
+        forecast_prefix = prefix_and_match[:intro.start()]
+        if FORECASTED_FINANCIAL_RESULT_PATTERN.search(forecast_prefix):
+            logical_start += intro.start()
+            prefix_and_match = value[logical_start:match.end()]
+            break
+    context = prefix_and_match
+    return any(marker in context for marker in UNCONFIRMED_AWARD_MARKERS)
+
+
+def _sentence_context(value: str, match: re.Match) -> str:
+    sentence_start = max(
+        (
+            value.rfind(marker, 0, match.start())
+            for marker in SENTENCE_END_MARKERS
+        ),
+        default=-1,
+    ) + 1
+    sentence_ends = tuple(
+        position
+        for marker in SENTENCE_END_MARKERS
+        if (position := value.find(marker, match.end())) >= 0
+    )
+    sentence_end = min(sentence_ends) + 1 if sentence_ends else len(value)
+    return value[sentence_start:sentence_end]
+
+
 def extract_official_business_catalyst_facts(
     document: Any,
     content: Any,
@@ -355,11 +502,41 @@ def extract_official_business_catalyst_facts(
         for pattern in patterns:
             for match in pattern.finditer(normalized):
                 if (
-                    pattern is QUOTED_EPC_CONTRACT_PATTERN
+                    document.event_kind in {
+                        OfficialBusinessCatalystKind.MAJOR_CONTRACT,
+                        OfficialBusinessCatalystKind.PROJECT_AWARD,
+                    }
                     and _has_prospective_sentence_context(
                         normalized,
                         match.start(),
                     )
+                ):
+                    continue
+                if (
+                    pattern is CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN
+                    and _has_unconfirmed_award_context(
+                        normalized,
+                        match,
+                    )
+                ):
+                    continue
+                if (
+                    document.event_kind
+                    is OfficialBusinessCatalystKind.MAJOR_CONTRACT
+                    and _has_unexecuted_contract_context(normalized, match)
+                ):
+                    continue
+                if (
+                    document.event_kind
+                    is OfficialBusinessCatalystKind.PROJECT_AWARD
+                    and pattern is not CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN
+                    and _has_preliminary_award_context(normalized, match)
+                ):
+                    continue
+                if (
+                    document.event_kind
+                    is OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    and _has_unconfirmed_earnings_context(normalized, match)
                 ):
                     continue
                 matched_terms = _matched_terms(

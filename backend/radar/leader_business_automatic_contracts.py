@@ -3,6 +3,11 @@
 from enum import Enum
 
 
+DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION = (
+    "radar-leader-business-deterministic-relation-v19"
+)
+
+
 class AutomaticBusinessEvidenceStatus(str, Enum):
     READY = "ready"
     MISSING = "missing"

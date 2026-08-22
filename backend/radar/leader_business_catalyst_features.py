@@ -13,6 +13,9 @@ import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
+from radar.leader_business_automatic_contracts import (
+    DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
+)
 from radar.leader_research_features import ResearchFeatureStatus
 
 
@@ -598,7 +601,7 @@ def build_leader_business_catalyst_features(
             and (
                 not review.review_id.startswith("business-auto:")
                 or review.mapping_version
-                != "radar-leader-business-deterministic-relation-v13"
+                != DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION
                 or review.reviewer_key != review.mapping_version
             )
         )

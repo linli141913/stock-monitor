@@ -153,6 +153,186 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
             ("生物质纤维素长丝", "氨纶纤维", "火腿", "肉制品"),
         )
 
+    def test_forecast_header_does_not_invalidate_later_confirmed_metrics(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "本期业绩预计情况:预计净利润同比增长,"
+                "三、业绩变动原因说明,本期火腿及肉制品营业收入有所下降;"
+                "公司金针菇产品销售价格同比增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("金针菇", "火腿", "肉制品"))
+
+    def test_forecasted_profit_can_be_explained_by_confirmed_product_metrics(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "报告期内,公司预计净利润同比上涨,主要是"
+                "生物质纤维素长丝及氨纶纤维销量增加的同时"
+                "氨纶纤维毛利水平提升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            ("生物质纤维素长丝", "氨纶纤维"),
+        )
+
+    def test_distant_forecast_marker_still_rejects_forecasted_business_metric(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "公司预计受下游需求持续改善影响,"
+                "本期珠宝黄金业务营业收入增长。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_reason_prefix_still_extracts_named_business_metrics(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明业绩变动原因主要是本期"
+                "珠宝黄金业务营业收入增长、毛利增长等原因所致。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("珠宝黄金",))
+
+    def test_reason_prefix_rejects_generic_business_metrics(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "主要是本期公司业务营业收入增长;"
+                "主要是本期主营业务毛利增长;"
+                "主要是本期新业务收入增长;"
+                "主要是本期相关业务利润增长;"
+                "主要是本期珠宝黄金业务营业收入预计增长。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_named_product_average_extracts_only_the_explicit_product(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "报告期内,钨精矿均价同比上涨,"
+                "公司钨精矿及粉末产品盈利显著增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("钨精矿",))
+
+    def test_generic_or_input_average_is_not_a_business_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "公司均价上涨;市场均价上涨;产品均价上涨;"
+                "原材料均价上涨;能源均价回落;"
+                "报告期内,钨精矿均价同比上涨,公司整体盈利增长;"
+                "报告期内,钨精矿均价预计上涨,"
+                "公司钨精矿产品盈利增长。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_named_product_delivery_growth_extracts_the_product(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "报告期内,受益于无人化智能装备产品交付量的"
+                "同比大幅增加,公司营业收入同比增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("无人化智能装备",))
+
+    def test_forecast_header_does_not_invalidate_confirmed_delivery_growth(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "一、本期业绩预计情况:预计净利润为正值且同比上升,"
+                "三、业绩变动原因说明报告期内,受益于无人化智能装备"
+                "产品交付量的同比大幅增加,公司营业收入同比增长,"
+                "公司净利润同比上升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("无人化智能装备",))
+
+    def test_generic_product_delivery_growth_is_not_a_business_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "受益于公司产品交付量增加;"
+                "受益于行业产品交付量增加;"
+                "受益于相关产品交付量增加;"
+                "受益于产品交付量增加;"
+                "受益于无人化智能装备产品交付量同比增加;"
+                "报告期内,受益于无人化智能装备产品"
+                "交付量的同比增加,公司产量同比增长;"
+                "报告期内,受益于无人化智能装备产品"
+                "交付量预计增加,公司营业收入同比增长。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_unconfirmed_or_cross_sentence_earnings_context_is_rejected(self):
+        cases = (
+            "公司预计主要是本期珠宝黄金业务营业收入增长。",
+            "公司不主要是本期珠宝黄金业务营业收入增长。",
+            "预计,报告期内,钨精矿均价同比上涨,"
+            "公司钨精矿产品盈利增长。",
+            "预计,报告期内,受益于无人化智能装备产品"
+            "交付量的同比增加,公司营业收入同比增长。",
+            "主要是本期珠宝黄金业务营业收入。已实现增长。",
+            "报告期内,钨精矿均价同比。上涨,"
+            "公司钨精矿产品盈利增长。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
     def test_enumerated_period_product_metric_extracts_only_named_product(self):
         result = extract_official_business_catalyst_facts(
             document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
@@ -307,6 +487,138 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
                 "上海晶纾风力发电有限公司驭风行动50MW分散式风电项目",
             ),
         )
+
+    def test_confirmed_quoted_project_award_extracts_only_named_project(self):
+        cases = (
+            (
+                "公司被确定为“乐平市农产品智慧仓储和物流设施建设"
+                "项目勘察、设计、采购、施工总承包”的中标单位。",
+                "乐平市农产品智慧仓储和物流设施建设"
+                "项目勘察、设计、采购、施工总承包",
+            ),
+            (
+                "招标人确认公司为“江西省鹰潭市人民医院病房改造项目”"
+                "的中标供应商。",
+                "江西省鹰潭市人民医院病房改造项目",
+            ),
+            (
+                "确定江西磻溪建设工程有限公司(牵头方)、"
+                "中外建工程设计与顾问有限公司、浙江省围海建设集团"
+                "股份有限公司、江西金浔有色工程技术有限公司组成的"
+                "联合体为“乐平市农产品智慧仓储和物流设施建设项目"
+                "勘察、设计、采购、施工总承包”的中标单位。",
+                "乐平市农产品智慧仓储和物流设施建设"
+                "项目勘察、设计、采购、施工总承包",
+            ),
+        )
+
+        for text, expected_term in cases:
+            with self.subTest(expected_term=expected_term):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.READY,
+                )
+                self.assertEqual(result.business_terms, (expected_term,))
+                self.assertEqual(result.fragments[0].page_number, 1)
+
+    def test_unconfirmed_or_prospective_quoted_award_is_not_an_object(self):
+        cases = (
+            "公司为“智慧仓储项目”的中标单位。",
+            "公司预中标智慧仓储项目。",
+            "公司中标候选智慧仓储项目。",
+            "公司拟被确定为“智慧仓储项目”的中标单位。",
+            "公司被确定为“智慧仓储项目”的预中标单位。",
+            "公司被确定为智慧仓储项目的中标单位。",
+            "公司被确定为“EPC工程总承包项目”的中标单位。",
+            "公司未被确定为“智慧仓储项目”的中标单位。",
+            "招标人尚未确认公司为“智慧仓储项目”的中标供应商。",
+            "公司被确定为“智慧仓储项目”的中标单位候选人。",
+            "公司被确定为“智慧仓储项目”的中标单位(候选人)。",
+            "董事会确定公司拟由甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "招标人是否确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "招标人尚待确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "经评审,初步确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "招标人暂时确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "招标人临时确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "招标人预先确定甲、乙组成的联合体为"
+            "“智慧仓储项目”的中标单位。",
+            "公司被确定为“智慧仓储项目”的中标单位,"
+            "尚待最终定标。",
+            "公司中标智慧仓储项目(候选人)。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_explicit_unsuccessful_award_remains_negative_evidence(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content("公司未中标智慧仓储项目。"),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("智慧仓储",))
+        self.assertTrue(result.negative_event)
+
+    def test_prospective_plain_contract_is_not_an_explicit_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(),
+            content(
+                "公司拟签订工业软件项目合同。"
+                "公司计划签署智能仓储项目合同。"
+                "公司有意向续签智慧物流项目合同。"
+                "公司预计签订数字医疗项目合同。"
+                "公司拟签订《工业软件项目合同》。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_unexecuted_plain_contract_is_not_an_explicit_object(self):
+        cases = (
+            "公司未签订工业软件项目合同。",
+            "公司不签署《智能仓储项目合同》。",
+            "公司无法就“数字医疗项目”签署EPC承包合同。",
+            "公司不能续签智慧物流项目合同。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
 
     def test_unsigned_or_unquoted_epc_text_is_not_a_contract_object(self):
         for event_kind in (

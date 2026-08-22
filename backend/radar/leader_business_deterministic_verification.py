@@ -12,6 +12,7 @@ import unicodedata
 
 from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
+    DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
 )
 from radar.leader_business_catalyst_facts import (
     OfficialBusinessCatalystFactResult,
@@ -24,9 +25,6 @@ from radar.leader_business_document_facts import (
 from radar.leader_runtime_candidate_plan import LeaderRuntimeCandidatePlanItem
 
 
-DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION = (
-    "radar-leader-business-deterministic-relation-v13"
-)
 DETERMINISTIC_BUSINESS_VERIFICATION_CONTRACT_ID = (
     "radar-leader-business-deterministic-verification-v1"
 )
