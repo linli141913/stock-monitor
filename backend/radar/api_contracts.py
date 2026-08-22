@@ -561,6 +561,122 @@ class RadarLeadersResponse(RadarApiModel):
     module: RadarLeaderModule
 
 
+class RadarSectorHistoryResponse(RadarApiModel):
+    schema_version: Literal["radar-sector-history-v1"] = Field(
+        default="radar-sector-history-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    state: Literal["available", "not_ready", "failed"]
+    quality: Literal["complete", "unavailable"]
+    as_of: Optional[datetime] = Field(default=None, alias="asOf")
+    published_at: Optional[datetime] = Field(
+        default=None,
+        alias="publishedAt",
+    )
+    requested_count: int = Field(default=0, alias="requestedCount", ge=0)
+    fetched_count: int = Field(default=0, alias="fetchedCount", ge=0)
+    reused_count: int = Field(default=0, alias="reusedCount", ge=0)
+    failure_count: int = Field(default=0, alias="failureCount", ge=0)
+    sector_count: int = Field(default=0, alias="sectorCount", ge=0)
+    market_sample_count: int = Field(
+        default=0,
+        alias="marketSampleCount",
+        ge=0,
+    )
+    history_coverage_ready: bool = Field(
+        default=False,
+        alias="historyCoverageReady",
+    )
+    trading_presence_requested_count: int = Field(
+        default=0,
+        alias="tradingPresenceRequestedCount",
+        ge=0,
+    )
+    trading_presence_returned_count: int = Field(
+        default=0,
+        alias="tradingPresenceReturnedCount",
+        ge=0,
+    )
+    calibration_status: Optional[str] = Field(
+        default=None,
+        alias="calibrationStatus",
+    )
+    observation_date_count: int = Field(
+        default=0,
+        alias="observationDateCount",
+        ge=0,
+    )
+    industry_count: int = Field(default=0, alias="industryCount", ge=0)
+    market_regimes: List[str] = Field(
+        default_factory=list,
+        alias="marketRegimes",
+    )
+    train_end_date: Optional[date] = Field(
+        default=None,
+        alias="trainEndDate",
+    )
+    holdout_start_date: Optional[date] = Field(
+        default=None,
+        alias="holdoutStartDate",
+    )
+    metric_quantiles: Dict[str, Dict[str, float]] = Field(
+        default_factory=dict,
+        alias="metricQuantiles",
+    )
+    metric_sample_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        alias="metricSampleCounts",
+    )
+    train_observation_date_count: int = Field(
+        default=0,
+        alias="trainObservationDateCount",
+        ge=0,
+    )
+    holdout_observation_date_count: int = Field(
+        default=0,
+        alias="holdoutObservationDateCount",
+        ge=0,
+    )
+    holdout_metric_sample_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        alias="holdoutMetricSampleCounts",
+    )
+    threshold_review_state: Literal[
+        "review_ready",
+        "approved",
+        "not_ready",
+        "failed",
+    ] = Field(default="not_ready", alias="thresholdReviewState")
+    calibration_identity: Optional[str] = Field(
+        default=None,
+        alias="calibrationIdentity",
+    )
+    threshold_set_id: Optional[str] = Field(
+        default=None,
+        alias="thresholdSetId",
+    )
+    approval_id: Optional[str] = Field(default=None, alias="approvalId")
+    approved_by: Optional[str] = Field(default=None, alias="approvedBy")
+    approved_at: Optional[datetime] = Field(
+        default=None,
+        alias="approvedAt",
+    )
+    threshold_review_reason_codes: List[str] = Field(
+        default_factory=list,
+        alias="thresholdReviewReasonCodes",
+    )
+    formal_approval: bool = Field(
+        default=False,
+        alias="formalApproval",
+    )
+    gate: Dict[str, bool] = Field(default_factory=dict)
+    reason_codes: List[str] = Field(
+        default_factory=list,
+        alias="reasonCodes",
+    )
+
+
 class RadarStockResponse(RadarApiModel):
     schema_version: Literal["radar-stock-v1"] = Field(
         default="radar-stock-v1",

@@ -339,8 +339,10 @@ def evaluate_sector_rule_readiness(
                 "sector_classification_identity_mismatch"
             )
         if (
-            classification_release.history_status
-            != IndustryHistoryStatus.FORWARD_OBSERVED
+            classification_release.history_status not in {
+                IndustryHistoryStatus.FORWARD_OBSERVED,
+                IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED,
+            }
         ):
             classification_history_reasons.append(
                 "sector_classification_history_unverified"

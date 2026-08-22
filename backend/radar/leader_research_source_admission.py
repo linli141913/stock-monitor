@@ -23,6 +23,12 @@ from radar.leader_business_catalyst_manual_review import (
     LeaderOfficialBusinessManualReviewBatchResult,
     LeaderOfficialBusinessManualReviewBatchStatus,
 )
+from radar.leader_business_official_verification_adapter import (
+    LEADER_BUSINESS_VERIFICATION_BATCH_CONTRACT_ID,
+    LeaderOfficialBusinessVerificationBatchItem,
+    LeaderOfficialBusinessVerificationBatchResult,
+    LeaderOfficialBusinessVerificationBatchStatus,
+)
 from radar.leader_history_features import LeaderHistoryFeatureInput
 from radar.leader_research_features import ResearchFeatureStatus
 from radar.leader_research_input_provider_batch import (
@@ -523,6 +529,67 @@ def _business_batch_valid(
     candidate_plan_id: str,
     candidate_symbols: Tuple[str, ...],
 ) -> bool:
+    if type(value) is LeaderOfficialBusinessVerificationBatchResult:
+        if (
+            value.contract_id != LEADER_BUSINESS_VERIFICATION_BATCH_CONTRACT_ID
+            or value.status
+            == LeaderOfficialBusinessVerificationBatchStatus.BLOCKED
+            or value.candidate_plan_id != candidate_plan_id
+            or value.candidate_count != len(candidate_symbols)
+            or not isinstance(value.items, tuple)
+            or len(value.items) != len(candidate_symbols)
+            or tuple(getattr(item, "symbol", None) for item in value.items)
+            != candidate_symbols
+            or any((
+                value.formal_score_ready is not False,
+                value.formal_gate_ready is not False,
+                value.formal_usable is not False,
+                value.state_transition_allowed is not False,
+            ))
+        ):
+            return False
+        ready_count = 0
+        for index, item in enumerate(value.items):
+            if (
+                type(item)
+                is not LeaderOfficialBusinessVerificationBatchItem
+                or item.index != index
+                or not isinstance(item.status, ResearchFeatureStatus)
+                or not _reasons_valid(item.reasons)
+                or (
+                    item.status == ResearchFeatureStatus.READY
+                    and (
+                        type(item.input_value)
+                        is not LeaderBusinessCatalystFeatureInput
+                        or item.reasons
+                        != ("business_deterministic_verification_ready",)
+                        or not isinstance(item.verification_id, str)
+                        or not item.verification_id.startswith("business-auto:")
+                    )
+                )
+                or (
+                    item.status != ResearchFeatureStatus.READY
+                    and item.input_value is not None
+                )
+            ):
+                return False
+            ready_count += item.status == ResearchFeatureStatus.READY
+        if ready_count == len(candidate_symbols):
+            expected_status = LeaderOfficialBusinessVerificationBatchStatus.READY
+            expected_reasons = ()
+        elif all(
+            item.status == ResearchFeatureStatus.MISSING
+            for item in value.items
+        ):
+            expected_status = LeaderOfficialBusinessVerificationBatchStatus.MISSING
+            expected_reasons = ("business_deterministic_batch_missing",)
+        else:
+            expected_status = LeaderOfficialBusinessVerificationBatchStatus.PARTIAL
+            expected_reasons = ("business_deterministic_batch_partial",)
+        return (
+            value.status == expected_status
+            and value.reasons == expected_reasons
+        )
     if (
         type(value) is not LeaderOfficialBusinessManualReviewBatchResult
         or value.contract_id != LEADER_BUSINESS_MANUAL_REVIEW_BATCH_CONTRACT_ID

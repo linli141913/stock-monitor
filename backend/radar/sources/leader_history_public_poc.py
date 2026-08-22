@@ -19,6 +19,10 @@ from radar.leader_history_features import (
     HistorySeriesRole,
     LeaderHistoryFeatureInput,
 )
+from radar.contracts import (
+    IndustryClassificationRelease,
+    IndustryHistoryStatus,
+)
 from radar.leader_research_features import ResearchFeatureStatus
 
 
@@ -64,6 +68,10 @@ class PointInTimeIndustryMembership:
     first_observed_at: datetime
     fetched_at: datetime
     document_sha256: str
+    history_status: IndustryHistoryStatus = (
+        IndustryHistoryStatus.FORWARD_OBSERVED
+    )
+    knowledge_effective_from: Optional[datetime] = None
     excluded_out_of_scope_count: int = 0
 
 
@@ -114,6 +122,35 @@ class PublicHistoryPocResult:
             "formalUsable": False,
             "stateTransitionAllowed": False,
         }
+
+
+def build_point_in_time_industry_membership(
+    *,
+    release: IndustryClassificationRelease,
+    industry_code: str,
+    candidate_symbol: str,
+    member_symbols: Tuple[str, ...],
+    excluded_out_of_scope_count: int = 0,
+) -> PointInTimeIndustryMembership:
+    """把官方发布版本无损转为历史输入，不伪造首次观察时间。"""
+
+    if type(release) is not IndustryClassificationRelease:
+        raise ValueError("industry_release_unverified")
+    return PointInTimeIndustryMembership(
+        release_id=f"capco-{release.release_period}",
+        source_contract_id="capco-industry-classification-v1",
+        industry_code=industry_code,
+        candidate_symbol=candidate_symbol,
+        member_symbols=member_symbols,
+        published_date=release.published_date,
+        classification_start_date=release.classification_start_date,
+        first_observed_at=release.first_observed_at,
+        fetched_at=release.fetched_at,
+        document_sha256=f"sha256:{release.document_sha256}",
+        history_status=release.history_status,
+        knowledge_effective_from=release.knowledge_effective_from,
+        excluded_out_of_scope_count=excluded_out_of_scope_count,
+    )
 
 
 def _aware(value: Any) -> bool:
@@ -352,11 +389,27 @@ def run_public_history_input_poc(
             reasons.append("industry_membership_effective_window_incomplete")
         if membership.published_date > last_date:
             reasons.append("industry_membership_publication_future")
-        if (
-            _aware(membership.first_observed_at)
-            and membership.first_observed_at.date() > first_date
+        if membership.history_status == IndustryHistoryStatus.FORWARD_OBSERVED:
+            if (
+                _aware(membership.first_observed_at)
+                and membership.first_observed_at.date() > first_date
+            ):
+                reasons.append("industry_membership_forward_window_incomplete")
+        elif (
+            membership.history_status
+            == IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED
         ):
-            reasons.append("industry_membership_forward_window_incomplete")
+            if (
+                not _aware(membership.knowledge_effective_from)
+                or membership.knowledge_effective_from.date()
+                != membership.published_date
+                or membership.knowledge_effective_from.date() > first_date
+            ):
+                reasons.append(
+                    "industry_membership_archive_window_unverified"
+                )
+        else:
+            reasons.append("industry_membership_history_unverified")
 
     complete = {}
     for symbol in expected_series:

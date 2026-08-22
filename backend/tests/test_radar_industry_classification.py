@@ -273,6 +273,22 @@ class IndustryClassificationSourceTests(unittest.TestCase):
         )
         self.assertEqual(result.release.knowledge_effective_from, FETCHED_AT)
 
+    def test_official_archive_mode_uses_published_date_without_faking_observation(self):
+        result = self.fetch(
+            providers_for(source_record()),
+            verify_official_archive=True,
+        )
+
+        self.assertEqual(
+            result.release.history_status,
+            IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED,
+        )
+        self.assertEqual(result.release.first_observed_at, FETCHED_AT)
+        self.assertEqual(
+            result.release.knowledge_effective_from,
+            datetime(2026, 4, 3, tzinfo=SHANGHAI_TZ),
+        )
+
     def test_unverified_bse_alias_stays_unresolved_without_name_matching(self):
         old_bse_row = source_record(
             symbol="830001",

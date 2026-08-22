@@ -32,9 +32,9 @@ from radar.sources.industry_classification import (
 from radar.sources.leader_history_public_poc import (
     MAXIMUM_INDUSTRY_MEMBER_COUNT,
     PUBLIC_HISTORY_POC_CONTRACT_ID,
-    PointInTimeIndustryMembership,
     PublicHistoryPocQuery,
     TENCENT_HISTORY_URL,
+    build_point_in_time_industry_membership,
     parse_tencent_history_payload,
     run_public_history_input_poc,
 )
@@ -361,6 +361,7 @@ def _collect_default_public_history_evidence(
         publication_page_url=CAPCO_PUBLICATION_PAGE_URL,
         current_security_master=tuple(master.items),
         first_observed_at=observed_at,
+        verify_official_archive=True,
     )
     release = classification.release
     if release is None:
@@ -472,17 +473,11 @@ def _collect_default_public_history_evidence(
             failures.append(f"tencentHistory:{item}:{issue_code}")
 
     completed_at = _now()
-    membership = PointInTimeIndustryMembership(
-        release_id=f"capco-{release.release_period}",
-        source_contract_id="capco-industry-classification-v1",
+    membership = build_point_in_time_industry_membership(
+        release=release,
         industry_code=industry_code,
         candidate_symbol=symbol,
         member_symbols=members,
-        published_date=release.published_date,
-        classification_start_date=release.classification_start_date,
-        first_observed_at=release.first_observed_at,
-        fetched_at=release.fetched_at,
-        document_sha256=f"sha256:{release.document_sha256}",
         excluded_out_of_scope_count=excluded_out_of_scope_count,
     )
     result = run_public_history_input_poc(PublicHistoryPocQuery(

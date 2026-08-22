@@ -8,11 +8,13 @@ from radar.leader_history_features import (
     HistoryAdjustmentBasis,
     build_leader_history_features,
 )
+from radar.contracts import IndustryHistoryStatus
 from radar.leader_research_features import ResearchFeatureStatus
 from radar.sources.leader_history_public_poc import (
     PointInTimeIndustryMembership,
     PublicHistoryPocQuery,
     PublicHistorySeries,
+    build_point_in_time_industry_membership,
     parse_tencent_history_payload,
     run_public_history_input_poc,
 )
@@ -102,6 +104,27 @@ def query(*, membership_value=None, series_by_symbol=None):
 
 
 class PublicHistoryPocTests(unittest.TestCase):
+    def test_archive_release_adapter_preserves_real_observation_and_public_knowledge(self):
+        from tests.test_radar_sector_history_backfill import archived_release
+
+        release = archived_release()
+        value = build_point_in_time_industry_membership(
+            release=release,
+            industry_code="15",
+            candidate_symbol="600519",
+            member_symbols=("600519", "000858"),
+        )
+
+        self.assertEqual(value.first_observed_at, release.first_observed_at)
+        self.assertEqual(
+            value.history_status,
+            IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED,
+        )
+        self.assertEqual(
+            value.knowledge_effective_from,
+            release.knowledge_effective_from,
+        )
+
     def test_complete_public_history_builds_existing_research_input(self):
         result = run_public_history_input_poc(query(
             membership_value=membership(excluded_out_of_scope_count=1),
@@ -133,6 +156,24 @@ class PublicHistoryPocTests(unittest.TestCase):
             "industry_membership_forward_window_incomplete",
             result.reasons,
         )
+
+    def test_verified_official_archive_backfills_without_relabelling_observation(self):
+        archived = replace(
+            membership(first_observed_at=datetime(
+                2026, 8, 8, 19, 0, tzinfo=SHANGHAI_TZ,
+            )),
+            history_status=IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED,
+            knowledge_effective_from=datetime(
+                2026, 4, 3, tzinfo=SHANGHAI_TZ,
+            ),
+        )
+
+        result = run_public_history_input_poc(query(
+            membership_value=archived,
+        ))
+
+        self.assertEqual(result.resolution_status, "ready", result.reasons)
+        self.assertIsNotNone(result.history_input)
 
     def test_missing_one_member_day_blocks_equal_weight_benchmark(self):
         values = dict(query().series_by_symbol)

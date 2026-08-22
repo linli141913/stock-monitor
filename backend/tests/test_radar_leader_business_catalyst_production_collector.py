@@ -79,6 +79,22 @@ class LeaderBusinessCatalystProductionCollectorTests(unittest.TestCase):
             LeaderFormalResearchProductionDeliveryResolutionStatus.READY,
         )
 
+    def test_deterministic_official_batch_replays_into_existing_provider(self):
+        source_batch = self.helper.deterministic_source_batch()
+        source = collect_leader_business_catalyst_production_source(
+            self.context,
+            self.frozen(source_batch=source_batch),
+        )
+
+        self.assertEqual(
+            source.status,
+            LeaderFormalResearchProductionSourceStatus.COMPLETED,
+        )
+        self.assertEqual(
+            source.symbols,
+            tuple(item.symbol for item in self.context.candidate_plan.items),
+        )
+
     def test_one_second_source_server_clock_lead_reaches_provider(self):
         source_batch = replace(
             self.source_batch,

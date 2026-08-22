@@ -113,10 +113,21 @@ def _market_cap_cny(
         or total_shares is None
         or total_shares <= 0
         or currency != "CNY"
-        or abs(
+        or (
+            abs(
             raw_market_cap * MARKET_CAP_SCALE_TO_CNY
             - price * total_shares
-        ) > MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
+            ) > MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
+            and not math.isclose(
+                abs(
+                    raw_market_cap * MARKET_CAP_SCALE_TO_CNY
+                    - price * total_shares
+                ),
+                MARKET_CAP_CROSSCHECK_TOLERANCE_CNY,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+        )
     ):
         return None, UnitVerificationStatus.UNVERIFIED
     return (

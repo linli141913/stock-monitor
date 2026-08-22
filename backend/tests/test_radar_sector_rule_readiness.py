@@ -249,6 +249,27 @@ class SectorRuleReadinessTests(unittest.TestCase):
         self.assertNotIn("state", evidence)
         self.assertNotIn("formalUsable", evidence)
 
+    def test_official_archive_history_is_usable_after_published_date(self):
+        archived_release = release().model_copy(update={
+            "history_status": (
+                IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED
+            ),
+            "knowledge_effective_from": datetime(
+                2026, 4, 3, tzinfo=SHANGHAI_TZ,
+            ),
+        })
+
+        result = evaluate_sector_rule_readiness(
+            feature_batch=feature_batch(),
+            classification_release=archived_release,
+            history_evidence=history_evidence(),
+            market_baseline_evidence=market_baseline(),
+            threshold_approval_evidence=threshold_approval(),
+        )
+
+        self.assertEqual(result.status, SectorRuleReadinessStatus.READY)
+        self.assertEqual(result.reasons, ())
+
     def test_current_known_gaps_remain_missing_with_stable_reasons(self):
         result = evaluate_sector_rule_readiness(
             feature_batch=feature_batch(

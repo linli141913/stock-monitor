@@ -16,6 +16,9 @@ from radar.leader_business_catalyst_official_adapter import (
     LeaderOfficialBusinessMaterialBatchResult,
     build_leader_business_catalyst_inputs_from_official_artifacts_batch,
 )
+from radar.leader_business_official_verification_adapter import (
+    apply_official_business_verifications_batch,
+)
 from radar.leader_research_features import ResearchFeatureStatus
 from radar.leader_research_runtime_provider import (
     LeaderResearchRuntimeSourceContext,
@@ -58,6 +61,7 @@ class LeaderBusinessCatalystRuntimeSourceBatch:
     as_of: datetime
     material_entries: Any = field(repr=False)
     review_entries: Any = field(repr=False)
+    verification_entries: Any = field(default=None, repr=False)
     contract_id: str = (
         LEADER_BUSINESS_CATALYST_RUNTIME_SOURCE_CONTRACT_ID
     )
@@ -93,9 +97,7 @@ class LeaderBusinessCatalystRuntimeBridgeResult:
     material_batch: Optional[
         LeaderOfficialBusinessMaterialBatchResult
     ] = field(default=None, repr=False)
-    business_review_batch: Optional[
-        LeaderOfficialBusinessManualReviewBatchResult
-    ] = field(default=None, repr=False)
+    business_review_batch: Any = field(default=None, repr=False)
     business_inputs_by_symbol: Mapping[str, Any] = field(
         default_factory=dict,
         repr=False,
@@ -189,7 +191,7 @@ def build_leader_business_catalyst_runtime_bridge(
     *,
     source_batch: Any = None,
 ) -> LeaderBusinessCatalystRuntimeBridgeResult:
-    """校验显式官方材料与人工复核；不抓取、不写库、不推断关系。"""
+    """校验显式官方材料与关系验证；不抓取、不写库。"""
 
     if not is_leader_research_runtime_source_context_valid(context):
         raise ValueError(SOURCE_UNVERIFIED)
@@ -203,6 +205,11 @@ def build_leader_business_catalyst_runtime_bridge(
         source_reason = SOURCE_MISSING
     elif not _source_batch_bound(source_batch, context=context):
         source_reason = SOURCE_UNVERIFIED
+    elif (
+        source_batch.verification_entries is not None
+        and source_batch.review_entries
+    ):
+        source_reason = SOURCE_UNVERIFIED
     else:
         material_batch = (
             build_leader_business_catalyst_inputs_from_official_artifacts_batch(
@@ -210,10 +217,16 @@ def build_leader_business_catalyst_runtime_bridge(
                 entries=source_batch.material_entries,
             )
         )
-        business_review_batch = apply_official_business_manual_reviews_batch(
-            material_batch,
-            source_batch.review_entries,
-        )
+        if source_batch.verification_entries is None:
+            business_review_batch = apply_official_business_manual_reviews_batch(
+                material_batch,
+                source_batch.review_entries,
+            )
+        else:
+            business_review_batch = apply_official_business_verifications_batch(
+                material_batch,
+                deterministic_entries=source_batch.verification_entries,
+            )
 
     business_admission_value = business_review_batch
     if source_reason == SOURCE_UNVERIFIED:

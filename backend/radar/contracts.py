@@ -37,6 +37,7 @@ class MarketIndexKey(str, Enum):
 
 class IndustryHistoryStatus(str, Enum):
     FORWARD_OBSERVED = "forward_observed"
+    OFFICIAL_ARCHIVE_VERIFIED = "official_archive_verified"
     RETROSPECTIVE_UNVERIFIED = "retrospective_unverified"
 
 
@@ -286,8 +287,20 @@ class IndustryClassificationRelease(ContractModel):
     def validate_release_times_and_counts(self):
         if self.fetched_at < self.first_observed_at:
             raise ValueError("fetchedAt不能早于firstObservedAt")
-        if self.knowledge_effective_from < self.first_observed_at:
+        archive_verified = (
+            self.history_status
+            == IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED
+        )
+        if (
+            self.knowledge_effective_from < self.first_observed_at
+            and not archive_verified
+        ):
             raise ValueError("knowledgeEffectiveFrom不能早于firstObservedAt")
+        if archive_verified and (
+            self.knowledge_effective_from.date() != self.published_date
+            or self.classification_start_date > self.published_date
+        ):
+            raise ValueError("官方历史版本必须与发布日和分类生效日一致")
         if (
             self.knowledge_effective_to is not None
             and self.knowledge_effective_to <= self.knowledge_effective_from

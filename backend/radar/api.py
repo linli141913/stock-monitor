@@ -20,6 +20,7 @@ from radar.api_contracts import (
     RadarLeaderReviewVersionResponse,
     RadarOverviewResponse,
     RadarSectorsResponse,
+    RadarSectorHistoryResponse,
     RadarStockResponse,
 )
 from radar.config import load_radar_settings
@@ -34,6 +35,14 @@ from radar.leader_risk_review_service import (
 from radar.migrations import validate_applied_migrations
 from radar.read_service import RadarReadService
 from radar.repository import RadarRepository
+from radar.sector_history_store import (
+    DEFAULT_SECTOR_HISTORY_STORE_DIR,
+    load_latest_sector_history_evidence,
+)
+from radar.sector_threshold_review import (
+    build_sector_threshold_review_draft,
+    load_sector_threshold_approval,
+)
 
 
 router = APIRouter(prefix="/api/radar", tags=["Mainline Radar"])
@@ -43,6 +52,10 @@ def _database_path() -> Union[str, Path]:
     import database
 
     return database.DB_PATH
+
+
+def _sector_history_store_path() -> Path:
+    return DEFAULT_SECTOR_HISTORY_STORE_DIR
 
 
 @contextmanager
@@ -153,6 +166,103 @@ def get_radar_leaders(response: Response):
             status_code=503,
             detail="三级龙头只读数据暂不可用",
         ) from exc
+
+
+@router.get(
+    "/sector-history",
+    response_model=RadarSectorHistoryResponse,
+)
+def get_radar_sector_history(response: Response):
+    """读取已持久化的真实行业历史汇总，不访问生产SQLite。"""
+
+    _no_store(response)
+    checked_at = datetime.now(timezone.utc)
+    stored = load_latest_sector_history_evidence(
+        store_dir=_sector_history_store_path(),
+    )
+    if stored.status != "available" or stored.payload is None:
+        return RadarSectorHistoryResponse(
+            checkedAt=checked_at,
+            state=("failed" if stored.status == "failed" else "not_ready"),
+            quality="unavailable",
+            reasonCodes=list(stored.reasons),
+        )
+    payload = stored.payload
+    analysis = payload["analysis"]
+    presence = payload["tradingPresence"]
+    calibration = analysis["calibrationProposal"]
+    try:
+        review = build_sector_threshold_review_draft(stored)
+        approval = load_sector_threshold_approval(
+            store_dir=_sector_history_store_path(),
+            history_evidence=stored,
+        )
+        approval_evidence = approval.to_evidence()
+        threshold_review_state = (
+            "approved"
+            if approval.status == "approved"
+            else (
+                "failed"
+                if approval.status == "failed"
+                else "review_ready"
+            )
+        )
+        threshold_review_reasons = list(approval.reasons)
+    except ValueError:
+        review = None
+        approval = None
+        approval_evidence = {}
+        threshold_review_state = "failed"
+        threshold_review_reasons = [
+            "sector_threshold_review_calibration_unverified"
+        ]
+    return RadarSectorHistoryResponse(
+        checkedAt=checked_at,
+        state="available",
+        quality="complete",
+        asOf=payload["asOf"],
+        publishedAt=stored.published_at,
+        requestedCount=payload["requestedCount"],
+        fetchedCount=payload["fetchedCount"],
+        reusedCount=payload["reusedCount"],
+        failureCount=payload["failureCount"],
+        sectorCount=analysis["sectorCount"],
+        marketSampleCount=analysis["marketSampleCount"],
+        historyCoverageReady=analysis["historyCoverageReady"],
+        tradingPresenceRequestedCount=presence["requestedCount"],
+        tradingPresenceReturnedCount=presence["returnedCount"],
+        calibrationStatus=calibration["status"],
+        observationDateCount=calibration["observationDateCount"],
+        industryCount=calibration["industryCount"],
+        marketRegimes=calibration["marketRegimes"],
+        trainEndDate=calibration["trainEndDate"],
+        holdoutStartDate=calibration["holdoutStartDate"],
+        metricQuantiles=calibration["metricQuantiles"],
+        metricSampleCounts=calibration["metricSampleCounts"],
+        trainObservationDateCount=(
+            calibration["trainObservationDateCount"]
+        ),
+        holdoutObservationDateCount=(
+            calibration["holdoutObservationDateCount"]
+        ),
+        holdoutMetricSampleCounts=(
+            calibration["holdoutMetricSampleCounts"]
+        ),
+        thresholdReviewState=threshold_review_state,
+        calibrationIdentity=(
+            review.calibration_identity if review else None
+        ),
+        thresholdSetId=approval_evidence.get("thresholdSetId"),
+        approvalId=approval_evidence.get("approvalId"),
+        approvedBy=approval_evidence.get("approvedBy"),
+        approvedAt=approval_evidence.get("approvedAt"),
+        thresholdReviewReasonCodes=threshold_review_reasons,
+        formalApproval=bool(
+            approval is not None and approval.status == "approved"
+        ),
+        gate=payload["gate"],
+        reasonCodes=list(payload["reasons"]),
+    )
 
 
 @router.get("/stocks/{symbol}", response_model=RadarStockResponse)

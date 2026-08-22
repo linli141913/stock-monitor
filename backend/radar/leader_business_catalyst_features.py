@@ -591,7 +591,19 @@ def build_leader_business_catalyst_features(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
             ("business_reviewed_at_future",),
         )
-    if any(review.review_method != "manual" for review in reviews):
+    if any(
+        review.review_method not in {"manual", "deterministic_official"}
+        or (
+            review.review_method == "deterministic_official"
+            and (
+                not review.review_id.startswith("business-auto:")
+                or review.mapping_version
+                != "radar-leader-business-deterministic-relation-v4"
+                or review.reviewer_key != review.mapping_version
+            )
+        )
+        for review in reviews
+    ):
         return _invalid_result(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,
             ("business_review_method_unverified",),

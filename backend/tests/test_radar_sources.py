@@ -587,6 +587,35 @@ class TencentQuoteSourceTests(unittest.TestCase):
         )
         self.assertEqual(quote.market_cap_cny, 217_152_000_000.0)
 
+    def test_market_cap_exact_half_unit_rounding_boundary_is_not_rejected(self):
+        cases = (
+            ("20.67", "31.00", "150000000"),
+            ("33.85", "37.23", "110000000"),
+        )
+        for price, market_cap, total_shares in cases:
+            with self.subTest(price=price):
+                quote = fetch_tencent_quotes(
+                    ["000001"],
+                    radar_run_id="run-1",
+                    batch_id="quote-1",
+                    as_of=AS_OF,
+                    session=FakeSession(
+                        lambda _url, _call: tencent_line(
+                            "000001",
+                            price=price,
+                            market_cap=market_cap,
+                            total_shares=total_shares,
+                            currency="CNY",
+                        )
+                    ),
+                    clock=lambda: FETCHED_AT,
+                ).items[0]
+
+                self.assertEqual(
+                    quote.market_cap_unit_status,
+                    UnitVerificationStatus.VERIFIED,
+                )
+
     def test_missing_or_non_cny_market_cap_evidence_stays_unverified(self):
         cases = (
             {"total_shares": "", "currency": "CNY"},

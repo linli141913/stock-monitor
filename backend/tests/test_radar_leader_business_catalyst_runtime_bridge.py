@@ -21,6 +21,9 @@ from tests.test_radar_leader_business_catalyst_manual_review import (
 from tests.test_radar_leader_business_catalyst_official_adapter import (
     batch_entry,
 )
+from tests.test_radar_leader_business_official_verification_adapter import (
+    LeaderBusinessOfficialVerificationAdapterTests,
+)
 
 
 class _EmptyReviewRepository:
@@ -69,6 +72,29 @@ class LeaderBusinessCatalystRuntimeBridgeTests(unittest.TestCase):
                     ),
                 )
                 for index, item in enumerate(self.plan.items)
+            ),
+        )
+
+    def deterministic_source_batch(self):
+        verification = LeaderBusinessOfficialVerificationAdapterTests(
+            methodName=(
+                "test_deterministic_artifacts_replay_to_existing_ready_inputs"
+            )
+        )
+        verification.setUp()
+        return LeaderBusinessCatalystRuntimeSourceBatch(
+            candidate_plan_id=self.plan.candidate_set_id,
+            radar_run_id=self.plan.radar_run_id,
+            quote_batch_id=self.plan.quote_batch_id,
+            as_of=self.plan.as_of,
+            material_entries=tuple(
+                verification.material_entry(item)
+                for item in self.plan.items
+            ),
+            review_entries=(),
+            verification_entries=tuple(
+                verification.verification_entry(item)
+                for item in self.plan.items
             ),
         )
 
@@ -148,6 +174,34 @@ class LeaderBusinessCatalystRuntimeBridgeTests(unittest.TestCase):
         self.assertNotIn(
             self.plan.items[1].symbol,
             result.business_inputs_by_symbol,
+        )
+
+    def test_deterministic_official_batch_reaches_existing_runtime_bridge(self):
+        result = self.build(self.deterministic_source_batch())
+
+        self.assertEqual(
+            result.status,
+            LeaderBusinessCatalystRuntimeBridgeStatus.READY,
+        )
+        self.assertEqual(result.ready_count, self.plan.candidate_count)
+        self.assertTrue(all(
+            item.input_value.reviews[0].review_method
+            == "deterministic_official"
+            for item in result.business_review_batch.items
+        ))
+
+    def test_mixed_manual_and_deterministic_batch_is_blocked(self):
+        mixed = replace(
+            self.deterministic_source_batch(),
+            review_entries=self.source_batch().review_entries,
+        )
+
+        result = self.build(mixed)
+
+        self.assertEqual(result.ready_count, 0)
+        self.assertEqual(
+            result.reasons,
+            ("leader_business_catalyst_runtime_bridge_source_unverified",),
         )
 
     def test_cross_run_source_batch_is_blocked_not_relabelled_missing(self):

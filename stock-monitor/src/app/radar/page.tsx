@@ -28,6 +28,7 @@ import type {
   RadarLeadersResponse,
   RadarOverviewResponse,
   RadarSectorsResponse,
+  RadarSectorHistoryResponse,
 } from '@/types/radar';
 import type { RadarAiScopeType } from '@/types/radar-ai';
 import styles from './page.module.css';
@@ -58,6 +59,20 @@ function formatTime(
   if (Number.isNaN(date.getTime())) return '—';
   if (withSeconds) return TIME_FORMATTER.format(date);
   return TIME_FORMATTER.format(date).slice(0, 5);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 function stateLabel(state: string) {
@@ -139,6 +154,9 @@ export default function RadarPage() {
   const [sectors, setSectors] = useState<RadarSectorsResponse | null>(null);
   const [etfs, setEtfs] = useState<RadarEtfsResponse | null>(null);
   const [leaders, setLeaders] = useState<RadarLeadersResponse | null>(null);
+  const [sectorHistory, setSectorHistory] = useState<
+    RadarSectorHistoryResponse | null
+  >(null);
   const [leaderReviewQueue, setLeaderReviewQueue] = useState<
     RadarLeaderReviewQueueResponse | null
   >(null);
@@ -154,6 +172,7 @@ export default function RadarPage() {
   const [sectorsRefreshError, setSectorsRefreshError] = useState('');
   const [etfsRefreshError, setEtfsRefreshError] = useState('');
   const [leadersRefreshError, setLeadersRefreshError] = useState('');
+  const [historyRefreshError, setHistoryRefreshError] = useState('');
   const [leaderReviewQueueError, setLeaderReviewQueueError] = useState('');
   const [leaderReviewQueueLoading, setLeaderReviewQueueLoading] = useState(false);
   const [leaderReviewSubmitting, setLeaderReviewSubmitting] = useState(false);
@@ -163,6 +182,7 @@ export default function RadarPage() {
   const sectorsInFlight = useRef(false);
   const etfsInFlight = useRef(false);
   const leadersInFlight = useRef(false);
+  const historyInFlight = useRef(false);
   const leaderReviewQueueInFlight = useRef(false);
   const leaderReviewQueueOffset = useRef(0);
 
@@ -313,6 +333,31 @@ export default function RadarPage() {
       );
     } finally {
       leadersInFlight.current = false;
+    }
+  }, []);
+
+  const loadSectorHistory = useCallback(async () => {
+    if (historyInFlight.current) return;
+    historyInFlight.current = true;
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/sector-history?_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('行业历史真实快照暂不可用');
+      const payload = await response.json() as RadarSectorHistoryResponse;
+      if (payload.schemaVersion !== 'radar-sector-history-v1') {
+        throw new Error('行业历史数据契约不匹配');
+      }
+      setSectorHistory(payload);
+      setRenderedAt(new Date().toISOString());
+      setHistoryRefreshError('');
+    } catch (error) {
+      setHistoryRefreshError(
+        error instanceof Error ? error.message : '行业历史真实快照暂不可用',
+      );
+    } finally {
+      historyInFlight.current = false;
     }
   }, []);
 
@@ -508,6 +553,18 @@ export default function RadarPage() {
     };
   }, [activeTab, loadLeaderReviewQueue, loadLeaders]);
 
+  useEffect(() => {
+    if (activeTab !== 'history') return;
+    const initialTimer = window.setTimeout(() => void loadSectorHistory(), 0);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadSectorHistory();
+    }, 300_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [activeTab, loadSectorHistory]);
+
   const refreshNow = async () => {
     await loadOverview(false);
     if (activeTab === 'sectors') await loadSectors();
@@ -516,6 +573,7 @@ export default function RadarPage() {
       await loadLeaders();
       await loadLeaderReviewQueue(leaderReviewQueueOffset.current);
     }
+    if (activeTab === 'history') await loadSectorHistory();
   };
 
   const showTab = (tab: RadarTab) => {
@@ -904,13 +962,91 @@ export default function RadarPage() {
       )}
 
       {activeTab === 'history' && (
-        <ModuleStatePanel
-          state="not_enabled"
-          title="历史验证"
-          description="阶段9才接入严格时间点回放、黄金样本和影子质量结果。"
-          stage={9}
-          badges={['不展示虚假胜率', '不生成收益承诺']}
-        />
+        <>
+          {historyRefreshError && (
+            <div className={styles.refreshError}>
+              {historyRefreshError}。没有用旧数据冒充本轮成功。
+            </div>
+          )}
+          <ModuleStatePanel
+            state={sectorHistory?.state || (historyRefreshError ? 'failed' : 'not_ready')}
+            title="行业历史与阈值校准"
+            description={sectorHistory?.state === 'available'
+              ? `真实公开源历史已持久化。数据时点 ${formatDateTime(sectorHistory.asOf)}，发布到项目运行仓 ${formatDateTime(sectorHistory.publishedAt)}。`
+              : '正在读取项目运行仓中的真实历史汇总，不触发全市场重新抓取。'}
+            metrics={sectorHistory ? [
+              { label: '证券覆盖', value: `${sectorHistory.requestedCount.toLocaleString('zh-CN')} 只` },
+              { label: '行业覆盖', value: `${sectorHistory.sectorCount} 个` },
+              { label: '市场样本', value: `${sectorHistory.marketSampleCount} 日` },
+              {
+                label: '单指标样本',
+                value: `${(sectorHistory.metricSampleCounts.relativeReturn || 0).toLocaleString('zh-CN')} 训练 / ${(sectorHistory.holdoutMetricSampleCounts.relativeReturn || 0).toLocaleString('zh-CN')} 留出`,
+              },
+            ] : []}
+            progress={sectorHistory?.state === 'available' ? [
+              {
+                label: '全市场分钟历史',
+                value: `${sectorHistory.requestedCount - sectorHistory.failureCount}/${sectorHistory.requestedCount}`,
+                detail: '真实在线历史或同内容断点复用',
+                percent: sectorHistory.requestedCount
+                  ? ((sectorHistory.requestedCount - sectorHistory.failureCount) / sectorHistory.requestedCount) * 100
+                  : 0,
+                tone: 'good',
+              },
+              {
+                label: '分钟缺口日线核验',
+                value: `${sectorHistory.tradingPresenceReturnedCount}/${sectorHistory.tradingPresenceRequestedCount}`,
+                detail: '只用腾讯/新浪真实日线证明交易或停牌',
+                percent: sectorHistory.tradingPresenceRequestedCount
+                  ? (sectorHistory.tradingPresenceReturnedCount / sectorHistory.tradingPresenceRequestedCount) * 100
+                  : 100,
+                tone: 'good',
+              },
+              {
+                label: '阈值校准观察窗',
+                value: `${sectorHistory.observationDateCount}/20 日`,
+                detail: `训练 ${sectorHistory.trainObservationDateCount} 日（截止 ${sectorHistory.trainEndDate || '—'}），留出 ${sectorHistory.holdoutObservationDateCount} 日（开始 ${sectorHistory.holdoutStartDate || '—'}）`,
+                percent: Math.min(100, (sectorHistory.observationDateCount / 20) * 100),
+                tone: sectorHistory.observationDateCount >= 20 ? 'good' : 'warning',
+              },
+            ] : []}
+            milestones={sectorHistory?.state === 'available' ? [
+              {
+                label: '真实历史主动回填',
+                detail: `${sectorHistory.sectorCount} 个行业，${sectorHistory.marketSampleCount} 个市场日期样本`,
+                status: sectorHistory.historyCoverageReady ? 'done' : 'active',
+              },
+              {
+                label: '自动校准提案',
+                detail: `${sectorHistory.industryCount} 个行业，覆盖 ${sectorHistory.marketRegimes.join(' / ') || '未知'} 市场状态`,
+                status: sectorHistory.calibrationStatus === 'proposal_ready' ? 'done' : 'active',
+              },
+              {
+                label: '版本化正式阈值批准',
+                detail: sectorHistory.formalApproval
+                  ? `阈值集 ${sectorHistory.thresholdSetId || '—'}，批准于 ${formatDateTime(sectorHistory.approvedAt)}`
+                  : `审阅稿 ${sectorHistory.calibrationIdentity?.slice(0, 12) || '—'}；自动分析不能代替正式批准`,
+                status: sectorHistory.formalApproval ? 'done' : 'pending',
+              },
+            ] : []}
+            blockers={sectorHistory?.state === 'available' && !sectorHistory.formalApproval
+              ? [
+                '真实训练集与留出集已经严格隔离；正式八状态策略尚未批准',
+                ...sectorHistory.thresholdReviewReasonCodes,
+              ]
+              : sectorHistory?.reasonCodes || []}
+            nextStep={sectorHistory?.state === 'available'
+              ? (sectorHistory.formalApproval
+                ? '批准版本已可由行业规则同轮证据包自动加载；其他真实门继续独立核验'
+                : '填写完整八状态进入/保持/退出策略并作一次具名批准；系统随后自动校验和接入')
+              : '运行全自动历史同步后，本页将直接读取持久化结果'}
+            badges={[
+              '不展示虚假胜率',
+              '不生成收益承诺',
+              sectorHistory?.gate.formalGateReady ? '正式门已通过' : '正式门保持关闭',
+            ]}
+          />
+        </>
       )}
 
       <footer className={styles.radarFooter}>

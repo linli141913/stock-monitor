@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
 from html import unescape
@@ -29,6 +29,7 @@ CNINFO_BUSINESS_MATERIAL_CONTRACT_ID = (
 )
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
 REQUEST_TIMEOUT_SECONDS = 20.0
+MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS = 2
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 TITLE_TAG_PATTERN = re.compile(r"<[^>]*>")
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
@@ -332,37 +333,79 @@ def fetch_cninfo_business_materials(
             fetched_at=datetime.now(SHANGHAI_TZ),
         )
     requester = transport
+
+    def request_page(page_query: CninfoBusinessMaterialQuery):
+        for attempt in range(MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS):
+            try:
+                if requester is not None:
+                    return requester(page_query)
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.post(
+                        CNINFO_QUERY_URL,
+                        data={
+                            "pageNum": page_query.page_number,
+                            "pageSize": page_query.page_size,
+                            "tabName": "fulltext",
+                            "column": "szse",
+                            "stock": (
+                                f"{page_query.scope.symbol},"
+                                f"{page_query.scope.issuer_identity.removeprefix('cninfo-org:')}"
+                            ),
+                            "searchkey": page_query.search_key,
+                            "seDate": (
+                                f"{page_query.window_from.isoformat()}~"
+                                f"{page_query.window_until.isoformat()}"
+                            ),
+                            "sortName": "announcementId",
+                            "sortType": "desc",
+                            "isHLtitle": "true",
+                        },
+                        headers={"User-Agent": "Mozilla/5.0"},
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except requests.RequestException:
+                if attempt + 1 == MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS:
+                    raise
+        raise RuntimeError("business_material_request_attempts_exhausted")
+
     try:
-        if requester is None:
-            with requests.Session() as session:
-                session.trust_env = False
-                response = session.post(
-                    CNINFO_QUERY_URL,
-                    data={
-                        "pageNum": query.page_number,
-                        "pageSize": query.page_size,
-                        "tabName": "fulltext",
-                        "column": "szse",
-                        "stock": (
-                            f"{query.scope.symbol},"
-                            f"{query.scope.issuer_identity.removeprefix('cninfo-org:')}"
-                        ),
-                        "searchkey": query.search_key,
-                        "seDate": (
-                            f"{query.window_from.isoformat()}~"
-                            f"{query.window_until.isoformat()}"
-                        ),
-                        "sortName": "announcementId",
-                        "sortType": "desc",
-                        "isHLtitle": "true",
-                    },
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    timeout=REQUEST_TIMEOUT_SECONDS,
+        payload = request_page(query)
+        if isinstance(payload, Mapping) and payload.get("hasMore") is True:
+            next_payload = request_page(replace(
+                query,
+                page_number=query.page_number + 1,
+            ))
+            if (
+                not isinstance(next_payload, Mapping)
+                or not isinstance(payload.get("announcements"), list)
+                or not isinstance(next_payload.get("announcements"), list)
+                or payload.get("totalAnnouncement")
+                != next_payload.get("totalAnnouncement")
+                or payload.get("totalpages")
+                != next_payload.get("totalpages")
+                or not isinstance(next_payload.get("hasMore"), bool)
+            ):
+                return _result(
+                    query,
+                    OfficialBusinessMaterialDiscoveryStatus.SOURCE_UNVERIFIED,
+                    fetched_at=(
+                        clock or (lambda: datetime.now(SHANGHAI_TZ))
+                    )(),
+                    reasons=(
+                        "business_material_page_coverage_unverified",
+                    ),
                 )
-                response.raise_for_status()
-                payload = response.json()
-        else:
-            payload = requester(query)
+            payload = {
+                **payload,
+                "announcements": [
+                    *payload["announcements"],
+                    *next_payload["announcements"],
+                ],
+                "hasMore": next_payload["hasMore"],
+            }
         return parse_cninfo_business_material_payload(
             query,
             payload,

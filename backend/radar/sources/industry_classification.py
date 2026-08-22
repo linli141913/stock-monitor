@@ -523,9 +523,12 @@ def fetch_industry_classification(
     verified_aliases: Sequence[VerifiedSecurityAlias] = (),
     known_document_hashes: Optional[Mapping[str, str]] = None,
     first_observed_at: Optional[datetime] = None,
+    verify_official_archive: bool = False,
     timeout_seconds: float = 15.0,
     clock: Callable[[], datetime] = _now,
 ) -> IndustryClassificationSnapshot:
+    if type(verify_official_archive) is not bool:
+        raise ValueError("verify_official_archive必须是布尔值")
     if not 0 < timeout_seconds <= 30:
         raise ValueError("timeout_seconds必须在0到30秒之间")
     _require_aware(as_of, "asOf")
@@ -677,12 +680,24 @@ def fetch_industry_classification(
                 issueCodes=issue_codes,
             ))
 
-        history_status = (
-            IndustryHistoryStatus.FORWARD_OBSERVED
-            if observed_at.astimezone(SHANGHAI_TZ).date()
+        if verify_official_archive:
+            history_status = (
+                IndustryHistoryStatus.OFFICIAL_ARCHIVE_VERIFIED
+            )
+            knowledge_effective_from = datetime.combine(
+                page_metadata.published_date,
+                datetime.min.time(),
+                tzinfo=SHANGHAI_TZ,
+            )
+        elif (
+            observed_at.astimezone(SHANGHAI_TZ).date()
             <= page_metadata.published_date + timedelta(days=1)
-            else IndustryHistoryStatus.RETROSPECTIVE_UNVERIFIED
-        )
+        ):
+            history_status = IndustryHistoryStatus.FORWARD_OBSERVED
+            knowledge_effective_from = observed_at
+        else:
+            history_status = IndustryHistoryStatus.RETROSPECTIVE_UNVERIFIED
+            knowledge_effective_from = observed_at
         release = IndustryClassificationRelease(
             schemeVersion=SCHEME_VERSION,
             releasePeriod=page_metadata.release_period,
@@ -693,7 +708,7 @@ def fetch_industry_classification(
             publishedDate=page_metadata.published_date,
             firstObservedAt=observed_at,
             fetchedAt=fetched_at,
-            knowledgeEffectiveFrom=observed_at,
+            knowledgeEffectiveFrom=knowledge_effective_from,
             knowledgeEffectiveTo=None,
             classificationStartDate=page_metadata.classification_start_date,
             historyStatus=history_status,

@@ -25,6 +25,12 @@ from radar.leader_business_catalyst_runtime_bridge import (
     LeaderBusinessCatalystRuntimeSourceBatch,
     build_leader_business_catalyst_runtime_bridge,
 )
+from radar.leader_business_deterministic_verification import (
+    DeterministicOfficialBusinessVerificationArtifact,
+)
+from radar.leader_business_official_verification_adapter import (
+    LeaderOfficialBusinessDeterministicVerificationBatchEntry,
+)
 from radar.leader_formal_research_production_provider import (
     LeaderFormalResearchProductionCollectedSource,
     LeaderFormalResearchProductionSourceStatus,
@@ -56,6 +62,11 @@ class LeaderBusinessCatalystProductionFrozenBatch:
     def to_evidence(self) -> Mapping[str, object]:
         material_entries = getattr(self.source_batch, "material_entries", ())
         review_entries = getattr(self.source_batch, "review_entries", ())
+        verification_entries = getattr(
+            self.source_batch,
+            "verification_entries",
+            None,
+        )
         return {
             "contractId": self.contract_id,
             "sourceStatus": (
@@ -79,6 +90,11 @@ class LeaderBusinessCatalystProductionFrozenBatch:
             "reviewEntryCount": (
                 len(review_entries)
                 if isinstance(review_entries, tuple)
+                else 0
+            ),
+            "verificationEntryCount": (
+                len(verification_entries)
+                if isinstance(verification_entries, tuple)
                 else 0
             ),
         }
@@ -114,12 +130,24 @@ def _aware(value: Any) -> bool:
 
 
 def _source_time(source_batch: Any) -> Optional[datetime]:
+    verification_entries = getattr(
+        source_batch,
+        "verification_entries",
+        None,
+    )
     if (
         type(source_batch) is not LeaderBusinessCatalystRuntimeSourceBatch
         or source_batch.contract_id
         != LEADER_BUSINESS_CATALYST_RUNTIME_SOURCE_CONTRACT_ID
         or not isinstance(source_batch.material_entries, tuple)
         or not isinstance(source_batch.review_entries, tuple)
+        or (
+            verification_entries is not None
+            and (
+                not isinstance(verification_entries, tuple)
+                or bool(source_batch.review_entries)
+            )
+        )
     ):
         return None
     times = []
@@ -142,15 +170,27 @@ def _source_time(source_batch: Any) -> Optional[datetime]:
         if any(not _aware(value) for value in artifact_times):
             return None
         times.extend(artifact_times)
-    for entry in source_batch.review_entries:
-        if (
-            type(entry) is not LeaderOfficialBusinessManualReviewBatchEntry
-            or type(entry.review_artifact)
-            is not LeaderOfficialBusinessManualReviewArtifact
-            or not _aware(entry.review_artifact.reviewed_at)
-        ):
-            return None
-        times.append(entry.review_artifact.reviewed_at)
+    if verification_entries is None:
+        for entry in source_batch.review_entries:
+            if (
+                type(entry) is not LeaderOfficialBusinessManualReviewBatchEntry
+                or type(entry.review_artifact)
+                is not LeaderOfficialBusinessManualReviewArtifact
+                or not _aware(entry.review_artifact.reviewed_at)
+            ):
+                return None
+            times.append(entry.review_artifact.reviewed_at)
+    else:
+        for entry in verification_entries:
+            if (
+                type(entry)
+                is not LeaderOfficialBusinessDeterministicVerificationBatchEntry
+                or type(entry.verification_artifact)
+                is not DeterministicOfficialBusinessVerificationArtifact
+                or not _aware(entry.verification_artifact.validated_at)
+            ):
+                return None
+            times.append(entry.verification_artifact.validated_at)
     return max(times) if times else None
 
 

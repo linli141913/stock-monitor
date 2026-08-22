@@ -481,6 +481,50 @@ export interface RadarLeadersResponse {
   module: RadarLeaderModule;
 }
 
+export interface RadarSectorHistoryResponse {
+  schemaVersion: 'radar-sector-history-v1';
+  checkedAt: string;
+  state: 'available' | 'not_ready' | 'failed';
+  quality: 'complete' | 'unavailable';
+  asOf: string | null;
+  publishedAt: string | null;
+  requestedCount: number;
+  fetchedCount: number;
+  reusedCount: number;
+  failureCount: number;
+  sectorCount: number;
+  marketSampleCount: number;
+  historyCoverageReady: boolean;
+  tradingPresenceRequestedCount: number;
+  tradingPresenceReturnedCount: number;
+  calibrationStatus: string | null;
+  observationDateCount: number;
+  industryCount: number;
+  marketRegimes: string[];
+  trainEndDate: string | null;
+  holdoutStartDate: string | null;
+  metricQuantiles: Record<string, Record<string, number>>;
+  metricSampleCounts: Record<string, number>;
+  trainObservationDateCount: number;
+  holdoutObservationDateCount: number;
+  holdoutMetricSampleCounts: Record<string, number>;
+  thresholdReviewState: 'review_ready' | 'approved' | 'not_ready' | 'failed';
+  calibrationIdentity: string | null;
+  thresholdSetId: string | null;
+  approvalId: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  thresholdReviewReasonCodes: string[];
+  formalApproval: boolean;
+  gate: {
+    formalScoreReady?: boolean;
+    formalGateReady?: boolean;
+    formalUsable?: boolean;
+    stateTransitionAllowed?: boolean;
+  };
+  reasonCodes: string[];
+}
+
 export interface RadarStockResponse {
   schemaVersion: 'radar-stock-v1';
   checkedAt: string;
