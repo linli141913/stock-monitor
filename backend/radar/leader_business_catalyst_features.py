@@ -598,7 +598,7 @@ def build_leader_business_catalyst_features(
             and (
                 not review.review_id.startswith("business-auto:")
                 or review.mapping_version
-                != "radar-leader-business-deterministic-relation-v4"
+                != "radar-leader-business-deterministic-relation-v13"
                 or review.reviewer_key != review.mapping_version
             )
         )

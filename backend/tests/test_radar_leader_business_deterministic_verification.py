@@ -102,6 +102,10 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.artifact.relation, BusinessCatalystRelation.DIRECT)
         self.assertEqual(result.artifact.matched_terms, ("工业软件",))
+        self.assertEqual(
+            result.artifact.rule_version,
+            "radar-leader-business-deterministic-relation-v13",
+        )
         self.assertRegex(result.artifact.verification_id, r"^business-auto:[0-9a-f]{64}$")
         self.assertFalse(result.artifact.formal_usable)
         self.assertNotIn("evidence", repr(result))
@@ -125,6 +129,12 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
             (annual_facts(terms=("平台",)), catalyst_facts(terms=("平台",))),
             (annual_facts(terms=("工业软件",)), catalyst_facts(terms=("工业软件项目",))),
             (annual_facts(terms=("平安银行",)), catalyst_facts(terms=("平安银行",))),
+            (annual_facts(terms=("远洋捕捞",)), catalyst_facts(terms=("自捕鱼",))),
+            (annual_facts(terms=("水产品加工",)), catalyst_facts(terms=("进料加工",))),
+            (annual_facts(terms=("畜禽养殖",)), catalyst_facts(terms=("生猪养殖",))),
+            (annual_facts(terms=("水牛奶",)), catalyst_facts(terms=("乳业",))),
+            (annual_facts(terms=("钨锡铅锌矿开采",)), catalyst_facts(terms=("钨矿",))),
+            (annual_facts(terms=("数智能源",)), catalyst_facts(terms=("50MW分散式风电项目",))),
         )
 
         for annual, catalyst in cases:
@@ -140,6 +150,28 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
                     AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
                 )
                 self.assertIsNone(result.artifact)
+
+    def test_long_named_project_reaches_exact_relation_check(self):
+        result = build_deterministic_official_business_verification(
+            plan_item(),
+            annual_facts(terms=("数智能源",)),
+            (
+                catalyst_facts(terms=(
+                    "上海晶纾风力发电有限公司驭风行动50MW分散式风电项目",
+                )),
+            ),
+            validated_at=VALIDATED_AT,
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_deterministic_relation_unconfirmed",),
+        )
+        self.assertIsNone(result.artifact)
 
     def test_structural_qualifiers_do_not_hide_exact_business_objects(self):
         result = build_deterministic_official_business_verification(

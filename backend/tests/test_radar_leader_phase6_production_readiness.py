@@ -1,5 +1,7 @@
 import unittest
+from dataclasses import replace
 from datetime import timedelta
+from unittest.mock import Mock
 
 from radar.leader_business_catalyst_production_collector import (
     LeaderBusinessCatalystProductionFrozenBatch,
@@ -26,6 +28,7 @@ from radar.leader_tradability_production_collector import (
 from radar.sector_rule_production_collector import (
     SectorRuleProductionFrozenBatch,
 )
+from radar.sector_threshold_review import SectorThresholdApprovalLoadResult
 from tests import test_radar_leader_business_catalyst_runtime_bridge as business_helpers
 from tests import test_radar_leader_history_production_collector as history_helpers
 from tests import test_radar_leader_research_source_admission as source_helpers
@@ -111,11 +114,20 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
             ),
         )
 
+    @staticmethod
+    def approved_binder(source_batch):
+        return SectorThresholdApprovalLoadResult(
+            status="approved",
+            reasons=(),
+            source_batch=source_batch,
+        )
+
     def test_one_entrypoint_replays_four_sources_and_keeps_d8_missing(self):
         result = build_leader_phase6_production_readiness(
             self.context,
             repository=_EmptyReviewRepository(),
             frozen_inputs=self.inputs(),
+            sector_threshold_approval_binder=self.approved_binder,
         )
 
         statuses = {
@@ -151,6 +163,115 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
         self.assertFalse(result.formal_usable)
         self.assertFalse(result.state_transition_allowed)
 
+    def test_one_entrypoint_binds_latest_sector_threshold_before_assembly(self):
+        inputs = self.inputs()
+        source_without_threshold = replace(
+            inputs.sector_rule.source_batch,
+            threshold_approval_evidence=None,
+        )
+        inputs = replace(
+            inputs,
+            sector_rule=replace(
+                inputs.sector_rule,
+                source_batch=source_without_threshold,
+            ),
+        )
+        binder = Mock(return_value=SectorThresholdApprovalLoadResult(
+            status="approved",
+            reasons=(),
+            source_batch=self.sector_batch,
+        ))
+
+        result = build_leader_phase6_production_readiness(
+            self.context,
+            repository=_EmptyReviewRepository(),
+            frozen_inputs=inputs,
+            sector_threshold_approval_binder=binder,
+        )
+
+        sector = next(
+            item for item in result.assembly.components
+            if item.name == "sector_rule"
+        )
+        self.assertEqual(
+            sector.status,
+            LeaderFormalResearchRuntimeComponentStatus.READY,
+        )
+        binder.assert_called_once_with(source_without_threshold)
+
+    def test_threshold_binding_failure_reason_reaches_phase6_assembly(self):
+        inputs = self.inputs()
+        inputs = replace(
+            inputs,
+            sector_rule=replace(
+                inputs.sector_rule,
+                source_batch=replace(
+                    inputs.sector_rule.source_batch,
+                    threshold_approval_evidence=None,
+                ),
+            ),
+        )
+        binder = Mock(return_value=SectorThresholdApprovalLoadResult(
+            status="not_ready",
+            reasons=("sector_threshold_approval_snapshot_missing",),
+        ))
+
+        result = build_leader_phase6_production_readiness(
+            self.context,
+            repository=_EmptyReviewRepository(),
+            frozen_inputs=inputs,
+            sector_threshold_approval_binder=binder,
+        )
+
+        sector = next(
+            item for item in result.assembly.components
+            if item.name == "sector_rule"
+        )
+        self.assertEqual(
+            sector.status,
+            LeaderFormalResearchRuntimeComponentStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertIn(
+            "sector_threshold_approval_snapshot_missing",
+            sector.reasons,
+        )
+        self.assertFalse(result.formal_gate_ready)
+        self.assertFalse(result.formal_usable)
+        self.assertFalse(result.state_transition_allowed)
+
+    def test_threshold_binding_exception_reaches_phase6_assembly(self):
+        binder = Mock(side_effect=RuntimeError("private binder failure"))
+
+        result = build_leader_phase6_production_readiness(
+            self.context,
+            repository=_EmptyReviewRepository(),
+            frozen_inputs=self.inputs(),
+            sector_threshold_approval_binder=binder,
+        )
+
+        sector = next(
+            item for item in result.assembly.components
+            if item.name == "sector_rule"
+        )
+        self.assertEqual(
+            sector.status,
+            LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED,
+        )
+        self.assertEqual(
+            sector.reasons,
+            (
+                "sector_threshold_approval_binding_failed",
+                "leader_formal_research_production_delivery_source_failed",
+                "leader_formal_research_runtime_sector_rule_provider_failed",
+            ),
+        )
+        self.assertNotIn("private binder failure", str(result.to_evidence()))
+        binder.assert_called_once_with(self.inputs().sector_rule.source_batch)
+        self.assertFalse(result.formal_score_ready)
+        self.assertFalse(result.formal_gate_ready)
+        self.assertFalse(result.formal_usable)
+        self.assertFalse(result.state_transition_allowed)
+
     def test_unverified_four_source_is_visible_without_partial_payload(self):
         inputs = self.inputs(tradability_bundle=(
             self.source.tradability_bundle(include_official=False)
@@ -159,6 +280,7 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
             self.context,
             repository=_EmptyReviewRepository(),
             frozen_inputs=inputs,
+            sector_threshold_approval_binder=self.approved_binder,
         )
         statuses = {
             item.name: item.status for item in result.assembly.components
@@ -175,6 +297,7 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
             self.context,
             repository=_EmptyReviewRepository(),
             frozen_inputs=self.inputs(),
+            sector_threshold_approval_binder=self.approved_binder,
         )
         evidence = str(result.to_evidence())
 

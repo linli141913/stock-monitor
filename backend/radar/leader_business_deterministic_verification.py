@@ -25,7 +25,7 @@ from radar.leader_runtime_candidate_plan import LeaderRuntimeCandidatePlanItem
 
 
 DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION = (
-    "radar-leader-business-deterministic-relation-v4"
+    "radar-leader-business-deterministic-relation-v13"
 )
 DETERMINISTIC_BUSINESS_VERIFICATION_CONTRACT_ID = (
     "radar-leader-business-deterministic-verification-v1"
@@ -138,12 +138,16 @@ def _fragments_valid(value: Any) -> bool:
     )
 
 
-def _terms_valid(value: Any) -> bool:
+def _terms_valid(value: Any, *, maximum_length: int = 20) -> bool:
     return bool(
         isinstance(value, tuple)
         and value
         and len(value) == len(set(value))
-        and all(isinstance(term, str) and 2 <= len(_normalize(term)) <= 20 for term in value)
+        and all(
+            isinstance(term, str)
+            and 2 <= len(_normalize(term)) <= maximum_length
+            for term in value
+        )
     )
 
 
@@ -178,7 +182,7 @@ def _catalyst_valid(plan_item: LeaderRuntimeCandidatePlanItem, value: Any) -> bo
         and isinstance(value.document_version, str)
         and isinstance(value.content_sha256, str)
         and SHA256_PATTERN.fullmatch(value.content_sha256) is not None
-        and _terms_valid(value.business_terms)
+        and _terms_valid(value.business_terms, maximum_length=60)
         and _fragments_valid(value.fragments)
         and _aware(value.source_time)
         and _aware(value.validated_at)
@@ -191,7 +195,7 @@ def _safe_term(term: str, industry_name: str) -> bool:
     normalized = _normalize(term)
     canonical = _canonical_term(term)
     return bool(
-        2 <= len(canonical) <= 20
+        2 <= len(canonical) <= 60
         and normalized not in GENERIC_RELATION_TERMS
         and normalized not in UNSAFE_RELATION_TERMS
         and canonical not in GENERIC_RELATION_TERMS

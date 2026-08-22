@@ -36,8 +36,17 @@ GENERIC_TERMS = frozenset({
 NEGATIVE_MARKERS = ("终止", "取消", "未中标", "不再履行")
 TERM_SPLIT_PATTERN = re.compile(r"、|以及|及|和")
 EARNINGS_DIRECTION_PATTERN = r"(?:增长|提升|增加|上升|下降|减少|承压|回落|扭亏)"
+PROSPECTIVE_MARKERS = ("拟", "计划", "意向", "预计")
+SENTENCE_END_MARKERS = ("。", "!", "！", "?", "？")
+QUOTED_EPC_CONTRACT_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])"
+    r"(?:(?!(?:拟|计划|意向|预计))[^，,。.;；：:]){0,120}?"
+    r"就[“\"]([^”\"]{2,60}?项目)[”\"]"
+    r"签署EPC承包合同"
+)
 OBJECT_PATTERNS = {
     OfficialBusinessCatalystKind.MAJOR_CONTRACT: (
+        QUOTED_EPC_CONTRACT_PATTERN,
         re.compile(
             r"(?:签订|签署|续签|终止|取消)(?:了)?《"
             r"([^》]{2,40}?)(?:合同|协议)》"
@@ -48,6 +57,7 @@ OBJECT_PATTERNS = {
         ),
     ),
     OfficialBusinessCatalystKind.PROJECT_AWARD: (
+        QUOTED_EPC_CONTRACT_PATTERN,
         re.compile(
             r"第[0-9一二三四五六七八九十、，至和及-]{1,16}标段"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:项目)"
@@ -74,6 +84,39 @@ OBJECT_PATTERNS = {
         ),
     ),
     OfficialBusinessCatalystKind.EARNINGS_FORECAST: (
+        re.compile(
+            r"(?:导致|致使)公司(?:报告期内)?"
+            r"(?!报告期内|项目|公司|整体)"
+            r"([\u4e00-\u9fffA-Za-z0-9]{2,16}?养殖)(?:业务)?"
+            r"(?:利润|毛利).{0,8}" + EARNINGS_DIRECTION_PATTERN
+        ),
+        re.compile(
+            r"(?:推动|带动)(?!公司|行业|主营|整体)"
+            r"([\u4e00-\u9fffA-Za-z0-9]{2,16}?)板块"
+            r"(?:营业收入|收入)(?:实现)?(?:同比)?.{0,4}"
+            + EARNINGS_DIRECTION_PATTERN
+        ),
+        re.compile(
+            r"(?:^|[，,。.;；：:])因"
+            r"(?!市场|原材料|采购|能源|运输|成本)"
+            r"([\u4e00-\u9fffA-Za-z0-9]{2,16}?)(?:市场)?"
+            r"价格(?:上涨|下降|回落|承压)导致当期营业收入"
+        ),
+        re.compile(
+            r"(?:^|[，,。.;；：:])"
+            r"(?!公司业务|主营业务|主要业务)(?:公司)?"
+            r"([\u4e00-\u9fffA-Za-z0-9]{1,18}?"
+            r"(?:加工|生产|制造|服务|销售|运营))(?:业务)"
+            r"(?:有序|逐步|全面)?(?:恢复|复工复产|恢复生产)"
+        ),
+        re.compile(
+            r"(?:^|[，,。.;；：:])[一二三四五六七八九十]+是"
+            r"20\d{2}年(?:度|上半年|下半年|一季度|前三季度)?"
+            r"(?!度|上半年|下半年|一季度|前三季度|公司|市场|"
+            r"原材料|能源|运输|采购|成本)"
+            r"([\u4e00-\u9fffA-Za-z0-9]{2,24}?)"
+            r"(?:销售价格|销售均价|销售单价).{0,12}上涨"
+        ),
         re.compile(
             r"(?:公司)?主要产品"
             r"([\u4e00-\u9fffA-Za-z0-9、及和]{2,48}?)(?:产品)?(?:的)?(?:市场)?"
@@ -210,7 +253,7 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
 
 
-def _clean_term(value: str) -> Optional[str]:
+def _clean_term(value: str, *, maximum_length: int = 20) -> Optional[str]:
     term = _normalize(value).strip("：:。；;、,，‘’“”\"'()（）")
     term = re.sub(
         r"^(?:20\d{2}年(?:度|上半年|下半年|一季度|前三季度)?|"
@@ -222,12 +265,18 @@ def _clean_term(value: str) -> Optional[str]:
     term = re.sub(r"^(?:全年|整体上公司)", "", term)
     term = re.sub(r"(?:业务|产品|板块)$", "", term)
     if (
-        not 2 <= len(term) <= 20
+        not 2 <= len(term) <= maximum_length
         or term in GENERIC_TERMS
         or term in {
             "主营", "主营业务", "主要", "公司", "整体", "营业", "该产品", "重大", "上述",
             "补充", "项目主要内容", "日常经营重大", "产品力", "品牌力的",
+            "承包", "工程承包", "总承包", "总包", "工程总包", "EPC承包",
         }
+        or re.fullmatch(
+            r"(?:(?:EPC|施工|机电|工程|建设|总承包|承包|总包)+)项目",
+            term,
+            flags=re.IGNORECASE,
+        ) is not None
         or term.startswith((
             "相关", "其他", "导致", "致使", "因", "用以", "通知书后",
             "的第", "项目对公司",
@@ -255,8 +304,31 @@ def _matched_terms(
     return tuple(dict.fromkeys(
         term
         for raw_term in raw_terms
-        if (term := _clean_term(raw_term)) is not None
+        if (
+            term := _clean_term(
+                raw_term,
+                maximum_length=(
+                    60
+                    if event_kind in {
+                        OfficialBusinessCatalystKind.MAJOR_CONTRACT,
+                        OfficialBusinessCatalystKind.PROJECT_AWARD,
+                    }
+                    else 20
+                ),
+            )
+        ) is not None
     ))
+
+
+def _has_prospective_sentence_context(value: str, match_start: int) -> bool:
+    sentence_start = max(
+        (value.rfind(marker, 0, match_start) for marker in SENTENCE_END_MARKERS),
+        default=-1,
+    ) + 1
+    return any(
+        marker in value[sentence_start:match_start]
+        for marker in PROSPECTIVE_MARKERS
+    )
 
 
 def extract_official_business_catalyst_facts(
@@ -282,6 +354,14 @@ def extract_official_business_catalyst_facts(
         normalized_document += normalized
         for pattern in patterns:
             for match in pattern.finditer(normalized):
+                if (
+                    pattern is QUOTED_EPC_CONTRACT_PATTERN
+                    and _has_prospective_sentence_context(
+                        normalized,
+                        match.start(),
+                    )
+                ):
+                    continue
                 matched_terms = _matched_terms(
                     document.event_kind,
                     match.group(1),

@@ -91,6 +91,7 @@ class LeaderFormalResearchProductionSourceProof:
     fetched_at: Optional[datetime]
     expected_count: int
     returned_count: int
+    reasons: Tuple[str, ...] = ()
     contract_id: str = (
         LEADER_FORMAL_RESEARCH_PRODUCTION_SOURCE_PROOF_CONTRACT_ID
     )
@@ -228,6 +229,11 @@ def resolve_leader_formal_research_production_delivery(
         or not isinstance(proof.source_contract_id, str)
         or not proof.source_contract_id.strip()
         or not isinstance(proof.status, LeaderFormalResearchProductionSourceStatus)
+        or not isinstance(proof.reasons, tuple)
+        or any(
+            not isinstance(reason, str) or not reason
+            for reason in proof.reasons
+        )
     ):
         return _unverified(DELIVERY_CONTRACT_UNVERIFIED, proof=proof)
 
@@ -268,6 +274,8 @@ def resolve_leader_formal_research_production_delivery(
             reasons.append(DELIVERY_TIME_UNVERIFIED)
         if value.payload is None:
             reasons.append(DELIVERY_PAYLOAD_UNVERIFIED)
+        if proof.reasons:
+            reasons.extend((*proof.reasons, DELIVERY_SOURCE_UNVERIFIED))
         if reasons:
             return _unverified(*reasons, proof=proof)
         return LeaderFormalResearchProductionDeliveryResolution(
@@ -299,7 +307,7 @@ def resolve_leader_formal_research_production_delivery(
     return LeaderFormalResearchProductionDeliveryResolution(
         status=resolution_status,
         proof=proof,
-        reasons=(reason,),
+        reasons=_dedupe((*proof.reasons, reason)),
     )
 
 
@@ -408,6 +416,11 @@ def _provider_delivery(
         and all(isinstance(symbol, str) for symbol in source.symbols)
         and len(source.symbols) == len(set(source.symbols))
         and all(symbol in expected_symbols for symbol in source.symbols)
+        and isinstance(source.reasons, tuple)
+        and all(
+            isinstance(reason, str) and bool(reason)
+            for reason in source.reasons
+        )
     )
     source_contract_id = (
         source.source_contract_id
@@ -423,6 +436,7 @@ def _provider_delivery(
         else LeaderFormalResearchProductionSourceStatus.SOURCE_UNVERIFIED
     )
     payload = source.payload if valid_source else None
+    reasons = source.reasons if valid_source else ()
     if status == LeaderFormalResearchProductionSourceStatus.COMPLETED:
         if symbols != expected_symbols or payload is None:
             status = (
@@ -445,6 +459,7 @@ def _provider_delivery(
         fetched_at=fetched_at,
         expected_count=len(expected_symbols),
         returned_count=len(symbols),
+        reasons=reasons,
     )
     return LeaderFormalResearchProductionSourceDelivery(
         proof=proof,

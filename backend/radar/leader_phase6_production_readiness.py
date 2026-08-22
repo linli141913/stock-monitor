@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from radar.leader_business_catalyst_production_collector import (
     LeaderBusinessCatalystProductionFrozenBatch,
@@ -38,6 +38,11 @@ from radar.leader_tradability_production_collector import (
 from radar.sector_rule_production_collector import (
     SectorRuleProductionFrozenBatch,
     build_sector_rule_production_loader,
+)
+from radar.sector_rule_runtime_bridge import SectorRuleRuntimeSourceBatch
+from radar.sector_threshold_review import (
+    SectorThresholdApprovalLoadResult,
+    bind_latest_sector_threshold_approval,
 )
 
 
@@ -104,6 +109,10 @@ def build_leader_phase6_production_readiness(
     *,
     repository: Any,
     frozen_inputs: LeaderPhase6ProductionFrozenInputs,
+    sector_threshold_approval_binder: Callable[
+        [SectorRuleRuntimeSourceBatch],
+        SectorThresholdApprovalLoadResult,
+    ] = bind_latest_sector_threshold_approval,
 ) -> LeaderPhase6ProductionReadinessResult:
     """一次重放四源和D8，再执行现有五源总装与正式门验收。"""
 
@@ -126,7 +135,10 @@ def build_leader_phase6_production_readiness(
                 frozen_inputs.tradability
             ),
             sector_rule_loader=build_sector_rule_production_loader(
-                frozen_inputs.sector_rule
+                frozen_inputs.sector_rule,
+                threshold_approval_binder=(
+                    sector_threshold_approval_binder
+                ),
             ),
         )
     )

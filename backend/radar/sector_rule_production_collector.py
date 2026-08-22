@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 from radar.contracts import IndustryClassificationRelease, SectorFeatureBatch
 from radar.leader_formal_research_production_provider import (
@@ -29,6 +29,10 @@ from radar.sector_rule_runtime_bridge import (
     SectorRuleRuntimeBridgeStatus,
     SectorRuleRuntimeSourceBatch,
     build_sector_rule_runtime_bridge,
+)
+from radar.sector_threshold_review import (
+    SectorThresholdApprovalLoadResult,
+    bind_latest_sector_threshold_approval,
 )
 
 
@@ -75,6 +79,7 @@ def _collected(
     fetched_at: Optional[datetime] = None,
     symbols: Tuple[str, ...] = (),
     payload: Any = None,
+    reasons: Tuple[str, ...] = (),
 ) -> LeaderFormalResearchProductionCollectedSource:
     return LeaderFormalResearchProductionCollectedSource(
         component_name="sector_rule",
@@ -84,6 +89,7 @@ def _collected(
         fetched_at=fetched_at,
         symbols=symbols,
         payload=payload,
+        reasons=reasons,
     )
 
 
@@ -133,6 +139,11 @@ def _batch_times(batch: Any) -> Optional[Tuple[datetime, datetime]]:
 def collect_sector_rule_production_source(
     context: Any,
     frozen: Any,
+    *,
+    threshold_approval_binder: Callable[
+        [SectorRuleRuntimeSourceBatch],
+        SectorThresholdApprovalLoadResult,
+    ] = bind_latest_sector_threshold_approval,
 ) -> LeaderFormalResearchProductionCollectedSource:
     """重放行业正式规则；九项任一缺失都不交付部分载荷。"""
 
@@ -159,7 +170,34 @@ def collect_sector_rule_production_source(
             )
         return _collected(frozen.source_status)
 
-    times = _batch_times(frozen.source_batch)
+    source_batch = frozen.source_batch
+    try:
+        bound = threshold_approval_binder(source_batch)
+    except Exception:
+        return _collected(
+            LeaderFormalResearchProductionSourceStatus.SOURCE_FAILED,
+            reasons=("sector_threshold_approval_binding_failed",),
+        )
+    if (
+        type(bound) is not SectorThresholdApprovalLoadResult
+        or not isinstance(bound.reasons, tuple)
+        or any(
+            not isinstance(reason, str) or not reason
+            for reason in bound.reasons
+        )
+    ):
+        return _collected(
+            LeaderFormalResearchProductionSourceStatus.SOURCE_UNVERIFIED,
+            reasons=("sector_threshold_approval_binding_unverified",),
+        )
+    if bound.status != "approved" or bound.source_batch is None:
+        return _collected(
+            LeaderFormalResearchProductionSourceStatus.SOURCE_UNVERIFIED,
+            reasons=tuple(bound.reasons),
+        )
+    source_batch = bound.source_batch
+
+    times = _batch_times(source_batch)
     if times is None or not _aware(frozen.fetched_at):
         return _collected(
             LeaderFormalResearchProductionSourceStatus.SOURCE_UNVERIFIED
@@ -183,7 +221,7 @@ def collect_sector_rule_production_source(
     try:
         bridge = build_sector_rule_runtime_bridge(
             context,
-            source_batch=frozen.source_batch,
+            source_batch=source_batch,
         )
     except Exception:
         return _collected(
@@ -203,12 +241,17 @@ def collect_sector_rule_production_source(
         source_time=source_time,
         fetched_at=frozen.fetched_at,
         symbols=symbols,
-        payload=frozen.source_batch,
+        payload=source_batch,
     )
 
 
 def build_sector_rule_production_loader(
     frozen: SectorRuleProductionFrozenBatch,
+    *,
+    threshold_approval_binder: Callable[
+        [SectorRuleRuntimeSourceBatch],
+        SectorThresholdApprovalLoadResult,
+    ] = bind_latest_sector_threshold_approval,
 ):
     """为现有四源生产 provider 构造无网络只读 loader。"""
 
@@ -216,6 +259,10 @@ def build_sector_rule_production_loader(
         raise ValueError("sector_rule_production_batch_unverified")
 
     def load(context: LeaderResearchRuntimeSourceContext):
-        return collect_sector_rule_production_source(context, frozen)
+        return collect_sector_rule_production_source(
+            context,
+            frozen,
+            threshold_approval_binder=threshold_approval_binder,
+        )
 
     return load

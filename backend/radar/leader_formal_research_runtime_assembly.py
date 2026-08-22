@@ -158,6 +158,7 @@ class _ProviderResolution:
     source_unverified: bool = False
     bridge: Any = field(default=None, repr=False)
     proof: Any = field(default=None, repr=False)
+    reasons: Tuple[str, ...] = ()
 
 
 class _UnavailableReviewRepository:
@@ -204,6 +205,7 @@ def _resolve_provider(
                     configured=True,
                     failed=True,
                     proof=proof,
+                    reasons=delivery.reasons,
                 )
             if (
                 delivery.status
@@ -215,6 +217,7 @@ def _resolve_provider(
                     failed=False,
                     source_unverified=True,
                     proof=proof,
+                    reasons=delivery.reasons,
                 )
             source_value = delivery.payload
         bridge = bridge_builder(context, **{value_key: source_value})
@@ -293,9 +296,10 @@ def _provider_component(
             ),
             candidate_count=candidate_count,
             ready_count=0,
-            reasons=(
+            reasons=_dedupe((
+                *resolution.reasons,
                 f"leader_formal_research_runtime_{name}_source_unverified",
-            ),
+            )),
         )
     if resolution.failed or resolution.bridge is None:
         return LeaderFormalResearchRuntimeComponent(
@@ -303,9 +307,10 @@ def _provider_component(
             status=LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED,
             candidate_count=candidate_count,
             ready_count=0,
-            reasons=(
+            reasons=_dedupe((
+                *resolution.reasons,
                 f"leader_formal_research_runtime_{name}_provider_failed",
-            ),
+            )),
         )
     bridge = resolution.bridge
     admission = _admission_component(bridge, admission_name)
@@ -354,9 +359,10 @@ def _sector_component(
             ),
             candidate_count=candidate_count,
             ready_count=0,
-            reasons=(
+            reasons=_dedupe((
+                *resolution.reasons,
                 "leader_formal_research_runtime_sector_rule_source_unverified",
-            ),
+            )),
         )
     if resolution.failed or resolution.bridge is None:
         return LeaderFormalResearchRuntimeComponent(
@@ -364,9 +370,10 @@ def _sector_component(
             status=LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED,
             candidate_count=candidate_count,
             ready_count=0,
-            reasons=(
+            reasons=_dedupe((
+                *resolution.reasons,
                 "leader_formal_research_runtime_sector_rule_provider_failed",
-            ),
+            )),
         )
     bridge: SectorRuleRuntimeBridgeResult = resolution.bridge
     if SECTOR_SOURCE_UNVERIFIED in bridge.reasons:

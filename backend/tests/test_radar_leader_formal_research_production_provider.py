@@ -186,6 +186,71 @@ class LeaderFormalResearchProductionProviderTests(unittest.TestCase):
         )
         self.assertIsNone(valid.payload)
 
+    def test_source_failure_reasons_survive_provider_delivery(self):
+        provider = build_leader_formal_research_production_provider_set(
+            history_collector=lambda _context: self.collected_source(
+                status=(
+                    LeaderFormalResearchProductionSourceStatus
+                    .SOURCE_UNVERIFIED
+                ),
+                source_time=None,
+                fetched_at=None,
+                symbols=(),
+                payload=None,
+                reasons=("sector_threshold_approval_snapshot_missing",),
+            ),
+        )
+
+        result = self.resolve(provider.history_provider(self.context))
+
+        self.assertEqual(
+            result.status,
+            LeaderFormalResearchProductionDeliveryResolutionStatus
+            .SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            (
+                "sector_threshold_approval_snapshot_missing",
+                "leader_formal_research_production_delivery_source_unverified",
+            ),
+        )
+
+    def test_sector_binding_failure_reason_reaches_runtime_assembly(self):
+        failed = replace(
+            self.proof(status="source_failed", returned_count=0),
+            component_name="sector_rule",
+            source_contract_id="sector-rule-production-source-v1",
+            source_time=None,
+            fetched_at=None,
+            reasons=("sector_threshold_approval_binding_failed",),
+        )
+
+        result = build_leader_formal_research_runtime_assembly(
+            self.context,
+            repository=_EmptyReviewRepository(),
+            sector_rule_provider=Mock(return_value=self.delivery(
+                proof=failed,
+                payload=None,
+            )),
+        )
+
+        sector = next(
+            item for item in result.components if item.name == "sector_rule"
+        )
+        self.assertEqual(
+            sector.status,
+            LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED,
+        )
+        self.assertEqual(
+            sector.reasons,
+            (
+                "sector_threshold_approval_binding_failed",
+                "leader_formal_research_production_delivery_source_failed",
+                "leader_formal_research_runtime_sector_rule_provider_failed",
+            ),
+        )
+
     def test_runtime_assembly_consumes_payload_and_retains_bound_proof(self):
         helper = source_helpers.LeaderResearchSourceAdmissionTests(
             methodName=(

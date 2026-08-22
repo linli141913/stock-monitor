@@ -153,6 +153,197 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
             ("生物质纤维素长丝", "氨纶纤维", "火腿", "肉制品"),
         )
 
+    def test_enumerated_period_product_metric_extracts_only_named_product(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content("一是2026年上半年自捕鱼销售均价同比上涨。"),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("自捕鱼",))
+        self.assertEqual(result.fragments[0].page_number, 1)
+        self.assertFalse(result.formal_usable)
+
+    def test_enumerated_company_or_market_metrics_are_not_objects(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "一是2026年上半年公司营业收入增加；"
+                "二是市场销售均价上涨。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_named_business_recovery_is_an_explicit_operating_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "进料加工业务有序恢复，"
+                "水产加工业务收入同比提升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            ("进料加工", "水产加工"),
+        )
+
+    def test_generic_business_recovery_is_not_an_explicit_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content("公司业务有序恢复，流动性逐步改善。"),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_generic_recovery_and_input_cost_increases_are_not_objects(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "经营业务恢复，国内业务逐步恢复，传统业务全面恢复；"
+                "核心业务恢复；"
+                "一是2026年上半年原材料采购销售价格上涨；"
+                "二是2026年上半年能源销售价格上涨；"
+                "三是2026年上半年运输销售均价上涨。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_named_livestock_profit_decline_extracts_farming_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "生猪价格持续处于低位，导致公司报告期内"
+                "生猪养殖利润下降。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("生猪养殖",))
+
+    def test_named_segment_revenue_growth_extracts_segment_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content("新品销售推动乳业板块营业收入实现同比增长。"),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("乳业",))
+
+    def test_named_commodity_price_cause_extracts_commodity_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "因钨矿市场价格下降导致当期营业收入及盈利水平下降。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("钨矿",))
+
+    def test_new_causal_patterns_reject_generic_financial_phrases(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "导致公司利润下降；导致公司报告期内项目养殖利润下降；"
+                "推动公司营业收入增长；推动行业营业收入增长；"
+                "因市场价格下降导致当期营业收入下降；"
+                "因原材料价格上涨导致当期营业收入下降。"
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_quoted_project_before_epc_signature_is_explicit_contract_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(),
+            content(
+                "公司就“上海晶纾风力发电有限公司驭风行动50MW"
+                "分散式风电项目”签署EPC承包合同。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            (
+                "上海晶纾风力发电有限公司驭风行动50MW分散式风电项目",
+            ),
+        )
+
+    def test_project_award_with_signed_quoted_epc_object_is_explicit(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content(
+                "公司及合作方组成的联合体与代县风和新能源有限公司"
+                "就“上海晶纾风力发电有限公司驭风行动50MW"
+                "分散式风电项目”签署EPC承包合同。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            (
+                "上海晶纾风力发电有限公司驭风行动50MW分散式风电项目",
+            ),
+        )
+
+    def test_unsigned_or_unquoted_epc_text_is_not_a_contract_object(self):
+        for event_kind in (
+            OfficialBusinessCatalystKind.MAJOR_CONTRACT,
+            OfficialBusinessCatalystKind.PROJECT_AWARD,
+        ):
+            with self.subTest(event_kind=event_kind):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=event_kind),
+                    content(
+                        "公司拟就“50MW分散式风电项目”开展沟通；"
+                        "公司拟与甲方就“50MW分散式风电项目”"
+                        "签署EPC承包合同；"
+                        "公司计划与甲方就“风电建设项目”"
+                        "签署EPC承包合同；"
+                        "公司拟与甲方达成意向，就“风电建设项目”"
+                        "签署EPC承包合同；"
+                        "公司拟与甲方(证券代码605289.SH)"
+                        "就“风电建设项目”签署EPC承包合同；"
+                        "50MW分散式风电项目签署EPC承包合同；"
+                        "公司就“EPC工程总承包项目”签署EPC承包合同；"
+                        "公司就“EPC项目”签署EPC承包合同；"
+                        "公司就“工程项目”签署EPC承包合同；"
+                        "公司就“EPC总包项目”签署EPC承包合同；"
+                        "公司就“工程总包项目”签署EPC承包合同；"
+                        "公司就“EPC施工总承包项目”签署EPC承包合同；"
+                        "公司就“机电工程总承包项目”签署EPC承包合同；"
+                        "公司就“已建成50MW风电项目”签署承包合同。"
+                    ),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
     def test_company_level_income_and_margin_metrics_are_not_business_objects(self):
         result = extract_official_business_catalyst_facts(
             document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
