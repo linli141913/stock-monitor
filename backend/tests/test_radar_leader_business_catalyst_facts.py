@@ -269,6 +269,50 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("无人化智能装备",))
 
+    def test_named_product_output_with_business_revenue_share_extracts_product(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "转型,已全面切换到含锌铟固危废资源化利用这一高潜力赛道,"
+                "2025年该业务占公司营收比重已达约95%,产精铟超过200吨,"
+                "公司整体营业收入预计再增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("精铟",))
+
+    def test_named_product_output_requires_confirmed_same_segment_context(self):
+        cases = (
+            "该业务占公司营收比重已达约95%,预计产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,有望产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,可能产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,或将产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,将产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,预期产精铟超过200吨。",
+            "产精铟超过200吨,但该业务占公司营收比重未达要求。",
+            "产精铟超过200吨,该业务占公司营收比重已达约95%。",
+            "该业务占公司营收比重已达约95%,日产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,产量精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,产产品超过200吨。",
+            "该业务占公司营收比重已达约95%,产精铟超过200吨,但不代表公司业务。",
+            "该业务占公司营收比重已达约95%。产精铟超过200吨。",
+            "该业务占公司营收比重已达约95%,产含锌铟固危废资源化利用超过200吨。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
     def test_forecast_header_does_not_invalidate_confirmed_delivery_growth(self):
         result = extract_official_business_catalyst_facts(
             document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),

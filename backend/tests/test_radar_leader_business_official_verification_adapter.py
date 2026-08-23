@@ -186,7 +186,7 @@ class LeaderBusinessOfficialVerificationAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             result.items[0].input_value.reviews[0].mapping_version,
-            "radar-leader-business-deterministic-relation-v21",
+            "radar-leader-business-deterministic-relation-v22",
         )
         self.assertFalse(result.formal_gate_ready)
 

@@ -4,7 +4,7 @@ from enum import Enum
 
 
 DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION = (
-    "radar-leader-business-deterministic-relation-v21"
+    "radar-leader-business-deterministic-relation-v22"
 )
 
 

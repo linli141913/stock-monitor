@@ -42,6 +42,22 @@ EXPLICIT_METRIC_DIRECTION_PATTERN = (
 )
 PROSPECTIVE_MARKERS = ("拟", "计划", "意向", "预计")
 NEGATIVE_CONFIRMATION_MARKERS = ("未", "不", "无法", "不能")
+EARNINGS_PROSPECTIVE_MARKERS = (
+    *PROSPECTIVE_MARKERS,
+    "有望",
+    "可能",
+    "预期",
+    "或将",
+    "将",
+)
+EARNINGS_UNCONFIRMED_MARKERS = (
+    *EARNINGS_PROSPECTIVE_MARKERS,
+    *NEGATIVE_CONFIRMATION_MARKERS,
+    "是否",
+    "尚待",
+    "有待",
+    "待确定",
+)
 UNEXECUTED_CONTRACT_MARKERS = (
     *PROSPECTIVE_MARKERS,
     *NEGATIVE_CONFIRMATION_MARKERS,
@@ -131,6 +147,17 @@ NAMED_PRODUCT_DELIVERY_PATTERN = re.compile(
     r"([一-鿿A-Za-z0-9]{2,20}?)产品交付量的同比(?:大幅)?增加"
     r"[，,]公司营业收入同比增长"
 )
+NAMED_PRODUCT_OUTPUT_SHARE_PATTERN = re.compile(
+    r"(?:^|[。!?！？；;])"
+    r"[^。!?！？；;]{0,180}?(?:该业务|该项业务)占公司营收比重已达"
+    r"(?:约)?\d+(?:\.\d+)?%[^。!?！？；;]{0,30}?[，,]产(?!量|日)"
+    r"(?!(?:公司|主营|主要|整体|相关|新|核心|行业|市场|产品|业务|项目|赛道|"
+    r"资源化|利用|固危废))"
+    r"((?!(?:[一-鿿A-Za-z0-9]{0,18}(?:业务|行业|项目|赛道|资源化|利用|固危废|"
+    r"公司|产品)))[一-鿿A-Za-z0-9]{2,20}?)"
+    r"(?:超过|达到)(?:约)?\d+(?:\.\d+)?(?:吨|万吨|公斤|千克|kg)"
+    r"(?=$|[。!?！？；;]|[(（]|[，,]公司整体营业收入)"
+)
 NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN = re.compile(
     r"(?:^|[，,。.;；：:()（）])"
     r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
@@ -204,6 +231,7 @@ OBJECT_PATTERNS = {
         REASON_PREFIX_BUSINESS_METRIC_PATTERN,
         NAMED_PRODUCT_AVERAGE_PATTERN,
         NAMED_PRODUCT_DELIVERY_PATTERN,
+        NAMED_PRODUCT_OUTPUT_SHARE_PATTERN,
         NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN,
         NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN,
         NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN,
@@ -524,7 +552,7 @@ def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
             prefix_and_match = value[logical_start:match.end()]
             break
     context = prefix_and_match
-    return any(marker in context for marker in UNCONFIRMED_AWARD_MARKERS)
+    return any(marker in context for marker in EARNINGS_UNCONFIRMED_MARKERS)
 
 
 def _sentence_context(value: str, match: re.Match) -> str:
