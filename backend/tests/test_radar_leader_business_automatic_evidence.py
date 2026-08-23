@@ -182,6 +182,33 @@ def ready_sources(*, missing_index=None, calls=None):
     )
 
 
+def object_missing_sources():
+    base = ready_sources()
+
+    def content(document, *, kind, fetched_at):
+        result = base.fetch_document_content(
+            document,
+            kind=kind,
+            fetched_at=fetched_at,
+        )
+        if kind is OfficialBusinessDocumentKind.CATALYST:
+            text = (
+                "三、业绩变动原因说明。"
+                "公司整体营业收入增长，主营产品销量提升。"
+            )
+            return replace(
+                result,
+                content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                pages=(OfficialBusinessDocumentPage(1, text),),
+            )
+        return result
+
+    return LeaderBusinessAutomaticEvidenceSources(
+        discover_catalysts=base.discover_catalysts,
+        fetch_document_content=content,
+    )
+
+
 class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
     def run_batch(self, packet, directory, *, sources=None):
         return run_leader_business_automatic_evidence(
@@ -229,6 +256,60 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertEqual(result.missing_count, 1)
             self.assertIsNone(result.delivery_packet_path)
             self.assertTrue(result.packet_path.is_file())
+
+    def test_explicit_gap_diagnostic_records_fresh_bounded_object_missing_corpus(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            result = run_leader_business_automatic_evidence(
+                source_packet(1),
+                artifact_dir=Path(directory),
+                sources=object_missing_sources(),
+                clock=lambda: VALIDATED_AT,
+                write_gap_diagnostic=True,
+            )
+
+            self.assertEqual(
+                result.items[0].reasons,
+                ("business_catalyst_fact_object_missing",),
+            )
+            self.assertTrue(result.gap_diagnostic_path.is_file())
+            payload = __import__("json").loads(
+                result.gap_diagnostic_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                payload["contractId"],
+                "radar-leader-business-automatic-gap-diagnostic-v1",
+            )
+            self.assertTrue(payload["diagnosticOnly"])
+            self.assertEqual(payload["targetReason"], "business_catalyst_fact_object_missing")
+            self.assertEqual(payload["candidateCount"], 1)
+            self.assertEqual(payload["items"][0]["annualTerms"], ["工业软件"])
+            self.assertEqual(
+                payload["items"][0]["catalysts"][0]["contentSha256"],
+                hashlib.sha256(
+                    "三、业绩变动原因说明。公司整体营业收入增长，主营产品销量提升。".encode(
+                        "utf-8"
+                    )
+                ).hexdigest(),
+            )
+            self.assertEqual(
+                payload["items"][0]["catalysts"][0]["snippets"],
+                [{
+                    "pageNumber": 1,
+                    "text": "公司整体营业收入增长，主营产品销量提升",
+                }],
+            )
+            self.assertFalse(payload["gate"]["formalGateReady"])
+
+    def test_gap_diagnostic_is_not_written_by_default(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            result = self.run_batch(
+                source_packet(1),
+                directory,
+                sources=object_missing_sources(),
+            )
+
+            self.assertIsNone(result.gap_diagnostic_path)
+            self.assertEqual(tuple(Path(directory).glob("gap-diagnostic-*.json")), ())
 
     def test_generic_catalyst_without_object_does_not_hide_explicit_document(self):
         base = ready_sources()

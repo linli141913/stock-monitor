@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from radar.leader_business_annual_report_selector import (
@@ -61,8 +62,17 @@ LEADER_BUSINESS_AUTOMATIC_CHECKPOINT_CONTRACT_ID = (
 LEADER_BUSINESS_AUTOMATIC_DELIVERY_CONTRACT_ID = (
     "radar-leader-business-automatic-delivery-v1"
 )
+LEADER_BUSINESS_AUTOMATIC_GAP_DIAGNOSTIC_CONTRACT_ID = (
+    "radar-leader-business-automatic-gap-diagnostic-v1"
+)
 MAXIMUM_PDF_WORKERS = 2
 CATALYST_LOOKBACK_DAYS = 365
+MAXIMUM_DIAGNOSTIC_SNIPPETS_PER_DOCUMENT = 8
+MAXIMUM_DIAGNOSTIC_SNIPPET_CHARACTERS = 600
+DIAGNOSTIC_TEXT_MARKERS = (
+    "收入", "销量", "销售", "价格", "均价", "毛利", "利润", "盈利",
+    "产量", "出货", "交付", "投产", "中标", "合同", "认证", "业务",
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +94,10 @@ class LeaderBusinessAutomaticEvidenceBatchItem:
     artifact: Optional[
         DeterministicOfficialBusinessVerificationArtifact
     ] = field(default=None, repr=False)
+    gap_diagnostic: Optional[Mapping[str, object]] = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, repr=False)
@@ -95,6 +109,7 @@ class LeaderBusinessAutomaticEvidenceBatchResult:
     reasons: Tuple[str, ...] = ()
     packet_path: Optional[Path] = None
     delivery_packet_path: Optional[Path] = None
+    gap_diagnostic_path: Optional[Path] = None
     contract_id: str = LEADER_BUSINESS_AUTOMATIC_EVIDENCE_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -187,6 +202,35 @@ def _write_atomic_json(path: Path, payload: Mapping[str, object]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _diagnostic_snippets(
+    content: OfficialBusinessDocumentContentResult,
+) -> Tuple[Mapping[str, object], ...]:
+    snippets = []
+    seen = set()
+    for page in content.pages:
+        normalized = " ".join(page.text.split())
+        for raw_text in re.split(r"[。；;!?！？\n]+", normalized):
+            text = raw_text.strip(" ：:，,")
+            if (
+                len(text) < 8
+                or text == "业绩变动原因说明"
+                or not any(marker in text for marker in DIAGNOSTIC_TEXT_MARKERS)
+            ):
+                continue
+            text = text[:MAXIMUM_DIAGNOSTIC_SNIPPET_CHARACTERS]
+            identity = (page.page_number, text)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            snippets.append({
+                "pageNumber": page.page_number,
+                "text": text,
+            })
+            if len(snippets) >= MAXIMUM_DIAGNOSTIC_SNIPPETS_PER_DOCUMENT:
+                return tuple(snippets)
+    return tuple(snippets)
 
 
 def _fragment_payload(value: OfficialBusinessEvidenceFragment):
@@ -405,6 +449,7 @@ def _process_candidate(
     artifact_dir,
     sources,
     validated_at,
+    write_gap_diagnostic,
 ):
     selection = select_latest_official_annual_report(plan_item, queue_item)
     if selection.status is not AutomaticBusinessEvidenceStatus.READY:
@@ -499,6 +544,7 @@ def _process_candidate(
         )
     catalyst_facts = []
     object_missing_reasons = []
+    catalyst_diagnostics = []
     for catalyst in catalysts:
         try:
             content = sources.fetch_document_content(
@@ -529,6 +575,17 @@ def _process_candidate(
         if facts.status is not AutomaticBusinessEvidenceStatus.READY:
             if facts.reasons == ("business_catalyst_fact_object_missing",):
                 object_missing_reasons.extend(facts.reasons)
+                if write_gap_diagnostic:
+                    catalyst_diagnostics.append({
+                        "documentId": catalyst.document_id,
+                        "documentVersion": catalyst.document_version,
+                        "title": catalyst.title,
+                        "eventKind": catalyst.event_kind.value,
+                        "publishedAt": catalyst.published_at.isoformat(),
+                        "sourceUrl": catalyst.source_url,
+                        "contentSha256": content.content_sha256,
+                        "snippets": list(_diagnostic_snippets(content)),
+                    })
                 continue
             return _item(
                 plan_item.index,
@@ -538,12 +595,25 @@ def _process_candidate(
             )
         catalyst_facts.append(facts)
     if not catalyst_facts:
+        gap_diagnostic = None
+        if write_gap_diagnostic and catalyst_diagnostics:
+            gap_diagnostic = {
+                "index": plan_item.index,
+                "symbol": plan_item.symbol,
+                "issuerIdentity": annual.issuer_identity,
+                "annualDocumentId": annual.document_id,
+                "annualDocumentVersion": annual.document_version,
+                "annualContentSha256": annual_content.content_sha256,
+                "annualTerms": list(annual_facts.business_terms),
+                "catalysts": catalyst_diagnostics,
+            }
         return _item(
             plan_item.index,
             plan_item.symbol,
             AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
             object_missing_reasons
             or ("business_catalyst_fact_object_missing",),
+            gap_diagnostic=gap_diagnostic,
         )
     verified = build_deterministic_official_business_verification(
         plan_item,
@@ -602,6 +672,7 @@ def run_leader_business_automatic_evidence(
     artifact_dir: Path,
     sources: Optional[LeaderBusinessAutomaticEvidenceSources] = None,
     clock: Callable[[], datetime],
+    write_gap_diagnostic: bool = False,
 ) -> LeaderBusinessAutomaticEvidenceBatchResult:
     """为候选全集产生长期官方证据；结果不回填原候选时点。"""
 
@@ -613,6 +684,8 @@ def run_leader_business_automatic_evidence(
     actual_sources = sources or LeaderBusinessAutomaticEvidenceSources()
     if type(actual_sources) is not LeaderBusinessAutomaticEvidenceSources:
         raise ValueError("business_automatic_sources_unverified")
+    if type(write_gap_diagnostic) is not bool:
+        raise ValueError("business_automatic_gap_diagnostic_unverified")
     validated_at = clock()
     if not _aware(validated_at):
         raise ValueError("business_automatic_clock_unverified")
@@ -635,6 +708,7 @@ def run_leader_business_automatic_evidence(
                 artifact_dir=artifact_dir,
                 sources=actual_sources,
                 validated_at=validated_at,
+                write_gap_diagnostic=write_gap_diagnostic,
             )
         except OSError:
             raise
@@ -677,6 +751,32 @@ def run_leader_business_automatic_evidence(
         },
     }
     _write_atomic_json(packet_path, report)
+    gap_diagnostic_path = None
+    gap_items = [
+        item.gap_diagnostic
+        for item in items
+        if item.gap_diagnostic is not None
+    ]
+    if write_gap_diagnostic:
+        gap_diagnostic_path = (
+            artifact_dir / f"gap-diagnostic-{basename}.json"
+        )
+        _write_atomic_json(gap_diagnostic_path, {
+            "contractId": LEADER_BUSINESS_AUTOMATIC_GAP_DIAGNOSTIC_CONTRACT_ID,
+            "candidatePlanId": plan.candidate_set_id,
+            "validatedAt": validated_at.isoformat(),
+            "ruleVersion": DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
+            "diagnosticOnly": True,
+            "targetReason": "business_catalyst_fact_object_missing",
+            "candidateCount": len(gap_items),
+            "items": gap_items,
+            "gate": {
+                "formalScoreReady": False,
+                "formalGateReady": False,
+                "formalUsable": False,
+                "stateTransitionAllowed": False,
+            },
+        })
     delivery_path = None
     if status is AutomaticBusinessEvidenceStatus.READY:
         delivery_path = artifact_dir / f"delivery-{basename}.json"
@@ -716,4 +816,5 @@ def run_leader_business_automatic_evidence(
         reasons=reasons,
         packet_path=packet_path,
         delivery_packet_path=delivery_path,
+        gap_diagnostic_path=gap_diagnostic_path,
     )

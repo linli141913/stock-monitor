@@ -24,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("source_path")
     parser.add_argument("--artifact-dir", required=True)
+    parser.add_argument(
+        "--gap-diagnostic",
+        action="store_true",
+        help="写出仅供规则设计的对象缺失新鲜语料，不参与正式门",
+    )
     return parser
 
 
@@ -50,6 +55,7 @@ def run_cli(
             artifact_dir=Path(arguments.artifact_dir),
             sources=sources,
             clock=clock,
+            write_gap_diagnostic=arguments.gap_diagnostic,
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         _print({
@@ -63,7 +69,13 @@ def run_cli(
             },
         }, stdout)
         return 3
-    _print(result.to_evidence(), stdout)
+    payload = dict(result.to_evidence())
+    if arguments.gap_diagnostic:
+        payload["gapDiagnosticPath"] = (
+            str(result.gap_diagnostic_path)
+            if result.gap_diagnostic_path else None
+        )
+    _print(payload, stdout)
     return (
         0
         if result.status is AutomaticBusinessEvidenceStatus.READY

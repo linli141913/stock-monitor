@@ -7,6 +7,7 @@ from pathlib import Path
 from run_leader_business_automatic_evidence import run_cli
 from tests.test_radar_leader_business_automatic_evidence import (
     VALIDATED_AT,
+    object_missing_sources,
     ready_sources,
     source_packet,
 )
@@ -41,6 +42,7 @@ class RunLeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
                 payload,
                 ensure_ascii=False,
             ))
+            self.assertNotIn("gapDiagnosticPath", payload)
 
     def test_not_ready_real_source_semantics_exit_two(self):
         with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
@@ -53,6 +55,30 @@ class RunLeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(payload["missingCount"], 1)
             self.assertIsNone(payload["deliveryPacketPath"])
+
+    def test_explicit_gap_diagnostic_option_reports_artifact_path(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            source_path = Path(directory) / "source.json"
+            source_path.write_text(
+                json.dumps(source_packet(1), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            code = run_cli(
+                [
+                    str(source_path),
+                    "--artifact-dir",
+                    str(Path(directory) / "out"),
+                    "--gap-diagnostic",
+                ],
+                stdout=output,
+                sources=object_missing_sources(),
+                clock=lambda: VALIDATED_AT,
+            )
+
+            payload = json.loads(output.getvalue())
+            self.assertEqual(code, 2)
+            self.assertTrue(Path(payload["gapDiagnosticPath"]).is_file())
 
     def test_invalid_input_and_write_failure_exit_three_without_traceback(self):
         with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:

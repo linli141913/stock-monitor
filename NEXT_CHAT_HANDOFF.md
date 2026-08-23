@@ -1,7 +1,17 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-23 12:53 CST
+> 保存时间：2026-08-23 16:06 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-08-23阶段6新鲜缺口语料诊断v29
+
+- 为避免只读探针过期，新增显式 `--gap-diagnostic` 选项。默认自动证据命令行为不变；只有主动开启时，才为 `business_catalyst_fact_object_missing` 保存当前轮官方文档身份、版本、正文哈希、年报词和受限片段。诊断工件独立标记 `diagnosticOnly=true`，不生成 delivery，不参与正式门，也不保存原始 PDF。
+- TDD 新增诊断工件生成、默认不生成和 CLI 选项测试；相关自动证据/CLI `12` 项通过。精确隔离生产 SQLite 的完整后端 `1722` 项通过；Python 编译、`git diff --check` 通过。Sol + 高风险审查发现并修复诊断路径进入正式 `to_evidence()` 摘要的隔离问题：正式摘要不携带诊断路径，只有显式 CLI 诊断输出和独立诊断工件包含该路径；无 Critical/Important 残留。
+- v29 真实公开源 `385` 只重放业务计数与 v28 完全一致：`ready=11`、`missing=147`、`source_failed=0`、`source_unverified=227`、`reused=0`，四个正式标志全部为 `false`。证据为 `/private/tmp/stage6-business-auto-20260823-v29/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `80dfbd76f53ad06586665f7d06f4e5d600dea5302b84c33bd810560e0b3b8277`。
+- 新鲜缺口诊断为 `/private/tmp/stage6-business-auto-20260823-v29/gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `77bdcc9157dee1fe3bc9042eab81cb53d2a226403e4d9072247459a56454b7b0`，覆盖 `103/103` 只对象缺失；每文档最多 `8` 个片段、单片段最长 `600` 字符，实际最长 `518` 字符，原始 PDF 数量为 `0`。诊断显示 `000711` 当前官方文档仍包含“该业务占公司营收比重已达约95%，产精铟超过200吨”正文，但本轮正式结果仍未就绪，需后续单独复核编排链的文档页边界，不得直接改门。
+- 修改文件为 `backend/radar/leader_business_automatic_evidence.py`、`backend/run_leader_business_automatic_evidence.py`及两个对应测试和本检查点。`4000` 未监听；`8001` 仍为既有 PID `791`，未停止、重启或重载。Git 基线为 `main@e5af37e`，相对 `origin/main` 领先 `11` 个提交；本批尚未提交、未推送，没有读写生产 SQLite，没有修改环境变量、依赖、迁移、调度、功能开关、正式门或部署。
+
+下一步：1）复核 `000711` 诊断正文为何未在正式编排中转为 ready，只允许修复证据链边界，不放宽业务规则；2）继续使用新鲜诊断工件筛选剩余 `102` 只对象缺失；3）`39` 只关系未确认和同轮 D8 第二个真实实质变化版本等独立门继续保持关闭。
 
 ## 2026-08-23阶段6具名产品产量与营收占比v28真实重放
 
