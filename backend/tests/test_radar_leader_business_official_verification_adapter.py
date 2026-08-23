@@ -186,12 +186,12 @@ class LeaderBusinessOfficialVerificationAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             result.items[0].input_value.reviews[0].mapping_version,
-            "radar-leader-business-deterministic-relation-v19",
+            "radar-leader-business-deterministic-relation-v21",
         )
         self.assertFalse(result.formal_gate_ready)
 
         stale_version = (
-            "radar-leader-business-deterministic-relation-v18"
+            "radar-leader-business-deterministic-relation-v20"
         )
         stale_review = replace(
             result.items[0].input_value.reviews[0],

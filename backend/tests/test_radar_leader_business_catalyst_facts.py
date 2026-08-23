@@ -728,6 +728,212 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
         self.assertEqual(contract.business_terms, ("苹果独立维修提供商",))
         self.assertEqual(award.business_terms, ("油气服务",))
 
+    def test_strict_named_business_results_extract_full_official_objects(self):
+        cases = (
+            (
+                "2025年年度业绩增长主要得益于以下方面:"
+                "(一)国外玉米业务多措并举,营业收入实现增长,"
+                "利润大幅减亏。",
+                ("国外玉米",),
+            ),
+            (
+                "公司珠宝业务在2025年度实现了显著业绩增长。",
+                ("珠宝",),
+            ),
+            (
+                "公司节能业务板块巩固拓展,经营收入稳定增长。",
+                ("节能",),
+            ),
+            (
+                "公司心血管线核心产品盐酸贝尼地平片"
+                "(注册商标:元治®)2026年进入第十一批国家药品"
+                "集中带量采购执标期,受集采政策影响,"
+                "该产品销售单价大幅下调、销量同步下滑,"
+                "对公司营业收入及经营利润形成较大冲击。",
+                ("盐酸贝尼地平片",),
+            ),
+        )
+
+        for text, expected_terms in cases:
+            with self.subTest(expected_terms=expected_terms):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+                self.assertEqual(result.business_terms, expected_terms)
+
+    def test_uncertain_generic_or_joint_business_results_remain_unverified(self):
+        cases = (
+            "国外玉米业务拟多措并举,营业收入实现增长,"
+            "利润大幅减亏。",
+            "公司珠宝业务预计在2025年度实现显著业绩增长。",
+            "公司节能业务板块计划巩固拓展,经营收入稳定增长。",
+            "公司业务板块巩固拓展,经营收入稳定增长。",
+            "公司心血管线产品盐酸贝尼地平片受集采政策影响,"
+            "该产品销售单价大幅下调、销量同步下滑,"
+            "对公司营业收入及经营利润形成较大冲击。",
+            "公司心血管线核心产品盐酸贝尼地平片受集采政策影响。"
+            "该产品销售单价大幅下调、销量同步下滑,"
+            "对公司营业收入及经营利润形成较大冲击。",
+            "公司心血管线核心产品盐酸贝尼地平片受集采政策影响,"
+            "该产品销售单价预计下调、销量同步下滑,"
+            "对公司营业收入及经营利润形成较大冲击。",
+            "报告期公司大力拓展主营业务相关衍生产品的销售,"
+            "包括生物医药业务相关的美妆产品和保健品销售、"
+            "环保业务相关的产品销售等,带动了收入和利润的增长。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_confirmed_notice_award_extracts_the_full_quoted_project(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content(
+                "公司全资子公司中国汽车工业工程有限公司收到《中标通知书》,"
+                "确认中汽工程中标《涪陵高新区新能源汽车轻量化零部件厂房及"
+                "智能产线项目(一期)工程总承包》。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            ("涪陵高新区新能源汽车轻量化零部件厂房及智能产线项目(一期)工程总承包",),
+        )
+
+    def test_incomplete_or_uncertain_notice_award_remains_unverified(self):
+        cases = (
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司收到《中标通知书》,中汽工程中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司收到《中标通知书》,"
+            "中汽工程中标涪陵高新区智能产线项目工程总承包。",
+            "公司收到《中标通知书》,确认中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司收到《中标通知书》,"
+            "确认中汽工程中标涪陵高新区智能产线项目工程总承包。",
+            "公司拟收到《中标通知书》,"
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司未收到《中标通知书》,"
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司收到《中标通知书》。"
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》。",
+            "公司收到《中标通知书》,"
+            "确认中汽工程中标《EPC工程总承包项目》。",
+            "公司收到《中标通知书》,"
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》,"
+            "尚待最终定标。",
+            "公司收到《中标通知书》,"
+            "确认中汽工程中标《涪陵高新区智能产线项目工程总承包》,"
+            "中标候选人公示。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_unquoted_union_notice_award_extracts_full_project_name(self):
+        cases = (
+            "联合体收到招标人发来的中标通知书："
+            "市政工程公司与中机国际组成的联合体被确定为"
+            "临港开发区供排水提质增效一体化工程(排水达标区建设项目)"
+            "EPC工程总承包(以下简称“项目”)中标人。",
+            "市政工程公司与中机国际组成的联合体被确定为"
+            "临港开发区供排水提质增效一体化工程(排水达标区建设项目)"
+            "EPC工程总承包(以下简称“项目”)中标人。",
+        )
+
+        expected = (
+            "临港开发区供排水提质增效一体化工程(排水达标区建设项目)"
+            "EPC工程总承包",
+        )
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+                self.assertEqual(result.business_terms, expected)
+                self.assertFalse(result.negative_event)
+
+    def test_unquoted_union_award_requires_same_sentence_confirmed_subject(self):
+        cases = (
+            "联合体拟被确定为临港开发区供排水提质增效一体化工程"
+            "(排水达标区建设项目)EPC工程总承包中标人。",
+            "联合体为临港开发区供排水提质增效一体化工程"
+            "(排水达标区建设项目)EPC工程总承包中标人。",
+            "收到中标通知书。联合体被确定为临港开发区供排水提质增效"
+            "一体化工程(排水达标区建设项目)EPC工程总承包中标人。",
+            "联合体被确定为EPC工程总承包项目中标人。",
+            "联合体被确定为智慧城市建设项目中标人。",
+            "联合体被确定为重点工程建设项目EPC工程总承包中标人。",
+            "联合体被确定为重大项目建设项目EPC工程总承包中标人。",
+            "联合体被确定为临港开发区供排水提质增效一体化工程"
+            "(排水达标区建设项目)EPC工程总承包中标候选人。",
+            "联合体被确定为临港开发区供排水提质增效一体化工程"
+            "(排水达标区建设项目)EPC工程总承包中标人，"
+            "另一项目合同终止。",
+            "联合体被确定为临港开发区供排水提质增效一体化工程"
+            "(排水达标区建设项目)EPC工程总承包中标人，"
+            "但该项目不再履行。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_unquoted_union_award_rejects_later_page_conflict(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content(
+                "市政工程公司与中机国际组成的联合体被确定为"
+                "临港开发区供排水提质增效一体化工程(排水达标区建设项目)"
+                "EPC工程总承包(以下简称“项目”)中标人。",
+                "另一项目合同终止。",
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
     def test_document_content_identity_drift_is_rejected(self):
         result = extract_official_business_catalyst_facts(
             document(),

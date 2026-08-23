@@ -83,6 +83,30 @@ CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN = re.compile(
     r"的中标(?:单位|供应商)"
     r"(?=$|[，,。.;；：:!?！？])"
 )
+CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN = re.compile(
+    r"收到[^。!?！？]{0,60}?《中标通知书》"
+    r"[^。!?！？]{0,40}?[，,]确认"
+    r"(?:公司|本公司|[一-鿿A-Za-z0-9]{2,32}?)中标"
+    r"《([^》]{2,60}?项目[^》]{0,30})》"
+    r"(?=$|[，,。.;；：:!?！？])"
+)
+CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])"
+    r"[^。!?！？]{0,100}?组成的联合体被确定为"
+    r"([一-鿿A-Za-z0-9()（）-]{6,90}?(?:项目|工程总承包))"
+    r"(?:[(（]以下简称[“\"]?项目[”\"]?[)）])?中标人"
+    r"(?=$|[，,。.;；：:!?！？])"
+)
+CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN = re.compile(
+    r"收到[^。!?！？]{0,180}?发来的中标通知书[：:]"
+    r"[^。!?！？]{0,100}?(?:组成的)?联合体被确定为"
+    r"([一-鿿A-Za-z0-9()（）-]{6,90}?(?:项目|工程总承包))"
+    r"(?:[(（]以下简称[“\"]?项目[”\"]?[)）])?中标人"
+    r"(?=$|[，,。.;；：:!?！？])"
+)
+PLAIN_PROJECT_AWARD_PATTERN = re.compile(
+    r"(?:中标|未中标)([一-鿿A-Za-z0-9]{2,20}?)(?:项目)"
+)
 REASON_PREFIX_BUSINESS_METRIC_PATTERN = re.compile(
     r"(?:业绩变动原因主要是|主要原因(?:是|为)|主要是|主要系)本期"
     r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
@@ -107,6 +131,34 @@ NAMED_PRODUCT_DELIVERY_PATTERN = re.compile(
     r"([一-鿿A-Za-z0-9]{2,20}?)产品交付量的同比(?:大幅)?增加"
     r"[，,]公司营业收入同比增长"
 )
+NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:()（）])"
+    r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)业务多措并举[，,]"
+    r"营业收入实现增长[，,]利润大幅减亏"
+)
+NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])公司"
+    r"(?!主营|主要|整体|相关|新|核心|业务|产品|行业|市场)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)业务在20\d{2}年度"
+    r"实现了显著业绩增长"
+)
+NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:[一二三四五六七八九十]+是)?公司"
+    r"(?!主营|主要|整体|相关|新|核心|业务|产品|行业|市场)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)业务板块巩固拓展[，,]"
+    r"经营收入稳定增长"
+)
+NAMED_CORE_PRODUCT_ANAPHORA_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])[^\u3002!?！？]{0,30}?核心产品"
+    r"(?!该产品|主要产品|公司产品|产品)"
+    r"([一-鿿A-Za-z0-9]{2,24}?)(?:[(（][^()（）。!?！？]{2,30}[)）])?"
+    r"(?:20\d{2}年[^。!?！？，,]{2,40}[，,])?"
+    r"受[^。!?！？]{2,30}?影响[，,]"
+    r"该产品销售单价[^。!?！？]{0,8}?下调、销量"
+    r"[^。!?！？]{0,8}?下滑[，,]对公司营业收入及"
+    r"经营利润形成[^。!?！？]{0,8}?冲击"
+)
 OBJECT_PATTERNS = {
     OfficialBusinessCatalystKind.MAJOR_CONTRACT: (
         QUOTED_EPC_CONTRACT_PATTERN,
@@ -122,13 +174,14 @@ OBJECT_PATTERNS = {
     OfficialBusinessCatalystKind.PROJECT_AWARD: (
         QUOTED_EPC_CONTRACT_PATTERN,
         CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN,
+        CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN,
+        CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+        CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
         re.compile(
             r"第[0-9一二三四五六七八九十、，至和及-]{1,16}标段"
             r"([\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:项目)"
         ),
-        re.compile(
-            r"(?:中标|未中标)([\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:项目)"
-        ),
+        PLAIN_PROJECT_AWARD_PATTERN,
     ),
     OfficialBusinessCatalystKind.CAPACITY_START: (
         re.compile(
@@ -151,6 +204,10 @@ OBJECT_PATTERNS = {
         REASON_PREFIX_BUSINESS_METRIC_PATTERN,
         NAMED_PRODUCT_AVERAGE_PATTERN,
         NAMED_PRODUCT_DELIVERY_PATTERN,
+        NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN,
+        NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN,
+        NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN,
+        NAMED_CORE_PRODUCT_ANAPHORA_PATTERN,
         re.compile(
             r"(?:导致|致使)公司(?:报告期内)?"
             r"(?!报告期内|项目|公司|整体)"
@@ -349,6 +406,12 @@ def _clean_term(value: str, *, maximum_length: int = 20) -> Optional[str]:
             term,
             flags=re.IGNORECASE,
         ) is not None
+        or re.fullmatch(
+            r"(?:智慧城市|重点工程|重大项目|一般工程|综合治理)建设项目"
+            r"(?:EPC工程总承包)?",
+            term,
+            flags=re.IGNORECASE,
+        ) is not None
         or term.startswith((
             "相关", "其他", "导致", "致使", "因", "用以", "通知书后",
             "的第", "项目对公司",
@@ -408,7 +471,10 @@ def _has_unconfirmed_award_context(value: str, match: re.Match) -> bool:
     context = _sentence_context(value, match)
     return any(
         marker in context
-        for marker in UNCONFIRMED_AWARD_MARKERS
+        for marker in (
+            *UNCONFIRMED_AWARD_MARKERS,
+            *PRELIMINARY_AWARD_MARKERS,
+        )
     )
 
 
@@ -495,10 +561,9 @@ def extract_official_business_catalyst_facts(
     terms = []
     fragments = []
     seen_fragments = set()
-    normalized_document = ""
-    for page in content.pages:
-        normalized = _normalize(page.text)
-        normalized_document += normalized
+    normalized_pages = tuple(_normalize(page.text) for page in content.pages)
+    normalized_document = "".join(normalized_pages)
+    for page, normalized in zip(content.pages, normalized_pages):
         for pattern in patterns:
             for match in pattern.finditer(normalized):
                 if (
@@ -513,7 +578,12 @@ def extract_official_business_catalyst_facts(
                 ):
                     continue
                 if (
-                    pattern is CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN
+                    pattern in {
+                        CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                    }
                     and _has_unconfirmed_award_context(
                         normalized,
                         match,
@@ -529,8 +599,28 @@ def extract_official_business_catalyst_facts(
                 if (
                     document.event_kind
                     is OfficialBusinessCatalystKind.PROJECT_AWARD
-                    and pattern is not CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN
+                    and pattern not in {
+                        CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                    }
                     and _has_preliminary_award_context(normalized, match)
+                ):
+                    continue
+                if (
+                    document.event_kind
+                    is OfficialBusinessCatalystKind.PROJECT_AWARD
+                    and pattern is PLAIN_PROJECT_AWARD_PATTERN
+                    and "中标通知书" in _sentence_context(normalized, match)
+                ):
+                    continue
+                if (
+                    pattern in {
+                        CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                        CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
+                    }
+                    and any(marker in normalized_document for marker in ("终止", "取消"))
                 ):
                     continue
                 if (
