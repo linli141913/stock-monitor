@@ -58,6 +58,12 @@ EARNINGS_UNCONFIRMED_MARKERS = (
     "有待",
     "待确定",
 )
+EARNINGS_HEADING_CONTAMINATION_MARKERS = (
+    *EARNINGS_PROSPECTIVE_MARKERS,
+    "尚待",
+    "有待",
+    "待确定",
+)
 UNEXECUTED_CONTRACT_MARKERS = (
     *PROSPECTIVE_MARKERS,
     *NEGATIVE_CONFIRMATION_MARKERS,
@@ -148,7 +154,7 @@ NAMED_PRODUCT_DELIVERY_PATTERN = re.compile(
     r"[，,]公司营业收入同比增长"
 )
 NAMED_PRODUCT_OUTPUT_SHARE_PATTERN = re.compile(
-    r"(?:^|[。!?！？；;])"
+    r"(?:^|[。!?！？；;]|业绩变动原因说明)"
     r"[^。!?！？；;]{0,180}?(?:该业务|该项业务)占公司营收比重已达"
     r"(?:约)?\d+(?:\.\d+)?%[^。!?！？；;]{0,30}?[，,]产(?!量|日)"
     r"(?!(?:公司|主营|主要|整体|相关|新|核心|行业|市场|产品|业务|项目|赛道|"
@@ -536,12 +542,12 @@ def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
     logical_start = sentence_start
     for heading in EARNINGS_REASON_HEADING_MARKERS:
         position = value.rfind(heading, sentence_start, match.end())
-        if position < 0 or position > match.start():
+        if position < 0 or position > match.end():
             continue
         immediate_prefix = value[max(sentence_start, position - 8):position]
         if not any(
             marker in immediate_prefix
-            for marker in UNCONFIRMED_AWARD_MARKERS
+            for marker in EARNINGS_HEADING_CONTAMINATION_MARKERS
         ):
             logical_start = max(logical_start, position)
     prefix_and_match = value[logical_start:match.end()]

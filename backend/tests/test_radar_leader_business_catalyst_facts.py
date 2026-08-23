@@ -282,6 +282,33 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("精铟",))
 
+    def test_named_product_output_allows_long_earnings_reason_heading_prefix(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明自2024年初新管理团队履职以来,"
+                "公司坚定实施战略转型,已全面切换到含锌铟固危废资源化利用"
+                "这一高潜力赛道,2025年该业务占公司营收比重已达约95%,"
+                "产精铟超过200吨(其中自产精铟约121吨)。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("精铟",))
+
+    def test_unrelated_preceding_negative_text_does_not_pollute_reason_heading(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "二、与会计师事务所沟通情况不存在分歧。"
+                "三、业绩变动原因说明自2024年以来,"
+                "2025年该业务占公司营收比重已达约95%,产精铟超过200吨。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("精铟",))
+
     def test_named_product_output_requires_confirmed_same_segment_context(self):
         cases = (
             "该业务占公司营收比重已达约95%,预计产精铟超过200吨。",
