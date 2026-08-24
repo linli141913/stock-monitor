@@ -47,6 +47,8 @@ EARNINGS_PROSPECTIVE_MARKERS = (
     "有望",
     "可能",
     "预期",
+    "预测",
+    "推测",
     "或将",
     "将",
 )
@@ -63,6 +65,50 @@ EARNINGS_HEADING_CONTAMINATION_MARKERS = (
     "尚待",
     "有待",
     "待确定",
+)
+EARNINGS_ASSERTION_DENIAL_MARKERS = (
+    "没有证据",
+    "无证据",
+    "尚无",
+    "否认",
+    "不支持",
+    "无法证明",
+    "不能证明",
+    "未能证明",
+)
+EARNINGS_ASSERTION_DENIAL_PATTERN = re.compile(
+    r"(?:否认|否定|不支持|无法证明|不能证明|未能证明|"
+    r"(?:没有|尚无|缺乏|无)[^。!?！？；;]{0,32}(?:证据|依据|材料)|"
+    r"未发现[^。!?！？；;]{0,32}(?:证据|依据|材料))"
+)
+EARNINGS_FOLLOWUP_RETRACTION_PATTERN = re.compile(
+    r"^(?:上述|以上|该(?:说法|表述|内容)|此(?:说法|表述|内容)|公司随后)"
+    r"[^。!?！？；;]{0,32}"
+    r"(?:不实|不属实|仅为预测|系预测|为预测|否认|否定|撤回)"
+)
+EARNINGS_HYPOTHETICAL_MARKERS = ("假设", "假定")
+STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES = (
+    "原计划建设项目开工率不足",
+)
+GENERIC_OBJECT_PREFIXES = (
+    "相关",
+    "其他",
+    "某",
+    "部分",
+    "各类",
+    "多种",
+    "多类",
+    "若干",
+    "系列",
+    "多款",
+    "多项",
+    "多个",
+    "一系列",
+    "全部",
+    "这类",
+    "同类",
+    "各款",
+    "众多",
 )
 UNEXECUTED_CONTRACT_MARKERS = (
     *PROSPECTIVE_MARKERS,
@@ -164,6 +210,27 @@ NAMED_PRODUCT_OUTPUT_SHARE_PATTERN = re.compile(
     r"(?:超过|达到)(?:约)?\d+(?:\.\d+)?(?:吨|万吨|公斤|千克|kg)"
     r"(?=$|[。!?！？；;]|[(（]|[，,]公司整体营业收入)"
 )
+CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:导致|致使)"
+    r"(?:本期|本年度|报告期内)?销售(皮棉)毛利率"
+    r"(?:比上年|同比)[^。!?！？]{0,10}"
+    + EXPLICIT_METRIC_DIRECTION_PATTERN
+)
+CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:导致|致使)"
+    r"(沥青)销售业务毛利率(?:同比)?"
+    r"[^。!?！？]{0,8}" + EXPLICIT_METRIC_DIRECTION_PATTERN
+)
+REGISTERED_NAMED_PRODUCT_INCOME_PATTERN = re.compile(
+    r"中国首款四价流脑结合疫苗"
+    r"(((?!(?:研发|试验|临床|开发|候选|预计|的))"
+    r"[一-鿿A-Za-z0-9]){2,10}®)收入保持持续增长"
+)
+STRICT_CONFIRMED_EARNINGS_PATTERNS = (
+    CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
+    CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
+    REGISTERED_NAMED_PRODUCT_INCOME_PATTERN,
+)
 NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN = re.compile(
     r"(?:^|[，,。.;；：:()（）])"
     r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
@@ -238,6 +305,9 @@ OBJECT_PATTERNS = {
         NAMED_PRODUCT_AVERAGE_PATTERN,
         NAMED_PRODUCT_DELIVERY_PATTERN,
         NAMED_PRODUCT_OUTPUT_SHARE_PATTERN,
+        CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
+        CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
+        REGISTERED_NAMED_PRODUCT_INCOME_PATTERN,
         NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN,
         NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN,
         NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN,
@@ -446,8 +516,9 @@ def _clean_term(value: str, *, maximum_length: int = 20) -> Optional[str]:
             term,
             flags=re.IGNORECASE,
         ) is not None
+        or term.startswith(GENERIC_OBJECT_PREFIXES)
         or term.startswith((
-            "相关", "其他", "导致", "致使", "因", "用以", "通知书后",
+            "导致", "致使", "因", "用以", "通知书后",
             "的第", "项目对公司",
         ))
         or any(marker in term for marker in (
@@ -531,7 +602,7 @@ def _has_preliminary_award_context(value: str, match: re.Match) -> bool:
     return any(marker in context for marker in PRELIMINARY_AWARD_MARKERS)
 
 
-def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
+def _earnings_logical_start(value: str, match: re.Match) -> int:
     # PDF 文本常丢失句号：页首的“预计净利润”不能否掉后续
     # “业绩变动原因说明”中已发生的经营事实。同理，明确的
     # 财务结果预测可由“主要是/主要原因”引出已发生的对象事实。
@@ -555,10 +626,76 @@ def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
         forecast_prefix = prefix_and_match[:intro.start()]
         if FORECASTED_FINANCIAL_RESULT_PATTERN.search(forecast_prefix):
             logical_start += intro.start()
-            prefix_and_match = value[logical_start:match.end()]
             break
+    return logical_start
+
+
+def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
+    logical_start = _earnings_logical_start(value, match)
+    prefix_and_match = value[logical_start:match.end()]
     context = prefix_and_match
     return any(marker in context for marker in EARNINGS_UNCONFIRMED_MARKERS)
+
+
+def _has_unconfirmed_strict_earnings_context(
+    value: str,
+    match: re.Match,
+) -> bool:
+    logical_start = _earnings_logical_start(value, match)
+    prefix = value[logical_start:match.start()]
+    immediate_prefix = value[max(logical_start, match.start() - 12):match.start()]
+    sentence_ends = tuple(
+        position
+        for marker in SENTENCE_END_MARKERS
+        if (position := value.find(marker, match.end())) >= 0
+    )
+    sentence_end = min(sentence_ends) + 1 if sentence_ends else len(value)
+    matched_and_tail = value[
+        match.start():min(sentence_end, match.end() + 48)
+    ]
+    followup_ends = tuple(
+        position
+        for marker in SENTENCE_END_MARKERS
+        if (position := value.find(marker, sentence_end)) >= 0
+    )
+    followup_end = (
+        min(followup_ends) + 1
+        if followup_ends
+        else min(len(value), sentence_end + 64)
+    )
+    followup = value[sentence_end:min(followup_end, sentence_end + 64)]
+    prospective_prefix = prefix
+    for phrase in STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES:
+        prospective_prefix = prospective_prefix.replace(phrase, "")
+    return bool(
+        any(marker in prefix for marker in EARNINGS_HYPOTHETICAL_MARKERS)
+        or any(
+            marker in prospective_prefix
+            for marker in EARNINGS_PROSPECTIVE_MARKERS
+        )
+        or any(
+            marker in prefix
+            for marker in EARNINGS_ASSERTION_DENIAL_MARKERS
+        )
+        or EARNINGS_ASSERTION_DENIAL_PATTERN.search(prefix) is not None
+        or any(
+            marker in immediate_prefix
+            for marker in (
+                *NEGATIVE_CONFIRMATION_MARKERS,
+                "是否",
+                "尚待",
+                "有待",
+                "待确定",
+            )
+        )
+        or any(
+            marker in matched_and_tail
+            for marker in EARNINGS_UNCONFIRMED_MARKERS
+        )
+        or EARNINGS_ASSERTION_DENIAL_PATTERN.search(matched_and_tail)
+        is not None
+        or EARNINGS_FOLLOWUP_RETRACTION_PATTERN.search(followup) is not None
+    )
 
 
 def _sentence_context(value: str, match: re.Match) -> str:
@@ -660,7 +797,17 @@ def extract_official_business_catalyst_facts(
                 if (
                     document.event_kind
                     is OfficialBusinessCatalystKind.EARNINGS_FORECAST
-                    and _has_unconfirmed_earnings_context(normalized, match)
+                    and (
+                        _has_unconfirmed_strict_earnings_context(
+                            normalized,
+                            match,
+                        )
+                        if pattern in STRICT_CONFIRMED_EARNINGS_PATTERNS
+                        else _has_unconfirmed_earnings_context(
+                            normalized,
+                            match,
+                        )
+                    )
                 ):
                     continue
                 matched_terms = _matched_terms(

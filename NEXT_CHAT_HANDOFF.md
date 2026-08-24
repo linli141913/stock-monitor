@@ -1,7 +1,17 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-23 16:06 CST
+> 保存时间：2026-08-24 09:27 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-08-24阶段6严格销售毛利与注册产品v36真实重放
+
+- 按确认设计只新增三个官方窄句式：`600540` 的“致使本年度销售皮棉毛利率比上年有大幅提升”只提取 `皮棉`；`300135` 的“导致沥青销售业务毛利率同比下滑”只提取 `沥青`；`688185` 的“中国首款四价流脑结合疫苗曼海欣®收入保持持续增长”只提取 `曼海欣®`。未实现主观“表现亮眼”、泛产品、模糊包含、同义词或 AI 推断；确定性关系仍只允许官方 canonical 完全同值。规则版本升级为 `radar-leader-business-deterministic-relation-v24`，旧 v23 检查点不得复用。
+- 真实 `300135` PDF 暴露“客户原计划建设项目开工率不足”中的“计划”误伤后续已发生毛利事实；修正只豁免该完整历史短语，普通“公司计划”仍拒绝。Sol + 高审查发现并关闭“假设/假定 + 历史短语”反事实旁路；预计/预期/预测/推测/计划、否认/撤回、跨句、泛对象和未注册产品反例均继续失败关闭；最终关键复审无 Critical/Important。
+- v36 新鲜官方源 `385` 只重放为 `ready=15`、`missing=147`、`source_failed=0`、`source_unverified=223`、`reused=0`。与v31逐证券比较只有 `600540/300135/688185` 从 `business_catalyst_fact_object_missing` 转为 READY，均为 `direct` 完全同值关系，其他证券无业务状态漂移。对象缺失降为 `99`，精确关系未确认仍为 `39`。
+- 最终证据为 `/private/tmp/stage6-business-auto-20260824-v36/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `cd655c8d71e8bdeb61a1a0ebca02c7e6fdd1e48565fa8d8973af8effbb16e311`；缺口诊断为 `/private/tmp/stage6-business-auto-20260824-v36/gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `8b13a29266b65ec49b5ef8b4bc8f119193adca7219d4bd6f7dca3cb7e0992d34`，覆盖剩余 `99/99` 只对象缺失。`deliveryPacketPath=null`，四项阶段6正式门继续全部 `false`。
+- 精确隔离生产 SQLite 的完整后端 `1727` 项全部通过；最终聚焦规则链 `86` 项、受影响 Python 编译和 `git diff --check` 通过。修改文件为 `backend/radar/leader_business_automatic_contracts.py`、`backend/radar/leader_business_catalyst_facts.py`、四个对应测试和本检查点。`4000` 未监听；`8001` 仍为既有 PID `791`，未停止、重启或重载。Git 基线为 `main@b10ba00`，相对 `origin/main` 领先 `14` 个提交；本批修改未暂存、未提交、未推送，没有读写生产 SQLite，没有修改服务、环境变量、依赖、迁移、调度、功能开关、正式门或部署。
+
+下一步：1）只从剩余 `99` 只对象缺失的 v36 新鲜官方正文继续寻找可真实复现且有强反例保护的句式；2）`39` 只关系未确认继续只接受官方完全同值或人工审核的版本化映射；3）D8 第二个真实实质变化版本和四项正式门继续独立等待。
 
 ## 2026-08-23阶段6业绩原因页边界v31真实重放
 

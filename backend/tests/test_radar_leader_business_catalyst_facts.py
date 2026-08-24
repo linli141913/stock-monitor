@@ -153,6 +153,130 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
             ("生物质纤维素长丝", "氨纶纤维", "火腿", "肉制品"),
         )
 
+    def test_causal_named_sales_margin_extracts_only_the_sold_object(self):
+        cases = (
+            (
+                "三、本期业绩预亏主要原因1、2025年受国内国际大环境影响,"
+                "棉纺织市场下游需求趋淡,部分纺企订单不足,"
+                "叠加今年美国关税战的影响,纺企采购原料棉花偏谨慎,"
+                "限制棉花需求,导致棉花市场需求不足,价格呈下跌趋势,"
+                "年底新棉上市后价格有所回升,致使本年度销售皮棉毛利率"
+                "比上年有大幅提升,但依然偏低,影响本期利润。",
+                "皮棉",
+            ),
+            (
+                "一、本期业绩预计情况：预计净利润为负值。"
+                "三、业绩变动原因说明。"
+                "报告期内，公司部分客户原计划建设项目开工率不足，"
+                "致使沥青需求延期供货；同时原材料采购成本"
+                "受国际原油价格波动影响，"
+                "导致沥青销售业务毛利率同比下滑。",
+                "沥青",
+            ),
+        )
+
+        for text, expected_term in cases:
+            with self.subTest(expected_term=expected_term):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.READY,
+                )
+                self.assertEqual(result.business_terms, (expected_term,))
+
+    def test_registered_named_product_income_extracts_exact_product_name(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、本期业绩变化的主要原因。"
+                "报告期内，中国首款四价流脑结合疫苗"
+                "曼海欣®收入保持持续增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("曼海欣®",))
+
+    def test_new_named_margin_and_registered_product_patterns_fail_closed(self):
+        cases = (
+            "导致原材料销售业务毛利率同比下滑。",
+            "导致公司整体毛利率下降。",
+            "致使本年度销售皮棉毛利率预计提升。",
+            "导致沥青销售业务毛利率预计下滑。",
+            "致使本年度销售皮棉毛利率比上年提升或将达到10个百分点。",
+            "导致沥青销售业务毛利率同比下滑的说法不实。",
+            "导致本期销售部分产品毛利率同比提升。",
+            "导致部分销售业务毛利率同比下滑。",
+            "致使本期销售各类产品毛利率同比提升。",
+            "导致各类销售业务毛利率同比下滑。",
+            "导致本期销售系列产品毛利率同比提升。",
+            "导致系列销售业务毛利率同比下滑。",
+            "导致本期销售多款产品毛利率同比提升。",
+            "导致多款销售业务毛利率同比下滑。",
+            "没有证据表明该因素导致沥青销售业务毛利率同比下滑。",
+            "尚无充分证据支持该因素导致沥青销售业务毛利率同比下滑。",
+            "公司否认相关因素导致沥青销售业务毛利率同比下滑。",
+            "公司否定相关因素导致沥青销售业务毛利率同比下滑。",
+            "公司没有依据认定相关因素导致沥青销售业务毛利率同比下滑。",
+            "公司未发现任何充分可靠且可复核的材料能够证明相关因素"
+            "导致沥青销售业务毛利率同比下滑。",
+            "导致本期销售全部产品毛利率同比提升。",
+            "导致全部销售业务毛利率同比下滑。",
+            "导致本期销售这类产品毛利率同比提升。",
+            "导致这类销售业务毛利率同比下滑。",
+            "导致本期销售同类产品毛利率同比提升。",
+            "导致同类销售业务毛利率同比下滑。",
+            "导致本期销售各款产品毛利率同比提升。",
+            "导致各款销售业务毛利率同比下滑。",
+            "导致本期销售众多产品毛利率同比提升。",
+            "导致众多销售业务毛利率同比下滑。",
+            "疫苗收入保持持续增长。",
+            "预计疫苗曼海欣®收入保持持续增长。",
+            "疫苗曼海欣®收入预计持续增长。",
+            "某疫苗产品收入增长。",
+            "产品虚构牌®收入持续增长。",
+            "疫苗研发中的曼海欣®收入持续增长。",
+            "中国首款四价流脑结合疫苗曼海欣®收入保持持续增长"
+            "的预期尚待验证。",
+            "中国首款四价流脑结合疫苗曼海欣®收入保持持续增长"
+            "并不属实。",
+            "致使本年度销售皮棉毛利率比上年提升仅为预测。",
+            "导致沥青销售业务毛利率同比下滑系预测结果。",
+            "中国首款四价流脑结合疫苗曼海欣®收入保持持续增长"
+            "为预测值。",
+            "以下为预测内容：致使本年度销售皮棉毛利率比上年提升。",
+            "公司仅作推测：导致沥青销售业务毛利率同比下滑。",
+            "公司计划降低原材料采购成本，"
+            "导致沥青销售业务毛利率同比下滑。",
+            "假设原计划建设项目开工率不足，且原材料采购成本"
+            "受价格波动影响，导致沥青销售业务毛利率同比下滑。",
+            "致使本年度销售皮棉毛利率比上年提升。上述说法不实。",
+            "导致沥青销售业务毛利率同比下滑。以上仅为预测。",
+            "中国首款四价流脑结合疫苗曼海欣®收入保持持续增长。"
+            "公司随后否认该说法。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
     def test_forecast_header_does_not_invalidate_later_confirmed_metrics(self):
         result = extract_official_business_catalyst_facts(
             document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
