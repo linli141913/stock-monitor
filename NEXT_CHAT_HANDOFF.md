@@ -1,15 +1,15 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-28 15:02 CST
+> 保存时间：2026-08-28 16:01 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
 
 ## 2026-08-28阶段6行业与父池横截面证据链收口
 
 - 针对13:38真实五源已`ready_for_review`但资格子计划只有1只股时丢失父池横截面、状态审查丢失可信行业范围实体的两个真实缺口，已按TDD修复。研究组装现在用完整冻结父行情池计算市场/行业横截面，只将输出筛到子计划并保持子计划顺序；不再把子计划缩成1至2只后误报 `leader_cross_section_evidence_unavailable`。
 - 证据候选验收现在保留生产者绑定的原始行业范围，并由五源CLI→来源采集→状态审查同轮透传；仅用 `dataclasses.replace`复制的范围会丢失生产者身份并阻断。新增 `leader_formal_industry_gate` 只证明候选所属行业状态活跃、行业规则证据就绪和父池横截面就绪；没有获得版本化正式阈值批准前，仍明确返回 `leader_formal_industry_gate_policy_unapproved`，`formalGateReady/formalUsable/stateTransitionAllowed`全为false。证据真缺失时保留真实缺失原因，不会被改成输入伪造或误开门。
-- 本批涉及 `backend/radar/leader_runtime_inputs.py`、`leader_research_single_pass_orchestration.py`、`leader_evidence_candidate_plan.py`、新行业门证据模块、阶段6状态审查/五源入口及对应测试。两项精确红灯分别证明真实入口未传行业范围和缺横截面会阻断，修复后行业门专项6项、相关95项通过。解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-industry-gate-fulltest-20260828/stock_monitor_test.sqlite` 后，完整后端1938项全部通过，守卫实际拦截1次；Python全量编译、`pip check`、`git diff --check`通过。
+- 本批涉及 `backend/radar/leader_runtime_inputs.py`、`leader_research_single_pass_orchestration.py`、`leader_evidence_candidate_plan.py`、新行业门证据模块、阶段6状态审查/五源入口及对应测试。两项精确红灯分别证明真实入口未传行业范围和缺横截面会阻断，修复后行业门专项6项、相关95项通过。提交前再次从解释器启动阶段精确拦截生产SQLite绝对路径，并重定向到全新 `/private/tmp/codex-stage6-precommit-fulltest-20260828/stock_monitor_test.sqlite`；完整后端1938项全部通过，守卫实际拦截1次；Python全量编译、`pip check`、`git diff --check`通过。
 - 14:57前才完成代码收口，没有在临近连续交易窗口结束时冒险启动一轮长采集，因此13:38旧工件中的两个占位原因不能冒充本批修复后的现场证据。下一次合法连续交易窗口必须从最新顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json` （SHA-256 `a968f8ad516c97bd68653bf5dc71756705ac780310522943950f105a9eb96a91`）继续，不复用13:38候选。本批未读写生产SQLite、未调用付费AI，未改环境变量、依赖、服务、开关、Git或部署。
-- Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，97个未提交文件（65个已跟踪/32个未跟踪）全部保留；`8001`仍为旧PID 791，`4000`未监听，运行服务未加载本批代码。
+- 97个阶段6文件已全部进入本地代码提交 `b330278` (`feat: 收口阶段6同轮五源与证据候选链路`)；本文件随后单独同步提交，完成后工作树干净，`main` 相对 `origin/main` 领先17个提交。`8001`仍为旧PID 791，`4000`未监听，运行服务未加载本批代码。
 
 下一步：1）先在非交易窗口继续TDD收口官方风险开放事件的跨窗口延续与更正链，不用D2或AI代替D8结论；2）从PRD/升级规划已明文的正式规则中定位行业门阈值，只有真实已定义口径才版本化批准，不自创阈值；3）下一个A股连续交易窗口从上述唯一顺序前态重跑同一入口，五源或正式门任一不齐继续失败关闭，不进入阶段7/8/9。
 
