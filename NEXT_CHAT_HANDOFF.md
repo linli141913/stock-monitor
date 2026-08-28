@@ -1,7 +1,308 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-24 09:27 CST
+> 保存时间：2026-08-28 15:02 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-08-28阶段6行业与父池横截面证据链收口
+
+- 针对13:38真实五源已`ready_for_review`但资格子计划只有1只股时丢失父池横截面、状态审查丢失可信行业范围实体的两个真实缺口，已按TDD修复。研究组装现在用完整冻结父行情池计算市场/行业横截面，只将输出筛到子计划并保持子计划顺序；不再把子计划缩成1至2只后误报 `leader_cross_section_evidence_unavailable`。
+- 证据候选验收现在保留生产者绑定的原始行业范围，并由五源CLI→来源采集→状态审查同轮透传；仅用 `dataclasses.replace`复制的范围会丢失生产者身份并阻断。新增 `leader_formal_industry_gate` 只证明候选所属行业状态活跃、行业规则证据就绪和父池横截面就绪；没有获得版本化正式阈值批准前，仍明确返回 `leader_formal_industry_gate_policy_unapproved`，`formalGateReady/formalUsable/stateTransitionAllowed`全为false。证据真缺失时保留真实缺失原因，不会被改成输入伪造或误开门。
+- 本批涉及 `backend/radar/leader_runtime_inputs.py`、`leader_research_single_pass_orchestration.py`、`leader_evidence_candidate_plan.py`、新行业门证据模块、阶段6状态审查/五源入口及对应测试。两项精确红灯分别证明真实入口未传行业范围和缺横截面会阻断，修复后行业门专项6项、相关95项通过。解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-industry-gate-fulltest-20260828/stock_monitor_test.sqlite` 后，完整后端1938项全部通过，守卫实际拦截1次；Python全量编译、`pip check`、`git diff --check`通过。
+- 14:57前才完成代码收口，没有在临近连续交易窗口结束时冒险启动一轮长采集，因此13:38旧工件中的两个占位原因不能冒充本批修复后的现场证据。下一次合法连续交易窗口必须从最新顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json` （SHA-256 `a968f8ad516c97bd68653bf5dc71756705ac780310522943950f105a9eb96a91`）继续，不复用13:38候选。本批未读写生产SQLite、未调用付费AI，未改环境变量、依赖、服务、开关、Git或部署。
+- Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，97个未提交文件（65个已跟踪/32个未跟踪）全部保留；`8001`仍为旧PID 791，`4000`未监听，运行服务未加载本批代码。
+
+下一步：1）先在非交易窗口继续TDD收口官方风险开放事件的跨窗口延续与更正链，不用D2或AI代替D8结论；2）从PRD/升级规划已明文的正式规则中定位行业门阈值，只有真实已定义口径才版本化批准，不自创阈值；3）下一个A股连续交易窗口从上述唯一顺序前态重跑同一入口，五源或正式门任一不齐继续失败关闭，不进入阶段7/8/9。
+
+## 2026-08-28阶段6同轮五源首次真实可审查
+
+- 13:38 CST 在当天A股下午连续交易窗口确认没有重复验收进程后，从最新合法前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T102737258372.json` 顺序续接唯一五源入口；没有初始化新状态链、倒拨时间或复用10:29旧候选。唯一进程退出码0，生成 `radarRunId=stage6-prefreeze-20260828T133853483985`，历史 `5157/5157`、行业83个且81个分析、可交易性 `completed 383/383`，最终候选冻结 `asOf=2026-08-28T13:40:25.571917+08:00`。
+- 当轮行业状态继续为 `continued`，81个行业状态为 `observe=23/retreat=40/invalid=13/unclassified=5`；从383只轻量初筛派生15只证据候选。官方主营自动证据真实为 `ready=1/missing=2/source_unverified=12/source_failed=0/reused=0`，仅 `600076` 因2025年年报和2026年业绩预告均精确指向“集装箱地板”通过资格，另外14只按原规则排除，没有用AI、同义词、预测或空模板补齐。父证据计划为 `radar-leader-runtime-candidate-plan-v1:2af3acf6b873164fdb54957f512f2cc782f44baae635676b70430052ad98450e`，资格子计划为 `radar-leader-runtime-candidate-plan-v1:6853003b3565082930c3ca84d3b53ab451a53f11dc0480796f78e49f8165dca6`。
+- 对资格子计划同进程完成巨潮七类官方风险发现和五源重放：风险交付层仍诚实为 `missing/partial`、原因 `risk_lifecycle_batch_no_ready_items`，因为没有人工D8版本；官方确定性层只把完整七类查询的发现元数据作为真实风险来源输入，不声称风险过滤通过。最终行业规则、历史、主营催化、可交易性、风险五个来源均为 `ready`，总状态首次为 `ready_for_review`；但 `riskFilterPassed/formalScoreReady/formalGateReady/formalUsable/stateTransitionAllowed` 仍全部为false，`600076`的状态评审仍明确缺 `leader_formal_industry_gate_unavailable` 和 `leader_cross_section_evidence_unavailable`。这次成功只证明五源同轮身份和真实来源链已贯通，不等于正式龙头、阶段6正式启门或进入阶段7/8/9。
+- 总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260828T133853483985.json`，文件 SHA-256 `a298e6a76e98155c0683815ea5a68d39ae047040562917a8d56c066685a540a6`；资格候选包内 SHA-256 `a087dec109b51da785e6638c1ae5abf1e59802ad7d0fc4f3dbb25bee8d312a99`、文件 SHA-256 `40cefdb21b05cfacb7324de2df06481b017811e5655392a6d83d18a35e3d6741`；15只核验包内 SHA-256 `ad03ad0a8cf500bd0dfc57eae0ba73ab6472587243a653bf83e320c4937980ed`、文件 SHA-256 `766c7e417b64add8f4f6e4cd554449db4ebad92d188cb6cfe7543494e9d4d43c`；新行业快照文件 SHA-256 `a968f8ad516c97bd68653bf5dc71756705ac780310522943950f105a9eb96a91`。四份顶层工件均为0600。
+- 生产候选包加载器已重新验证两个包均为 `ready`，`radarRunId/asOf/父子计划` 全部对齐；入口与五源专项25项通过，`git diff --check`通过。本轮没有发现需改代码的缺陷，未读写生产SQLite、未调用付费AI，未改环境变量、依赖、服务、开关、Git或部署；现有全部未提交改动继续保留。
+
+下一步：1）不必再等交易窗口，先按TDD补齐 `leader_formal_industry_gate` 与跨截面证据的真实确定性输入和失败关闭合同；2）继续补齐官方风险开放事件跨窗口延续及更正链，只有真实正文和版本链能使 `riskFilterPassed` 成立；3）两类正式门完成后再在新交易窗口复跑同一入口，四个正式开关未全真前不进入阶段7/8/9。
+
+## 2026-08-28阶段6冻结候选官方主营解析收口
+
+- 只重放10:29已冻结的15只证据候选包 `radar-leader-runtime-candidate-plan-v1:f304ffaecce23d5851bf8f7a0028b9b2b16dd4a7e7f3e4567ee5b1996ba438ab`，未重跑全市场、未改写候选时点。用巨潮公开官方年报与公告逐项核对后，修复了4类可复现的真解析缺口：已发生的产品营收因果句、房地产结转收入/毛利句、经纪业务交易额/佣金收入句、上交所年报“公司所从事的主要业务”标题及其结束边界。同时将审计正文中的“所属行业的发展趋势”与显式行业标签分开，并禁止年报表格纯数字被误收为业务词。
+- 真实最终重放为 `ready=3` / `missing=5` / `source_unverified=7` / `source_failed=0` / `reused=3`。三只合格项均为年报与催化公告完全同对象：`601360`的“互联网”、`000560`的“经纪”、`000011`的“房地产开发”。`300492`的非学历培训净利润是预计值，`688061/688152`等只有产品/公司层面泛称，`600162`的新IDC合同无年报同对象主营，全部继续失败关闭，没有用预测、同义词或AI补齐。
+- 最终证据 `/private/tmp/stage6-business-parserfix-final-20260828/evidence-ee7f17afdf2cf9881d4e2bdd3935a891ba2a3b96c86c12e20779e5db89eda5ef.json`，SHA-256 `9ca1c30de72ef5347fcbb12888f338d7a0ff2e56485726fc9b73b182764406a5`。三个checkpoint SHA-256分别为 `601360=6493e1b96798b8ed9ec1a8347cc96f6e4f1ab0587d96fb1a1158ca52084414ee`、`000560=2d8c8ba7d46cdf51c7815a58bbc508f439c7bce6418c53e216dff35f8c35f18d`、`000011=db17ac7208b3603b7356e5518a1678c05342fb7b0fa51df6d7695592b6dafc0e`；四份工件均已设为0600。本批修改 `backend/radar/leader_business_catalyst_facts.py`、`backend/radar/leader_business_document_facts.py` 及对应两个测试文件。
+- 主营解析最终97项通过；解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-business-final-fulltest2-20260828/stock_monitor_test.sqlite` 后，完整后端1931项全部通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check`通过。未读写生产SQLite，未调用付费AI，未改环境变量、依赖、服务、开关、Git或部署。Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，93个未提交文件（63已跟踪/30未跟踪）全部保留；`8001`仍为旧PID 791，`4000`未监听，服务未加载本批代码。
+- 13:05旧一次性自动任务再次触发，但其命令仍绑定8月27日11:03旧状态；现场已确认今天最新合法前态为 `sector-state-20260828T102737258372.json`（SHA-256 `9d3f66a0b112aea7a7aaa8467e8ff118542c39814264298c1d87de47f334282c`），因此没有执行过期命令、没有从旧状态分叉。自动任务删除接口连续约两分钟无返回后已终止控制调用，当前无法确认任务6已删除；若再次触发仍应先按最新检查点拒绝旧命令。项目验收进程为0，`8001`仍为PID 791，`4000`未监听。
+
+下一步：1）下一个A股连续交易窗口只从 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T102737258372.json` 顺序续接唯一五源入口，重新冻结当时的真实候选，不把10:29的三只合格项冒充新一轮；2）若新一轮主营资格子计划非空，同一进程继续官方风险、真实D8和五源总门；3）任一来源不足仍保持四个正式开关全关，不进入阶段7/8/9。
+
+## 2026-08-28阶段6交易窗口编排故障修复与真实主营空资格
+
+- 09:45后由上交所官方日历确认今天为完整交易日并在连续交易窗口执行唯一五源入口。首两轮在深交所逐证券公开接口的 `marketTime` 比本机抓取时间快约6至7秒时失败关闭；40次公开源探针确认这是部分上游节点时钟/缓存偏差，不是倒拨本机时间。按TDD保留最终5秒上限，只对5至15秒的可恢复偏差等待到边界后重新请求一次真实响应，超过15秒或第二次仍超界继续失败关闭，没有修改原始时间或放宽正式口径。
+- 修复后可交易性已越过该门，但4并发交易所核验耗时会让同一冻结腾讯行情在最终重冻结时跨过90秒逐股新鲜度边界，产生 `candidate_scope_changed_after_refreeze`。公开真实基准证明8并发对383只核验为 `completed 383/383`，耗时36.913秒、距候选冻结37.681秒；阶段6默认入口现显式使用代码既有且已校验的8并发上限，没有提高适配器最大值，也没有更改90秒时效、5秒未来容差或失败关闭规则。
+- 10:17轮首次真实越过重冻结，历史 `5157/5157`、行业83个且81个分析、可交易性 `completed 383/383`，并从8月27最终顺序前态生成今天 `continued` 行业状态；随后证据候选轻量装配发现第二个真实合同矛盾：可交易性生产收集器允许既有5秒时钟偏差，下一层却重复要求 `fetchedAt >= sourceTime` 且零容差，导致同一个已 `completed` 的真实批次重放失败。新增1秒偏差回归先红后绿，装配层现信任刚刚实际调用的正式收集器时间合同，5秒上限仍由收集器校验。
+- 最终真实轮 `radarRunId=stage6-prefreeze-20260828T102737258372` 已依次通过历史/行业预冻结、候选重冻结、可交易性、行业状态和证据候选筛选：初筛383只，证据候选15只，候选计划 `radar-leader-runtime-candidate-plan-v1:f304ffaecce23d5851bf8f7a0028b9b2b16dd4a7e7f3e4567ee5b1996ba438ab`，`asOf=2026-08-28T10:29:08.475951+08:00`。主营材料入口15/15成功并进入 `pending_review`，但官方自动证据真实为 `ready=0/missing=5/source_unverified=10/source_failed=0/reused=0`；原因是催化缺失、事实对象/章节缺失、行业未核实或确定性关系未确认。资格子计划因此为空，最终 `not_ready`、唯一原因 `leader_business_evidence_qualification_empty`；风险、D8、五源总门和状态决策没有启动，四个正式开关仍全为false。这是当前真实数据门槛，不是编排卡死，禁止用AI、待复核材料或模糊关系补齐。
+- 最终总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260828T102737258372.json`，文件 SHA-256 `b6b26e4459b0682adbd170aad216fb9736488a1c151e7c782a162c8437ebee65`；候选源包同目录 `stage6-live-candidate-source-20260828T102737258372.json`，包内 SHA-256 `1a176e191c491f141bc08cb55a1a1feb15911e9641bdf44d61c42285d23ae8e0`、文件 SHA-256 `4d64e36cbe9ac73dd95b68e43362de93590f0694ac0f6f4cbfbea51eb55c7171`；最新顺序状态 `sector-state-20260828T102737258372.json`，文件 SHA-256 `9d3f66a0b112aea7a7aaa8467e8ff118542c39814264298c1d87de47f334282c`。三份文件均为0600。
+- 本批相关76项通过；解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-20260828-final-fulltest/stock_monitor_test.sqlite` 后，完整后端1921项全部通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check`通过。没有读取或写入生产SQLite，没有付费AI、环境变量、依赖、服务、开关、Git暂存/提交/推送或部署。Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，当前93个未提交文件（63个已跟踪修改、30个未跟踪）全部保留；`8001`仍由旧PID 791监听，`4000`未监听，运行服务未加载未提交代码。
+
+下一步：1）只对本轮15只候选继续寻找新的官方精确主营/催化原文证据，或完成真实版本化复核；不把 `pending_review` 自动升级为正式证据；2）只有资格子计划非空后，才对其全集执行官方风险、纯D2→真实D8和五源总门；3）下一次行业顺序运行必须从 `sector-state-20260828T102737258372.json` 继续，任一来源不足保持失败关闭，不进入阶段7/8/9。
+
+## 2026-08-27阶段6真实空榜与证据不齐语义分离
+
+- 复核升级规划中“所有类别允许空榜”与现有五源入口后，确认编排层把“真实规则完整运行后0只合格”和“来源未齐”都映射成 `not_ready`，会让真实空榜被误报为程序失败。按TDD在 `LeaderPhase6LiveSourceReadinessStatus` 新增独立 `empty`：已完成历史、行业、可交易性和状态机计算但没有活跃行业时，返回可审计的合法空榜，CLI退出码0，同时 `fiveSourceReadyForReview=false`、四个正式门和状态迁移仍全为false。
+- 主营资格空池又做了严格分层：只有同轮自动主营批次每只都为 `ready`、全部被官方确定性反证排除，且资格结果用现有生产构建器重放完全一致时，才能返回 `empty`。任一 `missing/source_unverified`导致的0只仍返回 `not_ready`；资格身份或重放不一致返回 `source_unverified`。因此14:22、14:34等真实运行的主营缺失/未核实不会被该修复冒充为成功空榜，也不会进入风险采集或状态决策。
+- 本批修改 `backend/radar/leader_phase6_live_source_readiness.py`、`backend/run_leader_phase6_live_five_source_acceptance.py` 及对应两个测试文件；先观察旧代码3项因无 `EMPTY` 失败，再观察过宽实现会把 `missing` 空池错报为 `empty`，收紧后4项边界通过。阶段6相关122项通过；解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-empty-fulltest-final-20260827/stock_monitor_test.sqlite` 后，完整后端1915项全部通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check`均通过。
+- 本轮未读写生产SQLite，未调用付费AI，未修改环境变量、依赖、调度、开关或服务，未做Git暂存/提交/推送/部署。Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，91个未提交文件全部保留。`8001` 仍由旧PID 791监听，`4000`未监听；FastAPI/ngrok LaunchAgent仍已加载且ngrok进程未运行，运行服务未加载本批未提交代码。
+
+下一步：1）下一个合法连续交易窗口从 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T145118956479.json` 顺序续接唯一五源入口，现场验证真实空榜不再被误报为程序失败；2）若任一行业合法进入 `observe`，只对当轮新证据候选跑官方精确主营，任一缺失/未核实仍返回 `not_ready`；3）只在资格子计划非空时继续官方风险、D8和五源总门，任一源不足不进入阶段7/8/9或正式启门。
+
+## 2026-08-27阶段6下午顺序入口恢复与主营真实空资格收口
+
+- 14:00后现场复验暴露了一个真实编排缺陷：证券主档某交易所来源失败时，预冻结只检查非空 items，因而曾用 `2863`只部分主档建立错误的行业成员身份。按TDD先证明部分主档会进入历史抓取，再在 `prepare_leader_phase6_public_historical_inputs()` 增加精确主档完整性门：`expectedCount`未知、覆盖率不为1、返回数与 items 不等或任一来源 issue 都以 `leader_phase6_public_prepare_security_master_unverified` 失败关闭，且不再创建新历史/行业身份。
+- 同时用真实公开数据纠正了过严的“行业快照必须 HEALTHY”暂时判断：14:20官方证券主档为 `5550/5550`、四个板块请求均成功；中上协官方分类文档完整 `5463`条、映射 `5439`条，但因111只分类生效日后上市/待确认证券和24条非当前A股记录，按合同正常标为 `degraded`。现在允许这种来源完整、缺口可审计的降级，但不允许部分主档冒充全集。
+- 14:22从最新合法顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T131005605684.json` 重跑唯一五源入口已越过技术链：历史 `5157/5157`、行业分析81个、比较时点14:20，可交易性 `completed 383/383`且六项字段覆盖均1.0，证据候选15只，行业状态合法续接。总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T142254095213.json`（SHA-256 `dd6fb55ab0a1860e51e5e1b304e1c0fe21aeec88d49cb734cb32b479e6b55a42`），候选包文件 SHA-256 `dd0903751eb8325f7f8348cfce1aaca26cf6a0358d198a1beb6d7828ec7f5de3`，新顺序状态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T142254095213.json`（SHA-256 `e63d7d66dec9dff7b2d53438d39fff9328b01f704dfffa8bf6d2418b39426657`）；三份文件均0600。
+- 本轮候选随行情/行业状态变化为新的15只，主营官方自动证据为 `ready=0`、`missing=11`、`source_unverified=4`、`source_failed=0`，资格子计划为空，最终唯一原因 `leader_business_evidence_qualification_empty`。两只关系缺口已核实：`600348`的煤炭主营与碳纤维投产不同值，继续拒绝；`601133`的《日常经营重大合同信息披露管理办法》曾被错当催化，已以TDD将“管理办法”类制度文件排除，真实复跑后其回到 `business_catalyst_fact_object_missing`，没有制造已签合同事实。
+- 另以13:10真实候选包诊断出 `300469` 官方业绩预告明确写明“公司在智慧交通行业领域取得显著成效，整体收入相较于2024年有所提升”，且年报主营原词为“智慧交通”。新增的窄句式及8个泛行业/预测/否认反例先红后绿；公开官方源重跑只将 `300469` 修正为 READY，其余14只无放宽。但 `300469` 不在14:22新候选池中，不能用旧候选的通过结果回填当轮。
+- 14:34又从14:22合法顺序状态继续一轮收盘前复验：历史仍为 `5157/5157`、行业分析81个、比较时点14:35，可交易性 `completed 383/383`，证据候选更换为新的15只。当轮主营仍为 `ready=0`、`missing=6`、`source_unverified=9`、`source_failed=0`，资格继续为空。唯一关系缺口 `002041` 已核实为年报“玉米”与催化“转基因玉米种”的上/下位词，年报全文没有后者完整原词，因此禁止用包含匹配放行。最新总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T143450251463.json`（SHA-256 `323903990159abe0b2aa14f12aece5b1d566ce0c5aed5a1493ad8b3946f06a37`），候选包文件 SHA-256 `6371428c07845efbef699b9de0b57bc38a022eac308a41b485d23805dd41d7d6`，最新顺序状态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T143450251463.json`（SHA-256 `045cc799fe7d9c5d395ff7f8b577d65326c9f71b589476fab030396b6e208aba`）。
+- 用户要求继续后已实际完成三次顺序推进：14:43轮只有行业69仍为 `observe`，派生5只证据候选，主营 `ready=0/missing=2/source_unverified=3`；14:47轮行业69经连续滞回正式降为 `retreat`，证据池合法为空；14:49首轮因最终预冻结来源短暂失败且未写新状态，随后只做一次有限重试，14:51从未污染的14:47前态成功续接，可交易性再次 `completed 383/383`，证据池仍合法为空。
+- 14:51最新状态中，行业13/19/25/34/39/40/65已连续两次 `pending observe`，但仍受到14:59:49才结束的退潮冷却期阻断；不得提前转为观察或在收盘后冒充盘中输入。最新总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T145118956479.json`（SHA-256 `1380689610972f56a27a4fd5d4b285f4e1daa6a573ead02a3a9e2a6cbd8ec28e`），唯一最新顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T145118956479.json`（SHA-256 `d1b7e8cecbfa20589b85425cf15542b891ae1ade80ff8516c97d0951e55d8b7e`）。
+- 相关回归 `120`项通过；解释器启动前精确拦截生产SQLite绝对路径并重定向到全新 `/private/tmp/codex-stage6-final-fulltest-20260827-1430/stock_monitor_test.sqlite` 后，完整后端 `1912`项全部通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check`均通过。没有读取或写入生产SQLite，没有付费AI、环境变量、依赖、服务、正式开关、Git暂存/提交/推送或部署操作。Git仍为 `main@82b71d9`、领先 `origin/main` 15个提交，当前91个未提交文件（61个已跟踪修改、30个未跟踪）均未暂存并完整保留。`8001` 仍由旧PID 791监听，`4000`未监听，服务未重载且未加载本批代码。
+
+下一步：1）下一个合法连续交易窗口只从 `sector-state-20260827T145118956479.json` 续接，首先验证7个 `pending observe=2` 行业在冷却期结束后的真实状态；2）若其中任一行业正式进入 `observe`，当轮立即派生少量证据候选并重跑官方精确主营；3）只在资格子计划非空时继续官方风险、D8和五源总门，任一源不足继续失败关闭，不进入阶段7/8/9。
+
+## 2026-08-27阶段6午后新鲜候选与主营资格空池复验
+
+- 13:07 CST 通过上交所官方休市日历确认今天为完整交易日，项目市场状态为 `trading`；现场没有重复阶段6验收进程。随后严格从上午顺序状态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T110329264119.json` 执行指定五源入口，没有复用上午候选冒充午后输入。
+- 首次真实运行 `stage6-prefreeze-20260827T130755906245` 在二次冻结时因 `candidate_scope_changed_after_refreeze` 正确失败关闭；工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T130755906245.json`，SHA-256 `bd37e9f335050406bf94a41dd2029b06d3146b43e4fe0d729fe6c3de5006e4ec`。在合法窗口内只做一次有限重试，未并发启动第二个进程，也未把该轮候选继续用于下游。
+- 有限重试 `radarRunId=stage6-prefreeze-20260827T131005605684` 使用午后新鲜行情，历史序列 `5157/5157`、行业分析81个、比较时点13:10；可交易性 `completed 383/383`，六项字段覆盖均为 `1.0`，`productionCollector=completed`、`phase6PrefrozenInputsReady=true`。新初筛计划为 `radar-leader-runtime-candidate-plan-v1:e99969e004b6ec5efd9275a9f59f29b895ad7d8686400d4d1c0d7af7b4cc9efa`，证据候选计划为 `radar-leader-runtime-candidate-plan-v1:ccf32cfcc76072ba5a89a5e2ea2d69ce1deb1f651b717c4ecd5af13ff5f24099`，候选15只，`asOf=2026-08-27T13:11:22.060227+08:00`。
+- 午后15只主营材料队列真实为 `pending_review=15`；官方自动证据仍为 `ready=0`、`missing=6`、`source_unverified=9`、`source_failed=0`、`reused=0`。缺口由行业事实未验证、催化缺失/对象未提取、年报缺失、确定性关系未确认和主营章节缺失构成；资格结果继续为 `empty`，排除15只并保留每只首次原因，没有放宽规则或把待复核材料升级为正式证据。
+- 因资格子计划为空，官方风险交付、D8风险版本装配、五源readiness和状态决策审查均未进入；本轮可执行D8新清单为0，不代表D8已完成，而是上游主营资格尚无合格证券。最终 `status=not_ready`、原因 `leader_business_evidence_qualification_empty`，四个正式开关全部为 `false`，不进入阶段7/8/9。
+- 总工件 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T131005605684.json`，SHA-256 `d4efd928ab346b48588272c90b7eb5a234377a7fb376c72b70eec3005a0881c6`；候选源包内部 SHA-256 `ab4c8d5da9867169af4311f2f7c215f954533d7a4019c8155358f52c724b09b2`、文件 SHA-256 `a7d6a1e1285055de4ffcd9a874c3aeb760f2581475ed6a1688776323b262275e`；顺序状态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260827T131005605684.json`，SHA-256 `125d0a30a9c56b1c325050e9a4387254a8a4cbda80b1100105edf57636e241d9`。三份主工件均为0600。
+- 本轮只读取公开来源、写入 `/private/tmp` 工件和更新本检查点；没有读取或写入生产SQLite，没有调用付费AI，没有修改代码行为、依赖、生产环境变量、服务或正式开关，也没有Git暂存、提交、推送或部署。`git diff --check`通过；Git仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交，全部既有未提交工作树继续保留。`8001`仍由原PID 791监听，`4000`未监听，服务没有重载。
+
+下一步：1）对午后15只主营材料做真实官方精确核对，只有可回到官方正文且确定关联的证据才可进入资格子计划；2）资格子计划非空后，再对其全集生成并人工处理D8真实版本，随后同轮运行官方风险和五源总门；3）任一来源不足继续失败关闭，四个正式开关不自动开启。
+
+## 2026-08-27阶段6上午行业全集越过与主营资格空池
+
+- 10:25 公开新浪分钟源第一次恢复后，第二轮正式入口真实新增 `2509` 只、复用 `2562` 只、失败降至 `82` 只；11:03 第二次恢复后，第三轮正式入口补齐最后 `82` 只并复用 `5071` 只，行业分钟最终 `5153/5153 ready`、失败0。最新行业证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-04321fedc768e03e6254f2eaa0fc22f42ffd1a5ac77e45223e40db3db3f3e09b.json`，SHA-256 `9b816d93ee74682a18305b4a1fac4778e60e497ca5ae93f646f95d241398709f`；21个已完成交易日、81个行业分析、比较时点11:00均已真实完成，没有换标签或降低全集门槛。
+- 同一进程继续完成最终候选冻结：`radarRunId=stage6-prefreeze-20260827T110329264119`，历史序列 `5157/5157`，可交易性 `completed 383/383`，`phase6PrefrozenInputsReady=true`。全量候选计划为 `radar-leader-runtime-candidate-plan-v1:358b0cd6ef356f84fd93e8b8fd2c84622a8203d19de38d962ae30569e4bc3110`；行业状态和完整前态从最新顺序快照续接后，证据核验计划为 `radar-leader-runtime-candidate-plan-v1:2442868b8dd92e1744096ac02fe15d324d2cbc11ce6cacd42a7a309b8221ebfd`，候选15只。
+- 主营官方自动证据真实结果为 `ready=0`、`missing=6`、`source_unverified=9`、`source_failed=0`、`reused=0`。6只缺少催化，9只分别因行业事实未验证、确定性关系未确认或催化对象未提取而失败关闭；资格结果为 `empty`，15只全部保留证券、索引和首次原因，没有将待复核材料、模糊词或AI线索升级为主营证明。因此风险交付、五源readiness和状态决策审查均未运行，最终状态 `not_ready`、原因 `leader_business_evidence_qualification_empty`，四个正式开关全部为 `false`。这是新的真实数据门槛，不再是历史、行业或身份对齐阻塞。
+- 总工件为 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260827T110329264119.json`，SHA-256 `d8b78616880398e09131d76ba195667c79f64a4a9572e9dd1e74e821faef12e8`；候选源包为同目录 `stage6-live-candidate-source-20260827T110329264119.json`，包内 SHA-256 `e999e0d274d2782a16094a04c5c31d9aae35d74e02d1806b530ca2de597c6fd6`、文件 SHA-256 `7953e2230505212075a487deefc1a298243588aaf91f906bf7d530a234808e95`；最新顺序状态为同目录 `sector-state-20260827T110329264119.json`，文件 SHA-256 `15dd7163d8b88e3f0dd6669ec7d6bffd5a6ad1d7f68d05314e521407e3940a5b`。三份文件均为0600。
+- 已用新顺序状态替换过时的午后续跑任务：一次性心跳自动任务 `6` 将于今天13:05 CST从 `sector-state-20260827T110329264119.json` 继续，取得午后新鲜行情和新候选；不再从8月26快照分叉，也不把上午15只候选冒充午后输入。若午后候选仍无官方精确主营证据，继续如实返回空资格，不凑数。
+- 本批只生成 `/private/tmp` 真实证据并更新本检查点，没有修改代码行为、生产SQLite、环境变量、依赖、服务或正式开关，没有付费AI、Git暂存、提交、推送或部署。全部既有未提交改动继续保留；`8001`仍为旧PID 791，`4000`未监听，运行服务没有加载未提交代码。
+
+下一步：1）13:05从今天11:03顺序状态进行午后同轮新鲜候选复验；2）主营只接受候选对应的新官方精确事实或真实版本化复核，当前15只不放宽规则；3）只有资格子计划非空后才继续官方风险与五源重放，未全齐继续失败关闭且不进入阶段7/8/9。
+
+## 2026-08-27阶段6真实交易窗口首轮行业分钟限流断点
+
+- 2026-08-27 09:46 CST 已在真实 A 股连续交易窗口从最新顺序连续行业快照 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260826T143739220905.json` 执行唯一同进程入口；没有倒拨时钟、复用旧候选计划或启动重复服务。入口在最终候选冻结前的行业分钟历史准备阶段正确失败关闭，CLI 退出码为 `3`，稳定原因为 `leader_phase6_public_prepare_sector_unverified`，尚未进入候选、主营、官方风险或五源重放。
+- 本轮 `radarRunId=stage6-prefreeze-20260827T094629671886`，行业分钟请求 `5153` 只，真实结果为 `fetched=2559`、`reused=3`、`failure=2591`，状态 `partial`、原因 `sector_history_series_scope_incomplete`；成功序列已原子保留在原断点目录，失败项仍保留截至 2026-08-25 的旧序列，未被换标签为 2026-08-26。证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-2a0bf03666eaf0503da393c1ed0efff3cdc2bb0635b169644d9a879769a1268f.json`，文件 SHA-256 `e959e0a37e45eb179e359649c5dc74cbbb851d6678f6571e6e50aab737b72481`。
+- 根因已用公开源小样本复核：12只失败证券单线程重试为 `rate_limited=12/12`；现有东方财富备用分钟接口6只均被远端主动断开，返回 `transport_failed=6/6`；09:56–10:04 对单只新浪源进行12次、每45秒一次的低频探测，全部为 HTTP `456` 且无 `Retry-After`。这是真实上游临时限流，不是身份对齐、历史日期或完整性规则错误；本轮没有为凑齐结果修改代码、放宽21日/5153只全集门槛或引入新来源合同。
+- 已创建一次性心跳自动任务 `6`（阶段6真实五源午后续跑），今天 13:05 CST 回到当前任务。它先以单只失败证券低频探测；限流未解除就不发起全量撞源，解除后才复用当前2559只新断点，只补剩余2591只并继续原五源入口。任何来源不齐仍失败关闭，四个正式开关保持 `false`。
+- 本轮没有读取或写入生产 SQLite，没有调用付费 AI，没有修改环境变量、依赖、代码、服务或正式开关，没有停止/重启/重载服务，也没有 Git 暂存、提交、推送或部署。Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；89个未提交文件（59个已跟踪修改、30个未跟踪）均未暂存并完整保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听；FastAPI LaunchAgent 已加载，运行服务未加载未提交代码。
+
+下一步：1）13:05 先单只探测新浪限流，解除后复用原断点执行同一五源入口；2）若行业历史完成，必须继续取得2026-08-27同轮候选、主营、官方风险及五源逐项真实状态，不能使用旧候选或旧行业状态冒充；3）来源未齐继续失败关闭，不进入阶段7/8/9或正式启门。
+
+## 2026-08-26阶段6资格分区接入状态决策前审查
+
+- 已按TDD新增 `backend/radar/leader_phase6_state_decision_review.py`，复用既有 F6 单次研究组装和 `LeaderFormalResearchBatchResult`，不再平行实现评分或状态机。审查合同同时绑定父核验计划、资格子计划、`qualificationId`、`radarRunId/asOf` 和完整父池顺序；合格项从既有正式研究候选取得 `firstVetoReason/firstMissingReason`，排除项保留主营资格阶段的首个真实原因。父池分区缺项、重复、跨证券、跨计划、上游正式开关漂移或单次研究身份不一致时，整份审查返回 `blocked`，不输出半份条目。
+- `run_leader_phase6_live_source_collection()` 现会在五源重放之后，用资格子计划的冻结运行输入再次调用既有 F6 单次组装，并把 `stateDecisionReview` 挂入同一采集证据。为避免父核验池剩余行情重新进入子计划，F6 前只按子计划证券过滤本轮冻结行情行；不改行情时间、来源合同或父计划。该审查层只提供后续状态决策输入，`formalScoreReady/formalGateReady/formalUsable/stateTransitionAllowed` 仍全部为 `false`，没有调用 `decide_leader_transition()`、没有生成或写入三级龙头状态。
+- 新增四项直接合同测试：真实F6子计划的父池分区为2只合格、3只排除且5只均有首次否决原因；缺一只排除项即阻断；资格结果或正式研究批次任一试图打开状态迁移标志即阻断；伪装在 READY 资格结果里的 `source_failed` 排除项同样阻断。五源采集回归同时确认 `stateDecisionReview` 已出现在采集证据。相关40项通过；解释器启动前精确拦截生产 SQLite 绝对路径并重定向到全新 `/private/tmp/codex-stage6-state-review-final-fulltest-20260826.GlXlJw/stock_monitor_test.sqlite` 后，完整后端1905项通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check` 均通过。
+- 本批在收盘后只完成不依赖新行情的工程接线，没有伪造新的活跃行业窗口，也没有把14:45诊断分支冒充顺序连续结果。最新顺序连续状态仍是 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260826T143739220905.json`；下一次现场验收必须只从该快照继续。没有读取或写入生产 SQLite，没有调用付费AI，没有修改环境变量、依赖、服务、调度、正式开关，没有Git暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；当前89个未提交文件（59个已跟踪修改、30个未跟踪），全部未暂存且既有改动完整保留。launchd资产验证通过；`8001` 仍由旧 PID 791 监听，`4000` 未监听，运行服务没有加载未提交代码。
+
+下一步：1）下一个真实活跃行业交易窗口只从最新顺序连续行业快照续跑，现场确认非分支资格子计划、完整排除分区、五源 `ready_for_review` 与 `stateDecisionReview=ready_for_review` 同轮同身份；合法空池继续记录空池；2）现场审查通过后，再把审查合格项接入既有版本化评分/状态机的纯内存影子决策，显式加载完整前态快照但继续保持 `formal_state_enabled=false`，不落库、不迁移状态；3）顺序连续现场门和影子状态决策合同未共同验收前，四个正式开关继续关闭，不进入阶段7/8/9。
+
+## 2026-08-26阶段6证据资格子计划与首次真实五源ready_for_review
+
+- 阶段6长期卡住的“全市场候选身份与少量深证据身份无法同时对齐”已完成工程收口。先修复两个真实根因：行业运行行过去没有复用仓储扁平合同，现由 `build_sector_feature_runtime_rows()` 统一生成完整来源/覆盖/指标/影子状态字段；市场指数键在 Pydantic Python 模式下保留 `Enum`，旧代码用 `str(enum)` 生成 `MarketIndexKey.SZSE_COMPONENT` 等错误键，导致383只全部 `board_index_missing`，现统一取 `.value`。真实入口随后可从383只全量轻量池稳定派生最多15只证据核验计划，父计划、行业状态快照、完整前态快照、`radarRunId/candidatePlanId/asOf` 和来源合同均保持绑定。
+- 按规划书“候选证据核验层”和“主营与催化是个股硬门槛”新增 `backend/radar/leader_evidence_qualification.py`：先对少量核验池逐只重放官方主营证据，只把规则版本正确、页级工件可重放且关系为正向 `direct` 的证券派生为第二个身份绑定子计划；缺失/未验证证券保留原索引和首次否决原因，不进入子计划，`source_failed` 任一出现则整轮阻断。子计划 ID 同时绑定父计划 ID、v31 主营规则、每只工件验证 ID、状态和原因，不通过 `model_copy` 改写身份。资格子计划复用既有历史、行业和可交易性冻结事实，并为实际交易所集合收缩日历；现场发现单一深市候选仍携带沪深两份日历会被既有合同正确拒绝，现只过滤多余交易所日历，缺失日历仍失败关闭。
+- 2026-08-26 14:45 CST 从已保存的14:24父行业状态快照做了明确标记的只读诊断分支，首次真实得到 `ready_for_review`：`radarRunId=stage6-prefreeze-20260826T144534505182`，全量可交易池383只，证据核验池14只，资格子计划1只 `000713`（行业05），资格计划 `radar-leader-runtime-candidate-plan-v1:757b31b82b786b0a27a05a7645443e776d66926009e1f8e356d7ce34c577bec3`。行业、历史、主营、可交易性、风险五个组件均为 `ready 1/1`，生产 acceptance 为 `ready_for_review`、`missingComponents=[]`、`reasons=[]`。总证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260826T144534505182.json`，文件 SHA-256 `f0cb2c962e376337e9435b5f64710bd4301d7a5c53a81959a2d84fe7eb746f71`；资格候选源包合同 SHA-256 `c63a962cb33fe46eacb97702efa37ccd5fc7dcbfc01f0db32c250ace2edbcbbc`，落盘文件 SHA-256 `7104aa61ed8a7b96e78e256e7d62017cb9fd95b0cc24e2e317054b50f3a43fbc`。该结果证明五源工程链真实可行，但它从较早父快照分叉，只作工程验收，不冒充最新顺序连续行业状态。
+- 最新顺序连续状态仍以14:31快照继续到14:37为准：`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260826T143739220905.json` 返回383只初筛完成但 `leader_evidence_scope_empty`，即当轮没有行业处于可进入核验的活跃状态；这是合法空池，不是来源失败，也不能用上述诊断分支替换。四个正式开关在所有工件中仍全部为 `false`，没有进入阶段7/8/9，没有生成正式三级龙头状态。
+- 主营 v31 的独立真实复跑已确认规则不靠放宽补数：先前15只核验池为 `ready=1/missing=5/source_unverified=9/source_failed=0`，唯一 `601212` 由年报“贵金属采选/冶炼/加工”和业绩原因“贵金属产品市场价格同比上升”形成官方精确同值关系；证据 `/private/tmp/stage6-business-exact-20260826-v31/evidence-bd2651a393e33627b4cce7aad2bf51e7b904e7294d0545025b13fe753dc94dda.json`，SHA-256 `488a3606ff2ed756b7b387f58fd6f3327a92cfa13f693ebd5f3f56b278e97978`。后续实时核验池随行情/行业状态变化，14:45分支的唯一合格项为 `000713`；这两者不是同一候选时点，不互相冒充。
+- 新增资格、两层子计划、单交易所日历和CLI双候选包审计测试，相关26项通过；解释器启动前精确拦截生产 SQLite 绝对路径并重定向到全新 `/private/tmp/codex-stage6-qualified-final-fulltest-20260826.79jWyE/stock_monitor_test.sqlite` 后，完整后端1901项通过，守卫实际拦截1次。Python全量编译、`pip check`、`git diff --check` 均通过。没有读取或写入生产 SQLite，没有调用付费AI，没有修改环境变量、依赖、服务、调度或正式开关，没有Git暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；当前87个未提交文件（59个已跟踪修改、28个未跟踪），全部未暂存且既有改动完整保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听；运行服务没有加载未提交代码。
+
+下一步：1）只从最新顺序连续快照 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260826T143739220905.json` 继续下一次真实活跃行业窗口，验证非分支资格子计划和五源 `ready_for_review`；合法空池就记录空池，不回退到诊断分支凑候选；2）把资格计划、13只排除项和首次否决原因接入阶段6现有状态决策审查输入，仍不打开正式状态迁移；3）维持四个正式开关关闭，不进入阶段7/8/9，直到顺序连续现场门和阶段6状态合同均验收。
+
+## 2026-08-26阶段6同轮预冻结越门、候选源包落盘与真实D8清单
+
+- 阶段6“候选冻结前取得当轮历史与行业输入”的工程阻塞已用真实交易窗口越过。历史生产收集器只在已完成交易日逐日精确一致时接受腾讯 qfq/raw 等价，并把当前未完成日的短暂行差异单独隔离；独立来源确认的非交易缺口必须同时具备前后真实成交边界。行业重算不再把旧 `asOf` 改写成新时点，历史成员、行业成员、分类发布身份和最终候选计划保持同一来源链。候选行业规则改为只校验最终候选涉及的行业，未降低 20 个同分钟交易日、5 日持续性、至少 20 个可比行业、单位证据和候选行业自身完整性门槛；两个只有单只成员的行业不再伪装成可比较行业，真实候选从全量可交易 385 只收敛为 383 只。北交所 `4/8/920` 代码现进入既有市值/成交额单位证据合同，未改动单位公式或容差。
+- 2026-08-26 11:28 CST 以公开来源重新执行唯一同进程入口，真实候选计划为 `radar-leader-runtime-candidate-plan-v1:b87d89fd1a512073b10c2a15ca8d0533ba69f846f2f4104833abc26b8b7565aa`，`asOf=2026-08-26T03:29:50.462249Z`，可交易性 `completed 383/383`，`phase6PrefrozenInputsReady=true`。行业与历史在五源重放中均为 `ready 383/383`；风险 D2 完成 7 类、236/236 页、13 分片、383 只，但生命周期与投影仍为 `missing`、`readyProjectionCount=0`。主营自动证据为 `ready=13/missing=151/source_unverified=219/source_failed=0/reused=0`。总状态因此真实返回 `not_ready`，四个正式开关全部为 `false`。证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260826T112835106349.json`。
+- 五源编排现在把同一内存候选源包原封不动保存为仅当前用户可读写的 `0600` 文件，并同时返回路径与包内 SHA-256；不再出现“D2 已完成但进程退出后无法执行 D8”的断链。本轮候选源包为 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-candidate-source-20260826T112835106349.json`，`packetSha256=a460adc5c748785df38c733aeefd520580b38a704eba47da96fa5600b28f6085`；正式 loader 复核为 `ready`，计划 ID、383 只候选和 `asOf` 均与五源工件一致。
+- 已用该精确候选源包真实重放公开 D2 并生成可执行 D8 清单：383 只、5,382 份巨潮官方公告引用，状态 `pending_human_review`，源包 `/private/tmp/stage6-d8-worklist-20260826T112835/stage6-d8-manual-worklist-20260826T035906-source.json`，空复核包 `/private/tmp/stage6-d8-worklist-20260826T112835/stage6-d8-manual-worklist-20260826T035906-review.json`，`sourcePacketSha256=c58aec1462b60c66258eb0bef444472dc983ac52af4024e63b89fa522a268d2d`。两文件均为 `0600`，383/383 条 `review=null`、`d8SubmissionReady=false`，`d8VersionCount=0`；没有复制 `manual-review-v1/v2`，没有把 D2、AI、标题命中或空模板冒充 D8 结论。用户当前不要求人工审核，因此该清单只作为可审计的真实来源入口，不作为正式风险通过结果。
+- TDD 新增候选包保留与安全落盘断言，D8/五源/人工会话相关 41 项通过；本批候选行业、单位证据等受影响回归 62 项通过。解释器启动前精确拦截生产 SQLite 绝对路径并重定向到全新 `/private/tmp/codex-stage6-prefreeze-fulltest-20260826-final/stock_monitor_test.sqlite` 后，完整后端 1881 项通过，守卫实际拦截 1 次。Python 全量编译、`pip check`、`git diff --check` 均通过。没有读取或写入生产 SQLite，没有调用付费 AI，没有修改环境变量、依赖、服务、调度或正式开关，没有 Git 暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；当前74个未提交文件（48个已跟踪修改、26个未跟踪），全部未暂存且原有改动完整保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听，运行服务没有加载未提交代码。独立审查另发现未接入本轮真实五源入口的 `leader_evidence_candidate_plan.py` 仍有父计划身份、行业范围、前态完整快照和生产来源合同四项 Important；在修复并验证前不得把该轻量候选路径用于阶段7或正式启门。
+
+下一步：1）直接基于本轮官方 D2 源包实现并验证“开放风险事件跨窗口延续、官方更正/解除链”的确定性生命周期，不要求人工审核，也不把零命中等同于无风险；2）主营只继续接受新的官方精确事实或真实版本化复核，当前 13/383 外不得用模糊词、AI 或旧映射补齐；3）收紧 `leader_evidence_candidate_plan.py` 的父计划、行业范围、完整前态快照和生产来源合同后，再重跑五源总门，任一来源未齐继续失败关闭且不进入阶段7/8/9。
+
+## 2026-08-26阶段6行业全集收口与非交易窗口失败关闭
+
+- 复用唯一正式入口和同一 `/private/tmp/stage6-live-prefreeze-resume-20260825` 断点完成一次新的真实只读续跑；启动前已确认没有重复进程。此前唯一缺失的 `600165/600525` 本次公开分钟源补取成功，阶段6预冻结证据现为 `requested=5153/reused=5151/fetched=2/failure=0`，历史 `5155/5155`、行业分析 `81` 个、比较时点 `15:00` 均已越过。最新行业证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-82d781b42587afa2e2ca6304d5840486595905ef4834f675ffad2ac2f0eb0ca0.json`，文件 SHA-256 `564655f4c6a8773816c4d9e8e5a9bfd9649aa9cf30a30a24d0b6d223cc1fad64`。
+- 正式入口继续到最终候选行情时已经跨过午夜；真实行情源时间仍是2026-08-25收盘，而本轮候选冻结时点为2026-08-26 00:00 CST。现有新鲜度合同正确返回 `candidate_collection_not_ready/quote_source_not_healthy/source_time_stale`，可交易性为 `not_ready`、候选数0。随后五源采集因上游可交易性未完成而返回稳定 `leader_phase6_live_source_contract_unverified`；这不是行业回退，也不能通过倒拨时钟、改写来源时间或复用昨天候选冒充同轮成功。工件为 `/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260825T235804181322.json`，四个正式开关全部仍为 `false`。
+- 最新独立审查结论为无 Critical、无 Important，当前合同和失败关闭边界 ready；行业八阶段正式生产仍等待真实交易窗口输入。上一批完整后端 `1872` 项、Python编译、`pip check`、`git diff --check` 均已通过，本次只新增真实 `/private/tmp` 证据和本检查点，没有新的代码行为修改。没有读取或写入生产 SQLite，没有调用付费AI，没有修改环境变量、依赖、服务、调度或开关。
+- 为避免非交易窗口重复空跑，已把既有自动任务 `6-d2` 原地更新为本任务 heartbeat `阶段6真实五源交易窗口续跑`，只在 `2026-08-26 09:35 Asia/Shanghai` 触发一次并回到当前任务；它必须复用上述完整断点、取得8月26日真实新鲜行情后再继续同进程五源，且保留全部安全边界。没有新建重复任务。
+- Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；当前74个未提交文件（48个已跟踪修改、26个未跟踪），全部未暂存且原有改动保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听；launchd资产验证通过，运行服务没有加载未提交代码。
+
+下一步：1）只在2026-08-26下一个真实A股连续交易窗口复用现有完整历史/行业断点运行同一入口，重新取得当轮新鲜行情和最终候选计划，不回填8月25日计划、不伪造时间；2）候选可交易性完成后立即在同一进程继续自动主营、官方风险与五源重放，记录真实 ready/missing/unverified；3）主营或风险任一仍不齐就继续失败关闭，不进入阶段7/8/9或正式启门。
+
+## 2026-08-25阶段6停牌历史双源对齐与行业缺口收敛至2只
+
+- 本批先复现同进程入口在17个前置行业步骤后只返回通用 `leader_phase6_live_five_source_execution_failed`。绕过外层吞错后，精确异常为历史日线 `5155` 个请求中 `5125` 个断点复用、固定 `30` 只因21个市场交易日内存在无K线日期而失败。腾讯与新浪真实日线对这30只逐一独立确认相同日期均无交易；只在两源一致、窗口被真实日线包围或当轮已确认末端停牌时，才按新增版本化 `verified-non-trading-zero-return-alignment-v1` 把停牌日收益记为0、价格沿用此前最近一次真实前复权收盘。派生序列保存腾讯原始载荷哈希、腾讯交易存在性哈希、新浪日线日期哈希、双源合同和精确停牌日期；任一来源显示有交易、无法包围或请求失败仍整只失败关闭。30只双源派生断点全部成功，历史稳定断点现为 `5155/5155`（含2个指数），没有把网络缺失或真实交易日静默补值。
+- 行业分钟真实补采已把上一检查点剩余 `2347` 只一次性全部抓回；该轮证据为 `fetched=2347/reused=2806/failure=0`，并由现有日线存在性核验处理33只分钟缺口。随后发现旧刷新逻辑会因“今天停牌”就免检缺少最新已完成交易日的旧断点，导致 `600165/600525` 虽在2026-08-24有真实日线成交，却继续复用只到2026-08-22的旧仓。现已按TDD改为从同轮历史冻结批次显式传递 `verified_non_trading_dates_by_symbol`：只有8月24日已由双源确认无交易的4只可复用旧断点，今天停牌本身不能证明昨天停牌；`600165/600525` 必须重新取得8月24日分钟序列。
+- 最新纠正后真实行业证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-b76d80c577f16e2e28c69960d69106b083bf124b97ed8d500cbde9ad284fd98f.json`，文件 SHA-256 `7f2c259af6d57a276b94d5a465f40bc20f7fbeeb60ec269774d838baaa7f8fc6`；`requested=5153/reused=5151/fetched=0/failure=2`，状态 `partial`、原因 `sector_history_series_scope_incomplete`。对两只执行两次受限正式收集器补采均真实返回 `rate_limited=2/returned=0`，因此没有写入断点；本机只存在它们截至2026-08-21的旧工件，不能冒充8月24日。稳定行业目录现有5149个序列，另有2个经同轮双源非交易证据合法复用的旧仓序列；只缺 `600165/600525`。本批没有生成五源验收工件，也没有进入主营/风险现场步骤，四个正式开关继续全部为 `false`。
+- 同进程五源 CLI 现在只透传有限白名单内的稳定预冻结失败原因，未知异常仍隐藏为通用错误，不暴露上游原文。相关回归最终 `86` 项及收口专项 `38` 项通过；解释器启动前精确拦截生产 SQLite 绝对路径并重定向到全新 `/private/tmp` 库的完整后端 `1872` 项全部通过，守卫实际拦截1次。Python 全量编译、`pip check`、`git diff --check` 和 launchd 资产验证通过。没有读取或写入生产 SQLite，没有调用付费AI，没有修改环境变量、依赖、服务、调度或正式开关。
+- 本批主要修改 `backend/radar/sources/leader_history_public_poc.py`、`leader_history_production_collector.py`、`sector_history_trading_presence.py`、`sector_history_automatic_backfill.py`、`leader_phase6_live_prefreeze.py`、`run_leader_phase6_live_five_source_acceptance.py` 及3个对应测试文件。Git 仍为 `main@82b71d9`、相对 `origin/main` 领先15个提交；当前74个未提交文件（48个已跟踪修改、26个未跟踪），全部未暂存且原有改动保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听；运行服务没有加载未提交代码。
+
+下一步：1）公开分钟源限流窗口恢复后，复用同一 `/private/tmp/stage6-live-prefreeze-resume-20260825` 运行同进程入口，只会补 `600165/600525`，不得使用8月21日旧分钟工件或无限重试；2）行业 `5153/5153` 与重算分析均 ready 后，立即继续同进程最终候选、自动主营、官方风险和五源重放，记录同轮真实主营/风险状态；3）主营仍只接受新的官方精确证据或真实版本化复核，五源任一不齐继续失败关闭，不进入阶段7/8/9或正式启门。
+
+## 2026-08-25阶段6同进程五源编排、历史真源收口与稳定行业断点
+
+- 按 TDD 完成同进程五源编排：新增 `backend/radar/leader_phase6_live_source_readiness.py` 和 `backend/run_leader_phase6_live_five_source_acceptance.py`，在一个内存流程内绑定同一 `radarRunId/candidatePlanId/asOf/候选源包 SHA-256`，依次复用历史/行业预冻结、最终可交易性、自动主营和官方风险后重放现有五源 readiness。完整且合格的自动主营批次现可直接生成现有生产冻结输入；部分/缺失批次不暴露半成品载荷。官方事实截止时间与本系统验证完成时间已分离：只有确定性官方路径允许计划后 24 小时内重放原始事实截止点，人工路径仍保持原 5 秒未来偏差且不得重标时间。四个正式开关全部仍为 `false`。
+- 真实日线门已越过。结构化诊断首先确认腾讯对 56 只证券的明确 `qfq` 请求只返回 `day`，东方财富备用源又因环境代理/远端断连无法接管。现改为同一腾讯来源的双请求精确等价验证：只在 `qfq` 响应的 `day` 与显式 raw 响应逐行完全相等时，才按 `tencent-qfq-day-exact-equivalence-v1` 证据使用；任一行不同仍失败关闭。投产批次在保存前又重验 21 个已完成交易日、复权口径、价格、时间和身份；主源/备用源部分行都不再短暂标记 ready。真实断点现为 `5155` 个完整序列（含 2 个板块指数），历史失败从 `56` 降为 `0`。
+- 真实股本基础门也已越过。精确诊断只剩 `600563`：价格 `126.18`、总股本 `225000000`、腾讯市值 `283.90` 亿的差额理论上恰为现有两位小数容差边界 `500000` 元，但浮点运算得到 `500000.000003...` 而被误拒。逐股解析和批次证据共用同一边界判定，业务容差仍严格保持 50 万元，只新增 0.001 元以内的机器浮点微误差；真实单股复核现为 `verified`。
+- 行业当轮历史已确认唯一当前阻塞。旧运行仓只有 2026-08-22 前证据，系统正确要求补到最新已完成交易日 2026-08-24，没有改写旧 `asOf`。首次真实行业回填对 `5153` 只复用 4、抓取成功 2531、失败 2618；发现当时断点被写入随机 `radarRunId` 目录后，已新增稳定 `/private/tmp` 行业断点目录参数，仍按分类成分内容哈希隔离，并把该批真实断点复制迁入。第二次复用 2534、新成功 272，失败降至 2347；稳定目录现有 2803 个本轮真实序列，加上外部旧仓可复用项后最新证据报告有 2806 个已用序列。证据为 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-6d7afb1ec8ac134a84db51308772e7026d8f07c6250ceeb57a13753f3a6da999.json`，SHA-256 `35bae7e8a4ab7dc4d8ba5e8de167270db6451d2456b8613811129f7bac852fae`。抽样和直接探针确认剩余阻塞是新浪 5 分钟公开源返回非标准 HTTP `456` 限流，东方财富 5 分钟备用连接也被远端关闭；已把 456 准确分类为 `rate_limited`，不进行无界重试。因行业全集仍不完整，本轮没有交付五源工件，没有进入主营/风险现场步骤，正式门仍失败关闭。
+- 本批受影响回归 `146` 项通过；解释器启动前精确拦截生产 SQLite 绝对路径并定向到全新 `/private/tmp` 库的最终完整后端 `1868` 项通过，主/子进程守卫实际拦截 1 次生产默认路径。Python 全量编译、`pip check`、`git diff --check`、launchd 资产验证通过。没有读写生产 SQLite、付费 AI、环境变量、服务或 Git 状态更改。Git 仍为 `main@82b71d9`，领先 `origin/main` 15 个提交，当前 73 个未提交文件（47 个已跟踪修改、26 个未跟踪），全部未暂存且旧改动保留。`8001` 仍由旧 PID 791 监听，`4000` 未监听；运行服务未加载未提交代码。
+
+下一步：1）等新浪 456 限流窗口恢复后，只复用同一 `/private/tmp/stage6-live-prefreeze-resume-20260825` 稳定断点再跑一次同进程入口，只补剩余 2347 只，不做无界重试；2）行业全集 ready 后立即继续同轮最终候选、自动主营、官方风险和五源重放，记录主营真实 ready/missing/unverified 数；3）主营仍只接受新的官方精确证据或真实版本化复核，五源任一不齐就继续关闭，不进入阶段7/8/9或正式启门。
+
+## 2026-08-25阶段6官方确定性风险来源与非人工路径
+
+- 用户明确不再把人工审核作为当前必经环节，但仍要求结果真实。本批按 TDD 新增 `backend/radar/leader_risk_official_deterministic.py`、`leader_risk_official_live_delivery.py` 和 `run_leader_risk_official_deterministic.py`：只读重放同轮候选计划、巨潮官方发行人名册与七类完整分页发现，可选增强为官方 PDF 正文和现有确定性事实；不生成 `manual-review-v1/v2`、D8 版本、人工事实或 AI 结论。旧人工 D8 入口仍保留为将来的纠错增强，不再是官方来源就绪的前置。
+- 零命中只能生成 `bounded_no_disclosure_in_window`，含义限于完整查询窗口内没有发现相关公告，绝不表示“公司无风险”。有公告但未批量下载正文时，只交付 `official_discovery_metadata`；只有身份、正文 SHA、页面和时间全部合格时才可升为 `official_document_evidence`，且未提取到标注事实时不伪造结构化事实。任何分页不完整、来源失败、时间/身份不一致、重复文档、部分正文或生命周期替换均失败关闭。结果使用仅可信生产路径注入的内存令牌，`dataclasses.replace()` 会丢失令牌；同时从保留的原始发现批次重放生命周期，防止只替换派生对象冒充官方文档。
+- 已把该来源接入现有 `risk` 生产 collector/provider、五源装配、阶段6 readiness、runtime bridge 和输入渲染。有效的官方批次可使风险“来源就绪”并绕过人工 D8 仓读取；契约级五源集成测试已达 `ready_for_review`。但 `riskFilterPassed/formalScoreReady/formalGateReady/formalUsable/stateTransitionAllowed` 全部固定为 `false`，因官方发现元数据尚不证明开放事件跨窗口延续与更正链；本批没有打开正式评分、排名、状态迁移或阶段7/8/9。
+- 21:21 CST 对当日真实候选来源包 `/private/tmp/stage6-business-material-acceptance-20260825T093750-source.json` 执行公开源只读重放：`asOf=2026-08-25T01:38:33.395157Z`，查询窗口 `2024-01-01~2026-08-25`，7 类、226 页，`385/385 ready`；全部 385 只为 `official_discovery_metadata`，共 5,104 个不重复官方公告引用，所有 URL 都是 `https://static.cninfo.com.cn/`，人工事实 0、确定性结构化事实 0、所有门字段均为 false。证据为 `/private/tmp/stage6-official-risk-20260825/stage6-official-risk-20260825T212111403918.json`，文件 SHA-256 `2d3c7ae94ae58f173d9132da3eae11db564b9049a3cbe46a15519e842c7e1f4c`。此工件证明同轮官方查询来源覆盖，不是 385 只都通过风险筛选。
+- 新增/ 修改涵盖上述三个生产文件、`backend/radar/leader_risk_lifecycle_delivery.py`、五源 collector/provider/assembly/bridge/readiness/runtime 相关文件、共享 D2 现场编排入口及 2 个新测试文件。官方风险及受影响回归 185 项通过；解释器启动前精确拦截生产 SQLite 绝对路径并重定向到 `/private/tmp` 后，完整后端 1,846 项通过。Python 全量编译、`pip check`、`git diff --check` 通过。没有读写生产 SQLite、调用付费 AI、修改生产环境或服务，也没有 Git 暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先15个提交；当前59个未提交文件（37个已跟踪修改、22个未跟踪），全部未暂存，旧 v37-v44、`source_context`、预冻结、行业状态和 D8 改动均保留。`8001` 仍由既有 PID 791 监听，`4000` 未监听；launchd 资产验证通过，FastAPI/ngrok LaunchAgent 已加载但 ngrok 未运行，preflight 按设计拒绝重复安装。运行的 8001 仍未加载本轮未提交代码。
+
+下一步：1）在同一新鲜进程中把已完成的历史/行业当轮预冻结、最终候选计划与新官方风险批绑定后重放五源，全程保持 `radarRunId/candidatePlanId/asOf` 一致；2）主营催化仍只接受新的官方精确证据或真实版本化复核，当前真实同轮 `ready=10/missing=162/source_unverified=213`，不因取消人工 D8 前置就放宽主营规则；3）补齐开放风险事件跨窗口延续和官方更正链的确定性语义前，风险只作来源就绪，五源未全齐继续失败关闭，不进入阶段7/8/9或正式启门。
+
+## 2026-08-25阶段6当轮历史重算与行业八阶段生产者
+
+- 已按确认的保守方案完成真正的行业八阶段确定性影子生产者 `backend/radar/sector_state_producer.py`。状态只允许 `未分类→观察→启动→确认→加速`、`加速→分歧→回流→加速` 以及风险优先的 `活跃态→退潮→失效`，单次观测最多迁移一步；连续观测数、最短持有期和冷却期全部取自内容哈希正确的具名阈值批准。只有观察、启动、确认可产生新的深度证据候选资格，加速/分歧/回流/退潮/失效均不新增候选；缺失、畸形、重复批次、倒序时间、批准不一致或历史不足一律整批失败关闭。
+- 当前指标不采用旧结果换日期：`turnoverRatio20d` 由本轮行业成交额除以前20个已完成交易日同分钟成交额中位数；`relativeReturn` 由本轮行业等权涨跌幅减本轮全市场等权涨跌幅，并把百分数点精确换算为小数；5日持续性由前4个已完成交易日和本轮真实相对收益共同计算。历史分析同时绑定最终行情来源时点对应的上海市场最近已完成5分钟刻度、真实覆盖交易日、分类文档 SHA、规则版本、批准记录和最终计划身份。
+- 修正了预冻结编排仍可能把旧行业分析结果仅替换 `asOf` 的问题。`SectorHistoryAutomaticBackfillResult` 现在保留经现有 backfill 验证的完整只读重放查询；最终候选行情取得后，`leader_phase6_live_prefreeze.py` 从其中冻结的真实分钟序列按最终比较时点重新执行现有 `build_sector_history_backfill`。重放成员范围必须与本轮分类/候选上下文完全一致，伪造或换成员的历史查询在进入重算前即拒绝；2026-08-22 旧证据仍不能冒充2026-08-25输入。
+- 行业状态结果使用仅由真实生产路径注入的内存来源令牌，`dataclasses.replace()` 会丢失令牌；阶段6候选行业范围公共入口只接受同轮 `READY` 的既有行业 bridge 与该可信状态结果，不能由调用方填写行业代码或状态。状态快照只允许写入 `/private/tmp`，绑定分类、规则、阈值集合、批准 ID、观测时间、行情批次和完整行业记录，内容篡改、未来快照或身份变化均拒绝。CLI 现在必须显式二选一：首次使用 `--initialize-sector-state`，后续使用 `--previous-sector-state`；不再允许省略前态后静默重置冷却/连续观测，已有快照也不会被覆盖。
+- 阈值批准复核补齐合同 ID、批准人、时区、三个64位小写十六进制摘要及完整八状态策略检查；异常批准只会返回 `blocked`，不会因时区比较抛出未处理错误。四个正式开关仍固定为 `false`，本批没有运行公开源现场验收、没有生成正式分数/排名或进入阶段7/8/9；代码就绪不等于阶段6五源总门已经成功。
+- 行业历史、状态、候选范围、预冻结和D8联合相关 `109` 项通过；解释器启动前精确拦截生产 SQLite 绝对路径并把主/子进程逐一重定向到 `/private/tmp` 临时库后，完整后端 `1832` 项全部通过。Python 全量编译、`pip check`、`git diff --check` 及全部本批未跟踪 Python 文件行尾检查通过。没有读取或写入生产 SQLite，没有调用付费 AI，没有修改生产环境变量、依赖、服务、调度或功能开关，没有 Git 暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先15个提交；当前45个未提交文件（28个已跟踪修改、17个未跟踪），此前 v37-v44、`source_context`、D8、预冻结和分层候选修改全部保留且均未暂存。`8001` 仍由既有 PID 791 监听，`4000` 未监听；launchd资产验证通过，FastAPI/ngrok LaunchAgent已加载但ngrok未运行，preflight按设计拒绝重复安装，运行服务没有加载未提交代码。
+
+下一步：1）在下一个真实交易窗口使用同一 `/private/tmp` 历史断点执行新的 `--initialize-sector-state` 现场轮，只有历史全集、行业重算、最终计划和状态同时 ready 才保存首份快照，任何公开源缺口继续失败关闭；2）下一轮必须显式传入该快照，验证连续观测后再从观察/启动/确认行业派生少量证据计划，并在不读取生产 SQLite 的边界下准备存量龙头状态输入方案；3）仅对派生小计划继续真实D8人工处理和官方精确主营证据，五源未全齐不进入阶段7/8/9或正式启门。
+
+## 2026-08-25阶段6分层候选证据计划与来源身份收紧
+
+- 已确认原先 `LeaderRuntimeCandidatePlan` 的 `385` 只并不是应逐只抓取公告和人工 D8 的正式证据池，而是“每行业最多5只”的全市场轻量初筛池。按 V5 规划的全量建册/轻量计算/行业内深算/少量证据核验分层，新建 `backend/radar/leader_evidence_candidate_plan.py`，实现少量证据核验计划的纯选择合同；主营、风险、正式评分、正式门和状态迁移均不在本层生成。真实行业状态生产者尚未接入，因此当前公共入口不会产出可执行的小计划。
+- 新候选只接受活跃行业、历史/可交易性就绪、研究可参与、成交额与换手真实可用且轻量研究分靠前的证券；已有非 `OUT` 龙头状态优先保留，不因新候选名额被截断。默认最多 `15` 个新核验对象加 `15` 个存量状态对象，这是证据核验工作上限，不是三级正式榜单上限；三级输出仍各最多5只。没有活跃行业且没有存量状态时允许真实空榜，存量状态不在初筛池或超过上限时整体失败关闭。
+- 独立审查最初发现行业范围可伪造、旧状态可漏传、派生计划丢失父计划身份、畸形嵌套特征抛异常和轻量装配可接受手工 `CollectedSource` 五类问题；已逐项 TDD 收紧。行业范围合同要求绑定强类型同轮 `READY` 的既有 sector runtime bridge/readiness、完整覆盖父计划行业并校验内容哈希，但公共 builder 在真正八阶段生产者缺失时固定抛出 `leader_evidence_industry_state_producer_missing`，不能把调用方填写的观察/启动/确认包装为可信状态。旧龙头状态的公共入口只接受精确 `LeaderRepository`，调用既有 `get_latest_state_records_before()` 生成带真实返回总数、完整标志及全字段哈希的快照；手工快照不能通过来源令牌校验。畸形研究特征返回 `BLOCKED`，不再中断编排。
+- `LeaderRuntimeCandidatePlan` 的派生计划现在显式保存 `parentCandidateSetId` 与 `derivationPolicyId`，二者进入子计划 SHA-256 身份；不同父初筛池派生同一股票不再发生子计划 ID 碰撞。证据计划校验器强制子计划父身份/策略等值，运行时收缩逐项回查 `parentIndex` 对应父计划证券和行业。主营材料来源包已向后兼容地保存并重建这两个字段，派生计划真实往返后仍通过原校验；可交易性真实验收结果继续只在 `completed` 时暴露最终重冻结 `runtime_inputs`。
+- 轻量研究装配不再接受调用方手工包装的通用历史/可交易性结果，而是接收冻结批次并在入口内调用现有 `collect_leader_history_production_source` 与 `collect_leader_tradability_production_source`，同时校验正式 `sourceContractId`、全集顺序和时间；主营和 D8 仍显式缺失，四个正式开关固定为 `false`。本批没有复用旧计划证据、没有把385只改成正式结果，也没有放宽主营或 D8 规则。
+- 最终独立复审发现并关闭合法快照经 `dataclasses.replace()` 保留内部来源令牌的重签漏洞：来源令牌现在 `init=False`，只由唯一可信工厂在真实查询和校验完成后注入；任何替换都会自动丢失令牌，即使重算内容哈希也整体阻断。最终复审无 Critical/Important，本批合同与失败关闭边界 Ready；这不代表行业八阶段生产者或阶段6正式门 Ready。
+- 证据候选专项 `16` 项及派生主营来源包往返测试通过；生产 SQLite 绝对路径在解释器启动阶段即重定向到逐进程 `/private/tmp` 临时库的完整后端 `1816` 项全部通过。Python 全量编译、`pip check`、`git diff --check` 和本批文件行尾空白检查通过；没有读取或写入生产 SQLite，没有调用付费 AI，没有修改环境变量、依赖、服务、调度、功能开关或正式门，也没有 Git 暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先15个提交；当前41个未提交文件（26个已跟踪修改、15个未跟踪），此前 v37-v44、`source_context`、预冻结、D8会话及本批修改全部保留。`8001` 仍由既有 PID 791 监听，`4000` 未监听；launchd资产验证通过，FastAPI/ngrok LaunchAgent已加载但ngrok未运行，preflight按设计拒绝重复安装，运行服务没有加载未提交代码。
+
+下一步：1）实现或接入真正的行业八阶段确定性状态生产者，把同轮批准阈值、行业特征、历史、前态和状态快照绑定后再生成活跃行业范围；当前只有 readiness 和失败关闭的交付合同，禁止人工填写行业状态冒充正式生产结果；2）确保全市场初筛池始终包含仓储快照中的全部非 `OUT` 存量状态，并补齐真实空榜的阶段6总验收语义；3）在上述两项齐备后，用派生的小证据计划实际重放五源和已有人工D8流程，主营仍只接受官方精确证据或真实版本化复核，五源未齐继续失败关闭。
+
+## 2026-08-25阶段6历史先取后冻编排、真实源诊断与D8入口收紧
+
+- 已按 TDD 把阶段6正确顺序落实为“先完成全市场长耗时历史及行业历史准备，再取新鲜最终行情并立即冻结候选计划”。新增 `backend/radar/leader_phase6_live_prefreeze.py` 与 `backend/run_leader_phase6_live_prefreeze_acceptance.py`：准备结果绑定分类文档 SHA、21 个已完成官方交易日、历史来源合同和具名阈值批准；最终时点从冻结原始行情重算市场基线和行业特征，不再给旧 `SectorFeatureBatch.asOf` 换标签，也不回绑 09:38 的旧计划。绑定后重放既有历史、行业生产 collector，二者未同时 `completed` 就不暴露预冻结输入。
+- 日线 collector 新增仅限 `/private/tmp` 的逐证券可恢复断点，身份同时绑定分类文档 SHA、完整 21 日交易日期和腾讯前复权/腾讯指数/东方财富前复权三个精确来源合同及 URL；每个成功序列经内容哈希、日期全集、复权口径、正价格和时间校验后以 0600 原子写入。失败轮仍对正式调用返回 0 条，但保留已核验成功序列；下轮只重试缺失项。断点哈希篡改、来源/日期/分类身份变化或路径越界会拒绝复用，不会换标签。CLI 使用跨 `radarRunId` 共享但按内容身份隔离的断点目录。
+- 行业自动回填仍只把既有运行仓作为外部只读断点，本轮新证据只写 `/private/tmp`，不会改写旧仓或把 2026-08-22 `asOf` 冒充 2026-08-25。候选采集的申万官方历史归档核验改为显式选择，默认完整实时运行不在短行情窗口内重复下载归档；来源合同和失败关闭语义保持不变。
+- 真实公开源诊断确认腾讯旧 `/fqkline/get` 对全量请求返回 HTTP 501，现改为实测可用的 `/newfqkline/get`；只接受证券 `qfqday` 和指数 `day` 原生口径。对仅返回未复权 `day` 的证券使用明确的东方财富前复权备用源，保留独立 URL/合同身份，不把未复权数据改名成前复权。新目录 `/private/tmp/stage6-live-prefreeze-resume-20260825` 首轮失败关闭但保存 5097 个断点；第二轮复用它们，只新增 2 个，当前 5099 个、20MB、权限不合格 0。按本轮 5157 个请求范围推算仍缺 58 个；单独探针 `601399` 可取完整 21 日，紧随的其他请求被上游拒绝，证明剩余阻塞是备用源节流/连接拒绝而非允许改用未复权数据的理由。两轮都没有生成 `phase6PrefrozenInputs` 或正式 CLI 工件，行业当轮回填尚未越过历史门。
+- D8 人工入口继续收紧：除 `versionCount/bundleIds` 全空外，任何藏在 projection item 中的既有 D8 投影也会整批拒绝；候选无命中公告时，人工清单使用同轮巨潮官方名册中的发行人身份，命中文档时则要求 D2 身份精确一致。CLI 真实路径集成测试不再整体 mock `_build_live_delivery`，而是实际覆盖候选包校验、官方名册、七类分页预算、纯 D2 生命周期、`/private/tmp` 路径门和 0600 原子写盘。没有自动复制 `manual-review-v1/v2`，没有生成新人工结论。
+- 最终阶段6相关专项 95 项通过；导入前把生产 SQLite 绝对路径精确重定向至全新 `/private/tmp` 数据库的完整后端 1797 项通过，守卫在主进程和子进程均生效；Python 全量编译、`pip check`、`git diff --check` 及未跟踪文件行尾空白检查通过。没有读取或写入生产 SQLite，没有付费 AI、生产环境/服务/开关、Git 暂存提交推送或部署操作。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先 15 个提交；当前 36 个未提交文件（23 个已跟踪修改、13 个未跟踪），此前 v37-v44、`source_context`、D8 会话与本轮改动全部保留。`8001` 仍由既有 PID 791 监听，`4000` 未监听；`launchd` 资产验证通过，FastAPI/ngrok LaunchAgent 已加载但 ngrok 未运行，preflight 因已有同名 LaunchAgent 按设计拒绝重复安装；运行服务没有加载未提交代码。
+
+下一步：1）等待东方财富连接窗口恢复后复用同一 `/private/tmp/stage6-live-prefreeze-resume-20260825` 断点目录，仅重试推算剩余 58 只；不得改用腾讯未复权 `day`，也不做无限重试；2）历史全集完成后在同一新运行中生成行业当轮回填、取最终行情并冻结新候选计划，禁止回补旧计划；3）由真实人工继续处理已有 3 份 D8 材料，主营仅接受新的官方精确证据或真实版本化复核，五源未齐继续失败关闭。
+
+## 2026-08-25阶段6 D8离线人工处理会话与只读预检入口
+
+- 按 TDD 把今日 D2 待办接到现有正文交付、事实提取、D8 表单和版本预检合同。`leader_risk_lifecycle_delivery.py` 现在保留真实 `windowFrom/windowUntil`；D8 待办包升为 v2，保留发行人名称、巨潮原始分类字段、关联报告标志和明确 `formalUsable=false`，旧 v1 工件仍只作当时 D2 审计，不再作正文处理输入。
+- 新增 `backend/radar/leader_risk_d8_manual_review_session.py`、`backend/run_leader_risk_d8_manual_review_session.py` 和 `backend/run_leader_risk_d8_manual_review_preflight.py`。会话入口只接受内容哈希正确、`review=null`、D8 版本为 0 的 v2 工作包，一次必须显式选择 1–3 份不重复官方公告；完整 D2 目录和所选 PDF 只写入 `/private/tmp` 0600 临时 SQLite/材料包。篡改包、预填“无事件”、越界路径、重复/超量选择在联网前失败关闭。
+- 只读预检 CLI 要求人工提交的 `reviewBatchId/documentId/category/contentSha256/candidateId` 与材料包逐项一致，以 SQLite `mode=ro + query_only` 调用现有 `preflight_manual_review_version`；即使预检结构有效也固定 `submissionAllowed=false`、`d8VersionPersisted=false`，不保存版本、不打开生产写开关。
+- 11:54–11:56 CST 重放同一候选计划的公开巨潮 D2，仍为 `385` 只、`5104` 份官方文档、`226/226` 页、7 类、13 分片。v2 来源包 `/private/tmp/stage6-d8-manual-worklist-20260825T035546-source.json`，文件 SHA-256 `d1213cfe82c1ddf7feb973643bd797f930be440e58e5e2aa6508b3c670ea1301`，包内 SHA-256 `5a18a0b7e035cbe1b131e760bd74cca9eac40a1b3e9a9bd989c286a3c4ae239e`；v2 处理包 `/private/tmp/stage6-d8-manual-worklist-20260825T035546-review.json`，文件 SHA-256 `6cf3b408aa7b98cf486ca11bb4e523d234ff48f8afef8b56eef23f05fe627aa7`。
+- 首批真实正文会话选择两份监管整改报告 `cninfo:1225474522`、`cninfo:1225448699` 和一份重大诉讼进展 `cninfo:1225464842`，官方 PDF 全部下载解析成功，共 7 页；现有提取器将它们判为需人工补录 `referenced_document_id`，诉讼项另需 `case_id`。材料包 `/private/tmp/stage6-d8-manual-review-session-20260825T035625666177Z.json`，文件 SHA-256 `8fa60ceaf202090a06e897ac17ae487a2594b70c7245d7b8295b6341a219db03`，包内 SHA-256 `9b9bf014e9bd727950e08375a3a79c4e1b8ccf004f5e50539f61042e35519941`；临时库同前缀 `.sqlite`，SHA-256 `a21184eaa2777caddaa74fb10757ac8ad4210e4ac9f6ab2c5f4df19a9348181a`。临时库为 1 个审核批次、5104 条公告目录、3 份正文、7 页、0 个人工版本，`quick_check=ok`、外键违规 0；所有工件权限均为 0600。
+- 今日没有真实人工填写的提交文件，因此本轮没有把 Codex、D2、公告标题、自动提取或空模板冒充人工 D8，也没有对真实材料运行“成功预检”。三份材料的 `review` 仍为 `null`、`d8VersionCount=0`、四个正式门全关；它们是可执行的真实人工待办，不是 D8 证据。
+- 最终新增会话/预检 7 项、精确拦截生产 SQLite 绝对路径到全新 `/private/tmp` 临时库的完整后端 `1771` 项全部通过，守卫实际拦截 1 次默认生产库路径；Python 全量编译、`pip check`、`git diff --check` 和新文件行尾空白检查通过。测试日志中 AI 重试和来源失败仍是既有 Mock/受控分支，没有付费 AI 请求。
+- 本轮没有读取或写入生产 SQLite，没有修改生产环境变量、依赖、迁移、调度、功能开关或正式门，也没有 Git 暂存、提交、推送或部署。Git 仍为 `main@82b71d9`，相对 `origin/main` 领先 15 个提交，当前 28 个未提交文件（17 个已跟踪修改、11 个未跟踪），原有 v37-v44、`source_context`、预冻结与 D8 工作全部保留。`8001` 仍由既有 PID `791` 监听，`4000` 未监听，已安装 `launchd` 资产验证通过，ngrok 未运行，运行服务没有加载未提交代码。
+
+下一步：1）由真实人工逐页核对上述 3 份材料，只有填写了可回到页码/原文片段的事实、原公告和关系决定后，才运行新的只读预检，任何版本写入仍需单独授权；2）继续为同一候选计划取得 2026-08-25 真实历史/行业预冻结输入，2026-08-22 旧仓仍不得绑定；3）主营仅接受新的官方精确证据或真实版本化人工复核，五源未全齐前继续失败关闭。
+
+## 2026-08-25阶段6冻结前同轮编排与D8人工清单入口
+
+- 按 TDD 把最终候选计划冻结前的历史/行业输入接入现有可交易性验收编排：候选运行时现在保留冻结的指数、行业分类原始快照和 ETF 范围；证据完成时重新校验行情新鲜度，并从这些冻结原始输入重算市场/行业特征和最终候选计划。新增 `backend/radar/leader_phase6_live_prefreeze.py` 只在历史生产 collector 与行业生产 collector 均真实返回 `completed` 时暴露预冻结输入，并要求最新阈值批准与本轮冻结 `approvalId` 整体完全一致；没有新增第二套行业桥。
+- 独立预审发现的旧 `SectorFeatureBatch.asOf` 换标签、未重放现有 collector 却标记 `completed`、非纯 D2 版本可混入、`/private/tmp` 路径越界和 Fixture `NOT_RUN` 测试边界均已逐项修正。新编排不改写原始 `sourceTime/fetchedAt`；任一加载器异常、畸形 collector 结果、阈值批准变化、现有历史/行业门未通过或候选范围改变均失败关闭。
+- 新增 `backend/radar/leader_risk_d8_manual_worklist.py` 和 `backend/run_leader_risk_d8_manual_worklist.py`：只接受完整强类型真实 D2 内存结果，拒绝脱敏汇总、`realPocStatus=not_run`、任何已有 `versionCount/bundleIds` 和可用投影。候选来源包与输出必须在 `/private/tmp`；写文件使用 0600 权限、不跟随符号链接、不覆盖旧包。工作包显式分开候选计划 `asOf` 与公开源 `d2CollectedAt`，不把采集时间冒充候选时点。
+- 10:55–10:56 CST 对今日候选来源包真实重放巨潮全量名册与七类 D2，成功完成 `226/226` 页、`7` 类、`385` 只、`13` 分片、发现查询 `226`、忽略文档 `0`；待办为 `385` 项、巨潮官方文档 `5104` 条，`385` 项均为 D2 `partial`。最终来源包 `/private/tmp/stage6-d8-manual-worklist-20260825T025625-source.json`，包内 SHA-256 `97f123837039aab1ae4db761ab1b3b0925d016ac60333e73c830079c4a62efa6`，文件 SHA-256 `ea977b2be60446db22bba36bb70cf4d3a57250bcbd8124175a43b9685d48d006`；人工处理包 `/private/tmp/stage6-d8-manual-worklist-20260825T025625-review.json`，文件 SHA-256 `373a80ac5fb5034e7ec877ea78677a69caf9b12f3680aa8552a9075e90f68d18`。
+- 最终工作包与原候选包的内部 `packetSha256=6aaa42b55452a6a54f1bf8d338af9713e7e393f94948786c5da8e641c2a4f6fc` 绑定；离线复核候选计划 ID、`radarRunId/quoteBatchId/asOf`、顺序、时间顺序、D2 审计、包哈希、官方 URL 域名、文档计数、文件权限和四个正式门均通过。人工处理包的 `385` 个 `review` 全部仍为 `null`，`d8VersionCount=0`、`d8SubmissionReady=false`，不包含 `manual-review-v1/v2` 或“无事件”结论；它是真实人工待办，不是 D8 证据包。
+- 最终相关专项 `91` 项、导入前精确拦截生产 SQLite 绝对路径到 `/private/tmp` 临时库的完整后端 `1764` 项全部通过；Python 全量编译、`pip check` 和 `git diff --check` 通过。测试中的 AI 重试、来源失败和调度日志均为既有 Mock/受控分支，没有付费 AI 请求。
+- 今天仍没有可冒充同轮的行业/历史证据，主营自动证据仍为 `10/385 ready`，新工作包仍是 `0` 个 D8 版本，因此没有重跑或开启阶段6总正式门；五源缺口和四个正式开关继续失败关闭。本轮没有读取或写入生产 SQLite，没有修改生产环境变量、依赖、迁移、调度、功能开关或正式门，也没有 Git 暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交；原有 v37-v44 及 `source_context` 修复全部保留，当前共 `21` 个未提交文件。`8001` 仍由既有 PID `791` 监听，`4000` 未监听，既有运行服务没有加载本轮未提交代码；`launchd` 资产验证通过，ngrok 未运行。
+
+下一步：1）以最终 review 工作包逐文档读取官方正文并走现有 D8 预检，只有真实人工事实和实质变化才形成版本，任何生产写入仍需单独授权；2）通过新预冻结 loader 为同一候选计划取得今天真实历史/行业输入，还是 2026-08-22 `asOf` 的旧仓证据继续不得绑定；3）主营只接受新的官方精确证据或真实版本化人工复核，五源全部同轮齐备后再复跑 `acceptance=ready_for_review`。
+
+## 2026-08-25阶段6新候选D2/D8与五源总门真实验收
+
+- 09:35 CST 使用上交所官方休市安排确认 2026-08-25 为完整交易日，项目市场状态为 `trading`，随后只用公开真实来源执行交易窗口验收。首个可交易性全集运行 `stage6-tradability-20260825T093610024398` 为 `385/385 completed`，六项字段覆盖均为 `1.0`，`productionCollector=completed`。
+- 以新的同轮主营候选 `stage6-business-20260825T093750045405`、计划 `radar-leader-runtime-candidate-plan-v1:c242c4788906c89a01154ee6c35c1593d12b594a3cb4001b7237253f9ca6aceb`、`asOf=2026-08-25T09:38:33.395157+08:00` 生成真实主营材料包：候选 `385`、巨潮发行人身份 `ready`、材料队列 `pending_review=385`，没有缺失或来源失败。来源包 `/private/tmp/stage6-business-material-acceptance-20260825T093750-source.json`，SHA-256 `80b66a96b36dd1e30d066197f44741a3af83c3f9def5bbfe3288f8b14b0a1a4b`。
+- 同一计划的 D2 七类巨潮官方发现先因调用方未显式放足分页预算停在 `91` 个首屏请求；确认现有合同有意要求显式预算后，按合法最大预算复跑完成 `226/226` 页、七类、`385` 只、`13` 分片核对，网络失败同页最多重试一次。真实结果为 `status=missing`、`385` 项均 `risk_lifecycle_version_history_insufficient`、D8版本 `0`、D8覆盖 `0/385`；没有复制旧 `manual-review-v1/v2`，没有把 D2 队列冒充 D8。证据 `/private/tmp/stage6-d2-live-20260825T093750.json`，SHA-256 `ddb35f82523f38e9d6cf4a6bde59aa311fd4778a4d3cccbd57dc978a39c9c353`。
+- 同一计划的官方主营确定性重放为 `ready=10`、`missing=162`、`source_failed=0`、`source_unverified=213`、`reused=0`，`deliveryPacketPath=null`；证据 `/private/tmp/stage6-business-auto-20260825-same-run/evidence-d1593894610235dc9e04fc111c9779d20c23e9a07b812d732e7b79a8e134a310.json`，SHA-256 `d8fb8fe8b36c48844eff3b21703c5fe4577414c523427fbe63ed43e1480a2e00`。这说明今天的新候选仍不具备主营催化全集生产交付，不能用昨日 v44 或人工空模板补位。
+- 行业运行仓只读复核仍真实有效：历史 `available`、证据 SHA-256 `6c4a5d9b4ae80d4d8b1ad5435984063e954fa3fef72cd5c54b7189ed7ad0e252`，具名批准 `approved`、`approvalId=radar-sector-threshold-approval-v1:e5c5286d870c50722bd4b906abe1438003ab936aa513ee651f9cca4c682d4fcf`；但历史 `asOf=2026-08-22T10:41:35.602556+08:00`，不能冒充今天新候选的同轮行业冻结输入。
+- 五源单入口首次真实调用发现 `LeaderTradabilityLiveAcceptanceResult` 没有暴露重冻结后的 `source_context`，调用方只能误用候选采集阶段旧 context，计划 ID 不一致并把已完成可交易性误降为 `tradability_bundle_time_window_unverified`。已按 TDD 先增加红灯断言，再最小新增只读 `source_context` 字段并只在验收完成时交付重冻结 context；未改变 CLI 公开证据合同或正式门。
+- 修复后 10:07 CST 以新轮 `stage6-total-gate-20260825T100638106457`、计划 `radar-leader-runtime-candidate-plan-v1:e3356a0b0dda3af0d4602d62e8290538c316cd212934de799c8dbe2391924c87` 真实复跑五源单入口：`tradability=ready 385/385`；`sector_rule/history/business_catalyst=source_unverified 0/385`；`risk=missing 0/385`；装配 `partial`，总 `acceptance=missing`，未进入 `ready_for_review`。证据 `/private/tmp/stage6-total-gate-20260825.json`，SHA-256 `56d6654c44127f689a771c46e1a825af7c1fe80b3d2dba5ba96391e2ffd4b55b`；四个正式状态开关全部为 `false`。
+- 修复专项及五源相关 `25` 项通过；精确把 `database.DB_PATH` 导入前定向到 `/private/tmp` 临时库并初始化后的完整后端 `1746` 项全部通过；受影响 Python 编译、`pip check` 和 `git diff --check` 通过。本轮没有读取或写入生产 SQLite，没有调用付费 AI，没有修改环境变量、依赖、迁移、功能开关或正式门，没有停止/重启/重载服务，也未暂存、提交、推送或部署。
+- Git 仍为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交；原有 v37-v44 修改全部保留，本轮新增修改 `backend/radar/leader_tradability_live_acceptance.py` 与对应测试，当前共 `14` 个未提交文件。`8001` 仍由既有 PID `791` 监听，`4000` 未监听，运行服务没有加载本轮修复。
+
+下一步：1）对今天 D2 清单的 `385` 只候选逐项形成真实版本化 D8 判断或明确无事件覆盖，不能自动复制版本；2）为新候选在计划冻结前取得可复用的历史与行业当轮冻结输入，并保持 `radarRunId/candidatePlanId/asOf` 对齐；3）主营催化只继续接受新的官方精确证据或真实版本化人工复核，五源全齐后再复跑 `acceptance=ready_for_review`。
+
+## 2026-08-24阶段6同轮D8与五源总门执行前置审计
+
+- 已按真实代码复核阶段6总入口：`build_leader_phase6_production_readiness` 会在同一内存上下文中重放历史连续性、主营催化、可交易性、行业正式规则四类冻结来源，再从只读 D8 版本仓储装配风险来源，最后按固定五源顺序执行来源证明和总正式门验收；正式分数、正式门、正式可用和状态迁移四个标志在人工启门前始终保持 `false`。现有入口已覆盖本轮目标，不另建第二套总门桥接或放宽合同。
+- 本次数据侧可用性审计确认：可交易性已有 2026-08-20 真实 `385/385 completed`；行业历史及阈值批准已有真实证据；主营催化最新 v44 仅 `22/385 ready`、`deliveryPacketPath=null`；生产 D8 虽有 `603055` 的 `manual-review-v1(completed) -> manual-review-v2(active)` 两版实质变化链，但不属于待生成的新候选同轮，且覆盖仅 `1` 只，不能回填或复制。故当前五源总门不能诚实得到 `ready_for_review`，缺口仍是数据覆盖，不是总门代码缺失。
+- 现场时间为 2026-08-24 22:08 CST，已过 A 股交易时段；使用上交所官方休市安排实时确认 2026-08-25 为完整交易日。已把现有自动续跑任务 `6` 更新为 2026-08-25 09:35 CST 单次执行：生成全新的同轮候选计划，依次采集可交易性和七类 D2 风险范围、运行主营材料与严格自动证据、绑定行业历史与阈值批准，再仅以真实 D8 版本做五源只读总门；没有 D8 人工版本的证券必须保持缺失，禁止自动制造审核版本。
+- 本轮未读写生产 SQLite、未调用付费 AI、未修改环境变量、依赖、迁移、功能开关或正式门，未停止/重启/重载服务，也未暂存、提交或推送。`8001` 仍由既有 PID `791` 监听，`4000` 未监听；Git 基线仍为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交，原有 v37-v44 共 `12` 个未提交文件完整保留。
+
+下一步：1）2026-08-25 09:35 在官方确认的连续交易窗口生成新候选计划和同轮四源冻结输入；2）只对该计划真实发现且具备人工事实判断的风险公告形成 D8 版本，空公告/未审证券保持明确缺失；3）五源身份、计划、`asOf` 和全集覆盖完全一致后执行阶段6总正式门验收，未满足任一门槛继续失败关闭。
+
+## 2026-08-24阶段6年报主营结构与v30关系缺口诊断收口
+
+- 先把自动缺口诊断从仅支持 `business_catalyst_fact_object_missing` 扩展为可显式选择 `business_deterministic_relation_unconfirmed`；新诊断只保存有界的年报主营词/片段、催化词/片段及催化词在年报全文的精确出现位置。工件始终 `diagnosticOnly=true`，不生成 delivery，四个正式标志全为 `false`；旧 `--gap-diagnostic` 默认对象缺失语义保持兼容。
+- 按 TDD 补强官方年报主营解析：支持跨页主要产品列表、“公司的主营业务包括”、具名编号产品及公司产品/产量窄句式，并去除具名产品末尾“除自用外”修饰。以 `000657` 真实年报版式增加跨行业标题后的明确本公司主营列表识别；复审时又先增加“同行业公司”误命中红灯反例，最终限定为“报告期内，公司……”明确本公司句式。确定性关系版本升为 `radar-leader-business-deterministic-relation-v30`，旧检查点不得复用。
+- v44 新鲜公开官方源全量 `385` 只复跑结果为 `ready=22`、`missing=147`、`source_failed=0`、`source_unverified=216`、`reused=0`。相对 v39，`002234` 以年报“商品代肉鸡苗/商品代鸡苗”和催化公告“商品代鸡苗”精确交集转为 READY；`002329` 以年报“公司的主营业务包括乳业和信息业务”与催化公告“乳业”精确交集转为 READY；`000657` 稳定保持 READY。`605299/603318/300027` 只从年报章节未识别推进到更准确的催化对象缺失，仍失败关闭；v44 与收紧前 v43 逐股状态/原因比较为空差异。
+- 当前缺口真实计数为：催化缺失 `141`、催化对象缺失 `97`、行业冲突 `43`、年报主营章节缺失 `38`、精确关系未确认 `37`、年报缺失 `6`、年报选择歧义 `1`。年报全文诊断证明多数“同词出现”仅是行业、风险、股东名称或词汇表语境，不能自动变成主营证明，本轮没有引入模糊匹配、同义词或 AI 关系推断。
+- v44 证据为 `/private/tmp/stage6-business-auto-20260824-v44-peer-company-guard/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `dea54c0cefc3dd63b119b3aa452675742471692e5b47a505a84b785b56b9d7e7`；37 条关系缺口诊断为同目录 `gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `9fc91e4e1c9e027c9023f1d70da166660b3ea9f3426d837d9a8a97eac44945da`。`deliveryPacketPath=null`，四项阶段6正式门继续全部 `false`。
+- 最终聚焦 `46` 项、导入前精确拦截默认库路径到 `/private/tmp` 的完整后端 `1746` 项全部通过；Python 全量编译、`pip check`和 `git diff --check` 通过。本批与尚未提交的 v37-v39 累计修改共 `12` 个文件，均保留在工作树；本轮未暂存、未提交、未推送。
+- 纠正旧检查点中的过时表述：生产 D8 已于 2026-08-15 真实形成 `manual-review-v1(completed) -> manual-review-v2(active)` 两个有实质状态纠正的连续版本，并通过 2/2 只读重放；但 v2 晚于 8月12日旧候选计划，不得未来证据回填，且仅覆盖 `603055` 单一文档。因此真实结论是“已有第二版，但当前候选同轮风险覆盖仍严重不足”，不是“仍等待创建第二版”。以上新检查点为后续唯一有效口径。
+- `4000` 仍未监听；`8001` 仍由既有 PID `791` 监听，未停止、重启或重载。Git 基线仍为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交。本轮没有读写生产 SQLite，没有调用付费 AI，没有修改服务、环境变量、依赖、迁移、调度、功能开关、正式门或部署。后端运行进程未加载本批新代码。
+
+下一步：1）剩余 `97` 条催化对象缺失和 `37` 条精确关系未确认只在出现新的可精确复现官方证据或真实版本化人工映射时继续，不再就当前语料放宽规则；2）以已有 D8 v1→v2 的真实版本链为基线，只为新的同轮候选计划补齐风险证据覆盖，不回填旧计划；3）历史连续性、主营催化、可交易性、行业正式规则和同轮风险投影全部真实对齐后，再做阶段6总正式门验收。
+
+## 2026-08-24阶段6建筑施工正式中标事实v39真实重放
+
+- 从 v38 剩余 `95` 只对象缺失中，只新增 `600159` 一条标题与正文联合确认的官方窄句式：同页必须同时存在“关于建筑施工项目收到中标通知书并签订合同的公告”和“大龙顺发收到《中标通知书》，被确认为该项目中标人”，才提取 `建筑施工`。年报原词为 `建筑施工业务`，仅经过既有结构后缀归一化形成 `direct` 完全同值关系；没有从项目名称、公司名称或预中标公告推断业务。
+- TDD 正例先以对象缺失红灯；反例覆盖预中标公示、拟签合同、拟/未收到通知书、候选人、不确定性、其他公司、泛施工标题、标题缺正文以及标题与确认分属不同页面。规则版本升级为 `radar-leader-business-deterministic-relation-v27`，旧 v26 检查点不得复用。聚焦抽取、确定性验证、官方适配器和自动证据四模块 `82` 项通过。
+- v39 新鲜公开官方源 `385` 只重放为 `ready=20`、`missing=147`、`source_failed=0`、`source_unverified=218`、`reused=0`。与 v38 逐证券移除检查点路径后比较，只有 `600159` 从 `business_catalyst_fact_object_missing` 转为 READY，其余 `384` 只状态和原因无业务漂移。对象缺失降为 `94`，精确关系未确认仍为 `39`。
+- 最终证据为 `/private/tmp/stage6-business-auto-20260824-v39-live/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `0681ede899a094b26b8a6ba4b5fe0b5dc4f68277f0d72f29659d1cf10a620f75`；缺口诊断为 `/private/tmp/stage6-business-auto-20260824-v39-live/gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `6bb9cded9e468b5fa837c0c0a8a43ea827e2d05d5fdaa16d7ce642e8862bdd38`，覆盖剩余 `94/94` 只对象缺失。`deliveryPacketPath=null`，四项阶段6正式门继续全部 `false`。
+- 精确隔离生产 SQLite 的完整后端 `1736` 项全部通过；Python 全量编译和 `git diff --check` 通过。修改文件仍为 `backend/radar/leader_business_automatic_contracts.py`、`backend/radar/leader_business_catalyst_facts.py`、四个对应测试和本检查点。规范化精确扫描剩余语料只得到泛行业/公司名误命中、多业务共同归因、未来目标或与年报不完全同值的高风险项，本轮没有继续扩规则。
+- `4000` 未监听；`8001` 仍为既有 PID `791`，未停止、重启或重载。Git 基线仍为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交；v37-v39 修改均未暂存、未提交、未推送，没有读写生产 SQLite，没有调用付费 AI，没有修改服务、环境变量、依赖、迁移、调度、功能开关、正式门或部署。
+
+下一步：1）剩余 `94` 只对象缺失不再仅凭当前语料扩大自动规则，只在出现新的可精确复现官方文档时增量重放；2）`39` 只关系未确认继续只接受官方完全同值或人工审核的版本化映射；3）D8 第二个真实实质变化版本和四项正式门继续独立等待。
+
+## 2026-08-24阶段6三类严格经营事实v38真实重放
+
+- 在 v37 剩余 `98` 只对象缺失的新鲜官方诊断中，只新增三条能与年报原词完全同值的窄句式：`603001` 的“公司主营的皮鞋业务销售面临压力，整体收入未达预期”提取 `皮鞋`；`000524` 的“餐饮业务表现亮眼，年宵品、端午粽销售均实现大幅增长”只在两个具名商品销售增长事实同时存在时提取 `餐饮`；`301322` 的非美国市场场地电动车定制化要求、人工及管理成本上升并影响盈利能力事实提取 `场地电动车`。未扩展泛行业、泛产品、主观“表现亮眼”单句、同义词、包含匹配或 AI 推断。
+- TDD 正例先以对象缺失红灯，反例覆盖缺公司主体、未来/预计、否定、方向或对象变化、跨句、泛对象、只保留主观判断以及后续否认/撤回。真实 `603001` 原句中的“整体收入未达预期”曾被通用未来词防线误拒；根因确认后只豁免这一整段固定历史结果，不豁免单独的“未”或“预期”。确定性规则版本升级为 `radar-leader-business-deterministic-relation-v26`，旧 v25 检查点不得复用。
+- 公开网络 v38 新鲜官方源 `385` 只重放为 `ready=19`、`missing=147`、`source_failed=0`、`source_unverified=219`、`reused=0`。与 v37 逐证券移除检查点路径后比较，只有 `603001/000524/301322` 从 `business_catalyst_fact_object_missing` 转为 READY，三只分别以 `皮鞋/餐饮/场地电动车` 形成 `direct` 完全同值关系，其余 `382` 只状态和原因无业务漂移。对象缺失降为 `95`，精确关系未确认仍为 `39`。
+- 最终证据为 `/private/tmp/stage6-business-auto-20260824-v38-live/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `255b4457db344299e107de756333009606b2dc65eb3c5b09bce0d37bcb963580`；缺口诊断为 `/private/tmp/stage6-business-auto-20260824-v38-live/gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `57ed34472be2d3d7e3328824323192a0777b4c5e0b5728bd8b06f745b28a4410`，覆盖剩余 `95/95` 只对象缺失。`deliveryPacketPath=null`，四项阶段6正式门继续全部 `false`。
+- 新增规则链相关四模块 `80` 项、精确隔离生产 SQLite 的完整后端 `1734` 项全部通过；Python 全量编译和 `git diff --check` 通过。修改文件仍为 `backend/radar/leader_business_automatic_contracts.py`、`backend/radar/leader_business_catalyst_facts.py`、四个对应测试和本检查点。`4000` 未监听；`8001` 仍为既有 PID `791`，未停止、重启或重载。Git 基线为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交；v37 与 v38 修改均未暂存、未提交、未推送，没有读写生产 SQLite，没有调用付费 AI，没有修改服务、环境变量、依赖、迁移、调度、功能开关、正式门或部署。
+
+下一步：1）只从剩余 `95` 只对象缺失的 v38 新鲜官方正文继续寻找可真实复现且有强反例保护的句式；2）`39` 只关系未确认继续只接受官方完全同值或人工审核的版本化映射；3）D8 第二个真实实质变化版本和四项正式门继续独立等待。
+
+## 2026-08-24阶段6公司单票快递服务收入v37真实重放
+
+- 上一批严格销售毛利与注册产品实现已提交为 `82b71d9 feat: 扩展阶段6严格销售对象证据`。本批没有采用更宽的“快递行业价格回升”方案，只新增 `002468` 官方业绩预告中的公司自身固定事实：“报告期内公司单票快递服务收入2.33元，同比较大幅度上升”，提取催化对象 `快递`；年报官方主营词为 `快递业务`，仅经过既有结构后缀归一化形成 `direct` 完全同值关系。规则版本升级为 `radar-leader-business-deterministic-relation-v25`，旧 v24 检查点不得复用。
+- TDD 反例覆盖行业价格、缺公司主体、泛服务/物流、成本替代收入、金额或方向变化、预计/预测/推测、跨句，以及相邻句否认/撤回；同时保留“否认其他市场传闻”等无关后续语义，不误伤已确认经营事实。多轮 Sol + 高关键审查发现并关闭常见主动、被动、指代换序和“确认后又被撤回”的旁路；最终有界复审无 Critical/Important，仅保留失败关闭取向下不影响当前官方语料的极端保守误拒观察。
+- v37 新鲜官方源 `385` 只重放为 `ready=16`、`missing=147`、`source_failed=0`、`source_unverified=222`、`reused=0`。与 v36 逐证券去除检查点路径后比较，只有 `002468` 从 `business_catalyst_fact_object_missing` 转为 READY，其余 `384` 只状态和原因无业务漂移。当前对象缺失降为 `98`，精确关系未确认仍为 `39`；其余原因为催化缺失 `141`、行业冲突 `43`、主营章节缺失 `41`、年报缺失 `6`、年报选择歧义 `1`。
+- 最终证据为 `/private/tmp/stage6-business-auto-20260824-v37/evidence-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `c96793c6bad4b04c3583903dfa83439dc73308b180e54ffa409a1bc3512e4287`；缺口诊断为 `/private/tmp/stage6-business-auto-20260824-v37/gap-diagnostic-7691cadddf0dfe41b100064c0afca26d92424ad3b9795fae2e735411c8f69829.json`，SHA-256 `ccf08ed456aecca5478b979bed8181533fffc0afd562ed94e22d4a38ae127aa1`，覆盖剩余 `98/98` 只对象缺失。`deliveryPacketPath=null`，四项阶段6正式门继续全部 `false`。
+- 精确隔离生产 SQLite 的完整后端 `1730` 项全部通过；最终聚焦规则链 `89` 项、受影响 Python 编译和 `git diff --check` 通过。修改文件为 `backend/radar/leader_business_automatic_contracts.py`、`backend/radar/leader_business_catalyst_facts.py`、四个对应测试和本检查点。`4000` 未监听；`8001` 仍为既有 PID `791`，未停止、重启或重载。Git 基线为 `main@82b71d9`，相对 `origin/main` 领先 `15` 个提交；本批修改未暂存、未提交、未推送，没有读写生产 SQLite，没有修改服务、环境变量、依赖、迁移、调度、功能开关、正式门或部署。
+
+下一步：1）只从剩余 `98` 只对象缺失的 v37 新鲜官方正文继续寻找可真实复现且有强反例保护的句式；2）`39` 只关系未确认继续只接受官方完全同值或人工审核的版本化映射；3）D8 第二个真实实质变化版本和四项正式门继续独立等待。
 
 ## 2026-08-24阶段6严格销售毛利与注册产品v36真实重放
 

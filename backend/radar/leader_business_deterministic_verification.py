@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import re
@@ -13,6 +13,7 @@ import unicodedata
 from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
     DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
+    MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS,
 )
 from radar.leader_business_catalyst_facts import (
     OfficialBusinessCatalystFactResult,
@@ -326,7 +327,9 @@ def replay_deterministic_official_business_verification(
         or not _aware(as_of)
         or artifact.rule_version != DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION
         or artifact.contract_id != DETERMINISTIC_BUSINESS_VERIFICATION_CONTRACT_ID
-        or artifact.validated_at > as_of
+        or artifact.validated_at > as_of + timedelta(
+            seconds=MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS
+        )
     ):
         return _result(
             AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,

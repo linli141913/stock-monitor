@@ -12,7 +12,7 @@ from radar.contracts import QuoteSnapshot, UnitVerificationStatus
 
 TURNOVER_UNIT_EVIDENCE_CONTRACT_ID = "radar-turnover-unit-evidence-v1"
 AMOUNT_TOLERANCE_CNY = 10_000.0
-SYMBOL_PATTERN = re.compile(r"^[036][0-9]{5}$")
+SYMBOL_PATTERN = re.compile(r"^[034689][0-9]{5}$")
 
 
 @dataclass(frozen=True)

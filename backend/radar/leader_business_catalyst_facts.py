@@ -82,13 +82,40 @@ EARNINGS_ASSERTION_DENIAL_PATTERN = re.compile(
     r"未发现[^。!?！？；;]{0,32}(?:证据|依据|材料))"
 )
 EARNINGS_FOLLOWUP_RETRACTION_PATTERN = re.compile(
-    r"^(?:上述|以上|该(?:说法|表述|内容)|此(?:说法|表述|内容)|公司随后)"
+    r"(?:"
+    r"(?:上述|以上)(?:仅为(?:预测|推测)|系(?:预测|推测)|"
+    r"为(?:预测|推测))"
+    r"|(?:(?:上述|以上|该|此)(?:说法|表述|内容|消息)"
+    r"|对此(?:说法|消息)?)"
     r"[^。!?！？；;]{0,32}"
-    r"(?:不实|不属实|仅为预测|系预测|为预测|否认|否定|撤回)"
+    r"(?:不实|不属实|仅为(?:预测|推测)|系(?:预测|推测)|"
+    r"为(?:预测|推测)|(?:只是|仅是|属于)"
+    r"[^。!?！？；;]{0,12}(?:预测|推测)|否认|否定|撤回)"
+    r")"
+)
+EARNINGS_FOLLOWUP_DIRECT_RETRACTION_PATTERN = re.compile(
+    r"(?:否认|否定|撤回)(?:了|过)?"
+    r"(?:上述|以上|该|此)(?:说法|表述|内容|消息)"
+)
+EARNINGS_FOLLOWUP_ASSERTION_CONFIRMED_PATTERN = re.compile(
+    r"(?:上述|以上|该|此)(?:说法|表述|内容|消息)"
+    r"[^，,。!?！？；;]{0,16}"
+    r"(?:(?:并未|未曾|没有)(?:被公司)?(?:否认|否定|撤回)"
+    r"|(?:仍然|依然)(?:成立|有效|属实))"
+)
+EARNINGS_FOLLOWUP_PASSIVE_RETRACTION_PATTERN = re.compile(
+    r"(?:但|却|随后|其后|后来)"
+    r"[^。!?！？；;]{0,12}"
+    r"(?:被(?:公司)?|遭(?:公司)?|受到(?:公司)?)"
+    r"(?:否认|否定|撤回)"
 )
 EARNINGS_HYPOTHETICAL_MARKERS = ("假设", "假定")
 STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES = (
     "原计划建设项目开工率不足",
+)
+STRICT_CONFIRMED_ACTUAL_OUTCOME_PHRASES = (
+    "整体收入未达预期",
+    "不断提升",
 )
 GENERIC_OBJECT_PREFIXES = (
     "相关",
@@ -156,6 +183,13 @@ CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN = re.compile(
     r"[^。!?！？]{0,40}?[，,]确认"
     r"(?:公司|本公司|[一-鿿A-Za-z0-9]{2,32}?)中标"
     r"《([^》]{2,60}?项目[^》]{0,30})》"
+    r"(?=$|[，,。.;；：:!?！？])"
+)
+CONFIRMED_DALONG_CONSTRUCTION_AWARD_PATTERN = re.compile(
+    r"关于(建筑施工)项目收到中标通知书并签订合同的公告"
+    r".{0,2400}?"
+    r"(?:20\d{2}年\d{1,2}月\d{1,2}日[，,])?"
+    r"大龙顺发收到《中标通知书》[，,]被确认为该项目中标人"
     r"(?=$|[，,。.;；：:!?！？])"
 )
 CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN = re.compile(
@@ -226,10 +260,69 @@ REGISTERED_NAMED_PRODUCT_INCOME_PATTERN = re.compile(
     r"(((?!(?:研发|试验|临床|开发|候选|预计|的))"
     r"[一-鿿A-Za-z0-9]){2,10}®)收入保持持续增长"
 )
+FIXED_SINGLE_TICKET_EXPRESS_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])"
+    r"报告期内公司单票(快递)服务收入2\.33元"
+    r"[，,]同比较大幅度上升"
+    r"(?=$|[，,。!?！？；;])"
+)
+NAMED_PRIMARY_FOOTWEAR_SALES_PRESSURE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])公司主营的(皮鞋)业务销售面临压力"
+    r"[，,]整体收入未达预期"
+    r"(?=$|[，,。!?！？；;])"
+)
+NAMED_CATERING_PRODUCT_SALES_GROWTH_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(餐饮)业务表现亮眼"
+    r"[，,]年宵品、端午粽销售均实现大幅增长"
+    r"(?=$|[，,。!?！？；;])"
+)
+NAMED_FIELD_VEHICLE_CUSTOMIZATION_COST_PRESSURE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:除此之外[，,])?在非美国市场[，,]"
+    r"(场地电动车)的市场需求较为分散且产品以定制化为主"
+    r"[，,]定制化业务对人员、研发及项目管理要求较高"
+    r"[，,]人工及管理成本上升"
+    r"[，,]从而也一定程度影响了公司盈利能力"
+    r"(?=$|[，,。!?！？；;])"
+)
+COMPANY_NAMED_INDUSTRY_FIELD_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])公司在"
+    r"(?!相关|所在|主营|主要|整体|新|核心|公司|市场|产品|业务)"
+    r"([一-鿿A-Za-z0-9]{2,20}?)行业领域取得了?显著成效[，,]"
+    r"整体收入相较于?20\d{2}年有所"
+    r"(?:提升|增长|下降|下滑)"
+)
+CONFIRMED_NAMED_PRODUCT_CAUSAL_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:报告期内[，,])?"
+    r"(?:[一二三四五六七八九十]+是)?公司持续迭代全线"
+    r"(?!相关|主要|整体|新|核心|各类|多款|产品)"
+    r"([一-鿿A-Za-z0-9]{2,20}?产品)[，,]"
+    r"[^。!?！？；;]{1,100}?驱动\1业务营收增长[，,]"
+    r"毛利水平同步提升"
+)
+CONFIRMED_REAL_ESTATE_SETTLEMENT_MARGIN_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:]|业绩变动原因说明)"
+    r"报告期内[，,]公司"
+    r"(房地产开发)业务结转的收入虽较上年同期上升[，,]"
+    r"但受结转收入的房地产项目毛利率降低的影响[，,]"
+    r"公司整体营业毛利率同比下降"
+)
+CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])但由于二手房价格出现了一定程度的下降"
+    r"[，,]对公司(经纪)业务的交易金额和佣金收入也产生了"
+    r"一定的负面影响"
+)
 STRICT_CONFIRMED_EARNINGS_PATTERNS = (
     CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
     CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
     REGISTERED_NAMED_PRODUCT_INCOME_PATTERN,
+    FIXED_SINGLE_TICKET_EXPRESS_REVENUE_PATTERN,
+    NAMED_PRIMARY_FOOTWEAR_SALES_PRESSURE_PATTERN,
+    NAMED_CATERING_PRODUCT_SALES_GROWTH_PATTERN,
+    NAMED_FIELD_VEHICLE_CUSTOMIZATION_COST_PRESSURE_PATTERN,
+    COMPANY_NAMED_INDUSTRY_FIELD_REVENUE_PATTERN,
+    CONFIRMED_NAMED_PRODUCT_CAUSAL_REVENUE_PATTERN,
+    CONFIRMED_REAL_ESTATE_SETTLEMENT_MARGIN_PATTERN,
+    CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN,
 )
 NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN = re.compile(
     r"(?:^|[，,。.;；：:()（）])"
@@ -259,6 +352,13 @@ NAMED_CORE_PRODUCT_ANAPHORA_PATTERN = re.compile(
     r"[^。!?！？]{0,8}?下滑[，,]对公司营业收入及"
     r"经营利润形成[^。!?！？]{0,8}?冲击"
 )
+OFFICIAL_METALS_PRODUCT_PRICE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:]|本期业绩变化的主要原因|"
+    r"业绩变动原因说明)"
+    r"(?:20\d{2}年(?:半年度|年度))?"
+    r"((?:有色金属|贵金属)(?:及(?:有色金属|贵金属))?)"
+    r"产品市场价格同比(?:上升|上涨|下降|下跌)"
+)
 OBJECT_PATTERNS = {
     OfficialBusinessCatalystKind.MAJOR_CONTRACT: (
         QUOTED_EPC_CONTRACT_PATTERN,
@@ -275,6 +375,7 @@ OBJECT_PATTERNS = {
         QUOTED_EPC_CONTRACT_PATTERN,
         CONFIRMED_QUOTED_PROJECT_AWARD_PATTERN,
         CONFIRMED_NOTICE_PROJECT_AWARD_PATTERN,
+        CONFIRMED_DALONG_CONSTRUCTION_AWARD_PATTERN,
         CONFIRMED_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
         CONFIRMED_NOTICE_UNQUOTED_UNION_PROJECT_AWARD_PATTERN,
         re.compile(
@@ -301,6 +402,7 @@ OBJECT_PATTERNS = {
         ),
     ),
     OfficialBusinessCatalystKind.EARNINGS_FORECAST: (
+        OFFICIAL_METALS_PRODUCT_PRICE_PATTERN,
         REASON_PREFIX_BUSINESS_METRIC_PATTERN,
         NAMED_PRODUCT_AVERAGE_PATTERN,
         NAMED_PRODUCT_DELIVERY_PATTERN,
@@ -308,6 +410,14 @@ OBJECT_PATTERNS = {
         CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
         CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
         REGISTERED_NAMED_PRODUCT_INCOME_PATTERN,
+        FIXED_SINGLE_TICKET_EXPRESS_REVENUE_PATTERN,
+        NAMED_PRIMARY_FOOTWEAR_SALES_PRESSURE_PATTERN,
+        NAMED_CATERING_PRODUCT_SALES_GROWTH_PATTERN,
+        NAMED_FIELD_VEHICLE_CUSTOMIZATION_COST_PRESSURE_PATTERN,
+        COMPANY_NAMED_INDUSTRY_FIELD_REVENUE_PATTERN,
+        CONFIRMED_NAMED_PRODUCT_CAUSAL_REVENUE_PATTERN,
+        CONFIRMED_REAL_ESTATE_SETTLEMENT_MARGIN_PATTERN,
+        CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN,
         NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN,
         NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN,
         NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN,
@@ -637,6 +747,20 @@ def _has_unconfirmed_earnings_context(value: str, match: re.Match) -> bool:
     return any(marker in context for marker in EARNINGS_UNCONFIRMED_MARKERS)
 
 
+def _followup_retracts_earnings_assertion(followup: str) -> bool:
+    if EARNINGS_FOLLOWUP_DIRECT_RETRACTION_PATTERN.search(followup):
+        return True
+    confirmed = EARNINGS_FOLLOWUP_ASSERTION_CONFIRMED_PATTERN.search(followup)
+    if confirmed is not None:
+        remaining = followup[:confirmed.start()] + followup[confirmed.end():]
+        return bool(
+            EARNINGS_FOLLOWUP_DIRECT_RETRACTION_PATTERN.search(remaining)
+            or EARNINGS_FOLLOWUP_RETRACTION_PATTERN.search(remaining)
+            or EARNINGS_FOLLOWUP_PASSIVE_RETRACTION_PATTERN.search(remaining)
+        )
+    return EARNINGS_FOLLOWUP_RETRACTION_PATTERN.search(followup) is not None
+
+
 def _has_unconfirmed_strict_earnings_context(
     value: str,
     match: re.Match,
@@ -653,6 +777,12 @@ def _has_unconfirmed_strict_earnings_context(
     matched_and_tail = value[
         match.start():min(sentence_end, match.end() + 48)
     ]
+    confirmed_matched_and_tail = matched_and_tail
+    for phrase in STRICT_CONFIRMED_ACTUAL_OUTCOME_PHRASES:
+        confirmed_matched_and_tail = confirmed_matched_and_tail.replace(
+            phrase,
+            "",
+        )
     followup_ends = tuple(
         position
         for marker in SENTENCE_END_MARKERS
@@ -689,12 +819,12 @@ def _has_unconfirmed_strict_earnings_context(
             )
         )
         or any(
-            marker in matched_and_tail
+            marker in confirmed_matched_and_tail
             for marker in EARNINGS_UNCONFIRMED_MARKERS
         )
-        or EARNINGS_ASSERTION_DENIAL_PATTERN.search(matched_and_tail)
+        or EARNINGS_ASSERTION_DENIAL_PATTERN.search(confirmed_matched_and_tail)
         is not None
-        or EARNINGS_FOLLOWUP_RETRACTION_PATTERN.search(followup) is not None
+        or _followup_retracts_earnings_assertion(followup)
     )
 
 

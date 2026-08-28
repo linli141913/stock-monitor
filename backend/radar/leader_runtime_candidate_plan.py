@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping as MappingABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -93,6 +93,8 @@ class LeaderRuntimeCandidatePlan:
     scanned_count: int = 0
     mapped_count: int = 0
     candidate_set_id: Optional[str] = None
+    parent_candidate_set_id: Optional[str] = None
+    derivation_policy_id: Optional[str] = None
     contract_id: str = LEADER_RUNTIME_CANDIDATE_PLAN_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -112,6 +114,8 @@ class LeaderRuntimeCandidatePlan:
             "quoteBatchId": self.quote_batch_id,
             "marketSourceContractId": self.market_source_contract_id,
             "candidateSetId": self.candidate_set_id,
+            "parentCandidateSetId": self.parent_candidate_set_id,
+            "derivationPolicyId": self.derivation_policy_id,
             "candidateCount": self.candidate_count,
             "scannedCount": self.scanned_count,
             "mappedCount": self.mapped_count,
@@ -147,6 +151,8 @@ def _candidate_set_id(
     as_of: datetime,
     items: Sequence[LeaderRuntimeCandidatePlanItem],
     market_source_contract_id: str,
+    parent_candidate_set_id: Optional[str] = None,
+    derivation_policy_id: Optional[str] = None,
 ) -> str:
     payload = {
         "contractId": LEADER_RUNTIME_CANDIDATE_PLAN_CONTRACT_ID,
@@ -171,6 +177,9 @@ def _candidate_set_id(
             for item in items
         ],
     }
+    if parent_candidate_set_id is not None:
+        payload["parentCandidateSetId"] = parent_candidate_set_id
+        payload["derivationPolicyId"] = derivation_policy_id
     digest = hashlib.sha256(
         json.dumps(
             payload,
@@ -193,6 +202,8 @@ def _result(
     mapped_count: int = 0,
     items: Sequence[LeaderRuntimeCandidatePlanItem] = (),
     market_source_contract_id: Optional[str] = None,
+    parent_candidate_set_id: Optional[str] = None,
+    derivation_policy_id: Optional[str] = None,
 ) -> LeaderRuntimeCandidatePlan:
     frozen_items = tuple(items)
     candidate_set_id = (
@@ -202,6 +213,8 @@ def _result(
             as_of=as_of,
             items=frozen_items,
             market_source_contract_id=market_source_contract_id,
+            parent_candidate_set_id=parent_candidate_set_id,
+            derivation_policy_id=derivation_policy_id,
         )
         if (
             status == LeaderRuntimeCandidatePlanStatus.READY
@@ -223,6 +236,8 @@ def _result(
         scanned_count=scanned_count,
         mapped_count=mapped_count,
         candidate_set_id=candidate_set_id,
+        parent_candidate_set_id=parent_candidate_set_id,
+        derivation_policy_id=derivation_policy_id,
     )
 
 
@@ -266,6 +281,19 @@ def is_leader_runtime_candidate_plan_valid(value: Any) -> bool:
         or not isinstance(value.items, tuple)
         or not value.items
         or not isinstance(value.gate_reasons, tuple)
+        or (
+            (value.parent_candidate_set_id is None)
+            != (value.derivation_policy_id is None)
+        )
+        or (
+            value.parent_candidate_set_id is not None
+            and (
+                not isinstance(value.parent_candidate_set_id, str)
+                or not value.parent_candidate_set_id.strip()
+                or not isinstance(value.derivation_policy_id, str)
+                or not value.derivation_policy_id.strip()
+            )
+        )
         or any(
             not isinstance(reason, str) or not reason
             for reason in value.gate_reasons
@@ -312,6 +340,69 @@ def is_leader_runtime_candidate_plan_valid(value: Any) -> bool:
         as_of=as_of,
         items=value.items,
         market_source_contract_id=value.market_source_contract_id,
+        parent_candidate_set_id=value.parent_candidate_set_id,
+        derivation_policy_id=value.derivation_policy_id,
+    )
+
+
+def derive_leader_runtime_candidate_plan_subset(
+    parent_plan: Any,
+    *,
+    symbols: Any,
+    derivation_policy_id: Any,
+) -> LeaderRuntimeCandidatePlan:
+    """从已验证的初筛计划派生有序子集，不改写来源身份。"""
+
+    if (
+        not is_leader_runtime_candidate_plan_valid(parent_plan)
+        or not isinstance(symbols, tuple)
+        or not symbols
+        or not isinstance(derivation_policy_id, str)
+        or not derivation_policy_id.strip()
+        or len(symbols) != len(set(symbols))
+        or any(
+            not isinstance(symbol, str)
+            or SYMBOL_PATTERN.fullmatch(symbol) is None
+            for symbol in symbols
+        )
+    ):
+        return _result(
+            status=LeaderRuntimeCandidatePlanStatus.BLOCKED,
+            as_of=None,
+            radar_run_id=None,
+            quote_batch_id=None,
+            reasons=("leader_candidate_subset_contract_unverified",),
+        )
+    by_symbol = {item.symbol: item for item in parent_plan.items}
+    if any(symbol not in by_symbol for symbol in symbols):
+        return _result(
+            status=LeaderRuntimeCandidatePlanStatus.BLOCKED,
+            as_of=parent_plan.as_of,
+            radar_run_id=parent_plan.radar_run_id,
+            quote_batch_id=parent_plan.quote_batch_id,
+            reasons=("leader_candidate_subset_scope_unverified",),
+            scanned_count=parent_plan.scanned_count,
+            mapped_count=parent_plan.mapped_count,
+            market_source_contract_id=(
+                parent_plan.market_source_contract_id
+            ),
+        )
+    items = tuple(
+        replace(by_symbol[symbol], index=index)
+        for index, symbol in enumerate(symbols)
+    )
+    return _result(
+        status=LeaderRuntimeCandidatePlanStatus.READY,
+        as_of=parent_plan.as_of,
+        radar_run_id=parent_plan.radar_run_id,
+        quote_batch_id=parent_plan.quote_batch_id,
+        reasons=parent_plan.gate_reasons,
+        scanned_count=parent_plan.scanned_count,
+        mapped_count=parent_plan.mapped_count,
+        items=items,
+        market_source_contract_id=parent_plan.market_source_contract_id,
+        parent_candidate_set_id=parent_plan.candidate_set_id,
+        derivation_policy_id=derivation_policy_id,
     )
 
 

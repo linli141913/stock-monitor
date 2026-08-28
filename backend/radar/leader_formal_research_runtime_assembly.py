@@ -396,13 +396,20 @@ def _risk_component(
     *,
     candidate_count: int,
     repository_failed: bool,
+    resolution: Optional[_ProviderResolution] = None,
 ) -> LeaderFormalResearchRuntimeComponent:
     admission = _admission_component(bridge, "risk")
     reasons = _dedupe((
         *bridge.reasons,
         *(admission.reasons if admission is not None else ()),
     ))
-    if repository_failed or REPOSITORY_UNAVAILABLE in reasons:
+    if resolution is not None and resolution.source_unverified:
+        status = LeaderFormalResearchRuntimeComponentStatus.SOURCE_UNVERIFIED
+        reasons = _dedupe((*resolution.reasons, *reasons))
+    elif resolution is not None and resolution.failed:
+        status = LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED
+        reasons = _dedupe((*resolution.reasons, *reasons))
+    elif repository_failed or REPOSITORY_UNAVAILABLE in reasons:
         status = LeaderFormalResearchRuntimeComponentStatus.SOURCE_FAILED
     elif (
         CHAIN_UNVERIFIED in reasons
@@ -454,6 +461,7 @@ def build_leader_formal_research_runtime_assembly(
     history_provider: Optional[Provider] = None,
     business_catalyst_provider: Optional[Provider] = None,
     tradability_provider: Optional[Provider] = None,
+    risk_provider: Optional[Provider] = None,
 ) -> LeaderFormalResearchRuntimeAssemblyResult:
     """只读调用五类来源并生成单一研究输入和脱敏健康证据。"""
 
@@ -488,6 +496,13 @@ def build_leader_formal_research_runtime_assembly(
         "tradability_bundle",
         "tradability",
     )
+    risk = _resolve_provider(
+        context,
+        risk_provider,
+        lambda _context, *, official_risk_batch: official_risk_batch,
+        "official_risk_batch",
+        "risk",
+    )
 
     repository_failed = False
     try:
@@ -508,6 +523,11 @@ def build_leader_formal_research_runtime_assembly(
                 tradability.bridge.tradability_admission_value
                 if tradability.bridge is not None
                 else None
+            ),
+            official_risk_batch=(
+                risk.bridge
+                if risk.configured and risk.bridge is not None
+                else (object() if risk.configured else None)
             ),
         )
     except Exception:
@@ -544,6 +564,7 @@ def build_leader_formal_research_runtime_assembly(
             formal_bridge,
             candidate_count=candidate_count,
             repository_failed=repository_failed,
+            resolution=(risk if risk.configured else None),
         ),
     )
     reasons = _dedupe(
@@ -565,14 +586,24 @@ def build_leader_formal_research_runtime_assembly(
         production_source_proofs=tuple(
             (
                 resolution.proof
-                for resolution in (sector, history, business, tradability)
+                for resolution in (
+                    sector,
+                    history,
+                    business,
+                    tradability,
+                    risk,
+                )
                 if resolution.proof is not None
             )
         ) + (
-            build_leader_formal_research_risk_source_proof(
-                context,
-                bridge=formal_bridge,
-            ),
+            ()
+            if risk.proof is not None
+            else (
+                build_leader_formal_research_risk_source_proof(
+                    context,
+                    bridge=formal_bridge,
+                ),
+            )
         ),
         formal_bridge=formal_bridge,
     )

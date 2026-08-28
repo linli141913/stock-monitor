@@ -17,6 +17,9 @@ from radar.leader_research_runtime_provider import (
     build_explicit_missing_leader_research_provider_input,
     is_leader_research_runtime_source_context_valid,
 )
+from radar.leader_research_readiness_runtime_batch import (
+    is_leader_research_runtime_risk_batch_valid,
+)
 from radar.leader_research_source_admission import (
     LeaderResearchRiskAdmissionBundle,
     LeaderResearchSourceAdmissionInput,
@@ -43,6 +46,10 @@ from radar.leader_risk_review_replay import (
 from radar.leader_risk_review_repository import (
     LeaderRiskReviewVersionChain,
 )
+from radar.leader_risk_official_deterministic import (
+    LeaderOfficialDeterministicRiskBatchResult,
+    is_leader_official_deterministic_risk_batch_valid,
+)
 from radar.leader_risk_supplemented_relation import (
     SupplementedRiskDocumentRelationInput,
     review_supplemented_risk_document_relation,
@@ -67,6 +74,9 @@ REPOSITORY_UNAVAILABLE = (
 CHAIN_UNVERIFIED = "leader_formal_research_bridge_chain_unverified"
 SOURCE_ADMISSION_UNVERIFIED = (
     "leader_formal_research_bridge_source_admission_unverified"
+)
+OFFICIAL_RISK_UNVERIFIED = (
+    "leader_formal_research_bridge_official_risk_unverified"
 )
 UTC = timezone.utc
 
@@ -115,6 +125,9 @@ class LeaderFormalResearchRuntimeBridgeResult:
         default_factory=tuple,
         repr=False,
     )
+    official_risk_batch: Optional[
+        LeaderOfficialDeterministicRiskBatchResult
+    ] = field(default=None, repr=False)
     contract_id: str = LEADER_FORMAL_RESEARCH_RUNTIME_BRIDGE_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -289,35 +302,60 @@ def build_leader_formal_research_runtime_bridge(
     history_entries: Any = None,
     business_review_batch: Any = None,
     tradability_bundle: Any = None,
+    official_risk_batch: Any = None,
 ) -> LeaderFormalResearchRuntimeBridgeResult:
-    """只读重放D8链，并通过统一来源准入生成当前计划输入。"""
+    """只读接纳官方确定性风险或重放D8，再生成当前计划输入。"""
 
     if not is_leader_research_runtime_source_context_valid(context):
         raise ValueError(CHAIN_UNVERIFIED)
     plan = context.candidate_plan
     symbols = tuple(item.symbol for item in plan.items)
     repository_reason: Optional[str] = None
-    try:
-        chains = repository.list_review_version_chains(symbols, plan.as_of)
+    accepted_official_batch = None
+    if official_risk_batch is not None:
         if (
-            not isinstance(chains, tuple)
-            or any(
-                not isinstance(chain, LeaderRiskReviewVersionChain)
-                or chain.symbol not in symbols
-                for chain in chains
+            is_leader_official_deterministic_risk_batch_valid(
+                official_risk_batch,
+                candidate_plan=plan,
             )
+            and official_risk_batch.ready_count == len(symbols)
+            and is_leader_research_runtime_risk_batch_valid(
+                official_risk_batch.projection_batch,
+                as_of=plan.as_of,
+                candidate_symbols=symbols,
+            )
+            and tuple(
+                item.symbol
+                for item in official_risk_batch.projection_batch.items
+            ) == symbols
         ):
-            repository_reason = CHAIN_UNVERIFIED
+            accepted_official_batch = official_risk_batch
             chains = ()
-    except (
-        AttributeError,
-        TypeError,
-        ValueError,
-        sqlite3.DatabaseError,
-        RepositoryStateError,
-    ):
-        repository_reason = REPOSITORY_UNAVAILABLE
-        chains = ()
+        else:
+            repository_reason = OFFICIAL_RISK_UNVERIFIED
+            chains = ()
+    else:
+        try:
+            chains = repository.list_review_version_chains(symbols, plan.as_of)
+            if (
+                not isinstance(chains, tuple)
+                or any(
+                    not isinstance(chain, LeaderRiskReviewVersionChain)
+                    or chain.symbol not in symbols
+                    for chain in chains
+                )
+            ):
+                repository_reason = CHAIN_UNVERIFIED
+                chains = ()
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            sqlite3.DatabaseError,
+            RepositoryStateError,
+        ):
+            repository_reason = REPOSITORY_UNAVAILABLE
+            chains = ()
 
     chains_by_symbol = {symbol: [] for symbol in symbols}
     for chain in chains:
@@ -332,6 +370,8 @@ def build_leader_formal_research_runtime_bridge(
         version_counts[symbol] = sum(
             len(chain.versions) for chain in symbol_chains
         )
+        if accepted_official_batch is not None:
+            continue
         if repository_reason is not None:
             entries.append(_missing_entry(symbol, (repository_reason,)))
             continue
@@ -362,9 +402,13 @@ def build_leader_formal_research_runtime_bridge(
             bundles=bundles,
         ))
 
-    risk_batch = build_leader_risk_projection_batch_from_bundles(
-        as_of=plan.as_of,
-        entries=tuple(entries),
+    risk_batch = (
+        accepted_official_batch.projection_batch
+        if accepted_official_batch is not None
+        else build_leader_risk_projection_batch_from_bundles(
+            as_of=plan.as_of,
+            entries=tuple(entries),
+        )
     )
     source_admission = build_leader_research_source_admission(
         LeaderResearchSourceAdmissionInput(
@@ -432,4 +476,5 @@ def build_leader_formal_research_runtime_bridge(
         source_admission=source_admission,
         provider_input=provider_input,
         review_chains=chains,
+        official_risk_batch=accepted_official_batch,
     )

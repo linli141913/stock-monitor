@@ -29,6 +29,9 @@ from radar.leader_research_runtime_provider import (
 from radar.leader_tradability_runtime_bridge import (
     build_leader_tradability_runtime_bridge,
 )
+from radar.leader_risk_official_deterministic import (
+    is_leader_official_deterministic_risk_batch_valid,
+)
 from radar.sector_rule_runtime_bridge import (
     build_sector_rule_runtime_bridge,
 )
@@ -64,6 +67,10 @@ class LeaderFormalResearchProductionSourceLoaders:
         default=None,
         repr=False,
     )
+    risk_loader: Optional[SourceLoader] = field(
+        default=None,
+        repr=False,
+    )
     contract_id: str = (
         LEADER_FORMAL_RESEARCH_PRODUCTION_SOURCE_LOADERS_CONTRACT_ID
     )
@@ -81,6 +88,7 @@ class LeaderFormalResearchProductionSourceLoaders:
                     ),
                     ("tradability", self.tradability_loader),
                     ("sector_rule", self.sector_rule_loader),
+                    ("risk", self.risk_loader),
                 )
                 if loader is not None
             ],
@@ -109,6 +117,21 @@ def _ready_symbols(
     ):
         return expected_symbols
     return ()
+
+
+def _build_official_risk_source_batch(
+    context: LeaderResearchRuntimeSourceContext,
+    *,
+    official_risk_batch: Any,
+):
+    if (
+        not is_leader_official_deterministic_risk_batch_valid(
+            official_risk_batch,
+            candidate_plan=context.candidate_plan,
+        )
+    ):
+        raise ValueError("risk_official_deterministic_source_unverified")
+    return official_risk_batch
 
 
 def _validated_collector(
@@ -205,5 +228,11 @@ def build_leader_formal_research_validated_provider_set(
             loader=loaders.sector_rule_loader,
             bridge_builder=build_sector_rule_runtime_bridge,
             value_key="source_batch",
+        ),
+        risk_collector=_validated_collector(
+            component_name="risk",
+            loader=loaders.risk_loader,
+            bridge_builder=_build_official_risk_source_batch,
+            value_key="official_risk_batch",
         ),
     )

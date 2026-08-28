@@ -591,6 +591,7 @@ class TencentQuoteSourceTests(unittest.TestCase):
         cases = (
             ("20.67", "31.00", "150000000"),
             ("33.85", "37.23", "110000000"),
+            ("126.18", "283.90", "225000000"),
         )
         for price, market_cap, total_shares in cases:
             with self.subTest(price=price):

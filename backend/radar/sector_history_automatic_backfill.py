@@ -45,6 +45,9 @@ class SectorHistoryAutomaticBackfillRequest:
     total_shares_by_symbol: Mapping[str, float] = field(repr=False)
     source_batch_ids: Tuple[str, ...]
     terminal_non_trading_symbols: Tuple[str, ...] = ()
+    verified_non_trading_dates_by_symbol: Mapping[
+        str, Tuple[date, ...]
+    ] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,10 @@ class SectorHistoryAutomaticBackfillResult:
     failure_count: int
     evidence_path: Optional[Path]
     backfill_result: Optional[SectorHistoryBackfillResult] = field(
+        default=None,
+        repr=False,
+    )
+    replay_query: Optional[SectorHistoryBackfillQuery] = field(
         default=None,
         repr=False,
     )
@@ -138,9 +145,9 @@ def _checkpoint_requires_refresh(
     series: HistoricalMinuteSeries,
     *,
     latest_completed_trade_date: date,
-    terminal_non_trading: bool,
+    latest_verified_non_trading: bool,
 ) -> bool:
-    if terminal_non_trading:
+    if latest_verified_non_trading:
         return False
     return not any(
         bar.occurred_at.date() == latest_completed_trade_date
@@ -271,6 +278,10 @@ def _analysis_payload(
                     item.relative_return_samples[-1].value
                     if item.relative_return_samples else None
                 ),
+                "comparableTime": (
+                    item.comparable_time.isoformat()
+                    if item.comparable_time is not None else None
+                ),
             }
             for item in value.sector_analyses
         ],
@@ -281,6 +292,7 @@ def run_sector_history_automatic_backfill(
     request: Any,
     *,
     artifact_dir: Path,
+    reuse_store_dir: Optional[Path] = None,
     minute_loader: Callable[
         [Tuple[str, ...], Tuple[date, ...]],
         SectorHistoryMinuteFrozenBatch,
@@ -307,11 +319,38 @@ def run_sector_history_automatic_backfill(
         for members in request.memberships_by_division.values()
         for symbol in members
     }))
+    verified_history_non_trading = (
+        request.verified_non_trading_dates_by_symbol
+    )
+    if (
+        not isinstance(verified_history_non_trading, Mapping)
+        or any(
+            symbol not in symbols
+            or not isinstance(values, tuple)
+            or len(values) != len(set(values))
+            or any(value not in request.expected_trade_dates for value in values)
+            for symbol, values in verified_history_non_trading.items()
+        )
+    ):
+        return SectorHistoryAutomaticBackfillResult(
+            status="error",
+            reasons=("sector_history_non_trading_evidence_unverified",),
+            requested_count=len(symbols),
+            fetched_count=0,
+            reused_count=0,
+            failure_count=len(symbols),
+            evidence_path=None,
+        )
     identity = _request_identity(request)
     root = (
         _published_checkpoint_root(artifact_dir)
         or artifact_dir / f"sector-history-{identity[:16]}"
     )
+    read_roots = [root]
+    if reuse_store_dir is not None:
+        external_root = _published_checkpoint_root(reuse_store_dir)
+        if external_root is not None and external_root != root:
+            read_roots.append(external_root)
     series_dir = root / "series"
     try:
         series_dir.mkdir(parents=True, exist_ok=True)
@@ -330,26 +369,35 @@ def run_sector_history_automatic_backfill(
     reused = 0
     missing = []
     for symbol in symbols:
-        path = series_dir / f"series-{symbol}.json"
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            series = _series_from_payload(
-                payload,
-                symbol=symbol,
-            )
-            if _checkpoint_requires_refresh(
-                series,
-                latest_completed_trade_date=request.expected_trade_dates[-1],
-                terminal_non_trading=(
-                    symbol in request.terminal_non_trading_symbols
-                ),
-            ):
-                raise ValueError("sector_history_checkpoint_update_required")
-            series_by_symbol[symbol] = series
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        series = None
+        for read_root in read_roots:
+            path = read_root / "series" / f"series-{symbol}.json"
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                candidate = _series_from_payload(
+                    payload,
+                    symbol=symbol,
+                )
+                if _checkpoint_requires_refresh(
+                    candidate,
+                    latest_completed_trade_date=(
+                        request.expected_trade_dates[-1]
+                    ),
+                    latest_verified_non_trading=(
+                        request.expected_trade_dates[-1]
+                        in verified_history_non_trading.get(symbol, ())
+                    ),
+                ):
+                    continue
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            series = candidate
+            break
+        if series is None:
             missing.append(symbol)
-        else:
-            reused += 1
+            continue
+        series_by_symbol[symbol] = series
+        reused += 1
 
     fetched = 0
     loader_failure_count = 0
@@ -400,8 +448,6 @@ def run_sector_history_automatic_backfill(
                 gaps.append(trade_day)
         if gaps:
             dates_to_verify[symbol] = tuple(gaps)
-    verified_trading = {}
-    verified_non_trading = {}
     presence_evidence = {
         "contractId": "radar-sector-trading-presence-v1",
         "sourceContractIds": [],
@@ -410,6 +456,9 @@ def run_sector_history_automatic_backfill(
         "returnedCount": 0,
         "failureCount": 0,
     }
+    verified_trading = {}
+    verified_non_trading = {}
+    presence_batches = []
     if dates_to_verify:
         try:
             presence = presence_loader(
@@ -424,13 +473,44 @@ def run_sector_history_automatic_backfill(
         except Exception:
             presence = None
         if type(presence) is HistoricalTradingPresenceBatch:
-            presence_evidence = dict(presence.to_evidence())
-            verified_trading = dict(
+            presence_batches.append(presence)
+            verified_trading.update(
                 presence.verified_trading_dates_by_symbol
             )
-            verified_non_trading = dict(
+            verified_non_trading.update(
                 presence.verified_non_trading_dates_by_symbol
             )
+    if presence_batches:
+        reason_counts = {}
+        for batch in presence_batches:
+            for reason, count in batch.failure_reason_counts.items():
+                reason_counts[reason] = reason_counts.get(reason, 0) + count
+        presence_evidence = {
+            "contractId": "radar-sector-trading-presence-v1",
+            "sourceContractIds": sorted({
+                contract
+                for batch in presence_batches
+                for contract in batch.source_contract_ids_by_symbol.values()
+            }),
+            "sourceStatus": (
+                "ready" if all(
+                    batch.source_status == "ready"
+                    and batch.failure_count == 0
+                    for batch in presence_batches
+                ) else "source_failed"
+            ),
+            "requestedCount": sum(
+                batch.requested_count for batch in presence_batches
+            ),
+            "returnedCount": sum(
+                len(batch.source_hashes_by_symbol)
+                for batch in presence_batches
+            ),
+            "failureCount": sum(
+                batch.failure_count for batch in presence_batches
+            ),
+            "failureReasonCounts": reason_counts,
+        }
 
     completed_at = (
         clock()
@@ -448,7 +528,7 @@ def run_sector_history_automatic_backfill(
         completed_at,
         *(series.fetched_at for series in series_by_symbol.values()),
     )
-    backfill = build_sector_history_backfill(SectorHistoryBackfillQuery(
+    replay_query = SectorHistoryBackfillQuery(
         radar_run_id=request.radar_run_id,
         as_of=effective_as_of,
         comparable_time=request.comparable_time,
@@ -460,7 +540,8 @@ def run_sector_history_automatic_backfill(
         source_batch_ids=request.source_batch_ids,
         verified_trading_dates_by_symbol=verified_trading,
         verified_non_trading_dates_by_symbol=verified_non_trading,
-    ))
+    )
+    backfill = build_sector_history_backfill(replay_query)
     failure_count = len(symbols) - len(series_by_symbol)
     if failure_count and loader_failure_count == 0:
         loader_failure_count = failure_count
@@ -501,4 +582,5 @@ def run_sector_history_automatic_backfill(
         failure_count=failure_count,
         evidence_path=evidence_path,
         backfill_result=backfill,
+        replay_query=replay_query,
     )

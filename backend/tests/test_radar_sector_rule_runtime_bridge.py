@@ -126,6 +126,36 @@ class SectorRuleRuntimeBridgeTests(unittest.TestCase):
         self.assertFalse(result.formal_usable)
         self.assertFalse(result.state_transition_allowed)
 
+    def test_unrelated_classification_gaps_do_not_block_bound_candidate_sector(self):
+        source_batch = self.source_batch()
+        candidate_sector = next(
+            sector
+            for sector in source_batch.feature_batch.sectors
+            if sector.division_code == self.plan.items[0].industry_code
+        )
+        self.assertTrue(candidate_sector.shadow_usable)
+        degraded_full_market_batch = source_batch.feature_batch.model_copy(
+            update={
+                "classification_mapping_coverage": 0.98,
+                "unconfirmed_stock_count": 89,
+                "shadow_usable": False,
+                "reasons": (
+                    "classification_source_degraded",
+                    "classification_mapping_incomplete",
+                    "sector_features_incomplete",
+                    "formal_use_not_approved",
+                ),
+            }
+        )
+
+        result = self.build(replace(
+            source_batch,
+            feature_batch=degraded_full_market_batch,
+        ))
+
+        self.assertEqual(result.status, SectorRuleRuntimeBridgeStatus.READY)
+        self.assertEqual(result.reasons, ())
+
     def test_missing_provider_stays_missing_without_placeholder_result(self):
         result = self.build()
 

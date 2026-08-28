@@ -26,6 +26,7 @@ from radar.contracts import (
     SectorFeatureBatch,
     SourceBatch,
     SourceHealthResult,
+    industry_classification_release_id,
 )
 from radar.migrations import (
     INDUSTRY_STORAGE_MIGRATION,
@@ -138,10 +139,7 @@ def _load_json(value: str, label: str, expected_type: Type) -> Any:
 
 
 def _industry_release_id(release: IndustryClassificationRelease) -> str:
-    return (
-        f"{release.classification_system}:{release.release_period}:"
-        f"{release.document_sha256[:16]}"
-    )
+    return industry_classification_release_id(release)
 
 
 def _symbols_checksum(symbols: Tuple[str, ...]) -> str:

@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 import hashlib
 import json
 import re
+import time
 from typing import Any, Callable, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -42,14 +43,22 @@ DEFAULT_WORKERS = 4
 REQUEST_ATTEMPTS = 2
 REQUEST_TIMEOUT_SECONDS = 5
 MAXIMUM_CLOCK_SKEW_SECONDS = 5
+MAXIMUM_RECOVERABLE_CLOCK_SKEW_SECONDS = 15
+CLOCK_SKEW_RETRY_EPSILON_SECONDS = 0.05
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _SYMBOL_PATTERN = re.compile(r"[036][0-9]{5}")
 
 
 class ExchangeOfficialSourceError(RuntimeError):
-    def __init__(self, reason_code: str) -> None:
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        retry_after_seconds: Optional[float] = None,
+    ) -> None:
         super().__init__(reason_code)
         self.reason_code = reason_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, repr=False)
@@ -172,11 +181,21 @@ def _validate_times(
         raise ExchangeOfficialSourceError(
             "exchange_official_trading_date_mismatch"
         )
-    if source_time > fetched_at + timedelta(
-        seconds=MAXIMUM_CLOCK_SKEW_SECONDS
-    ):
+    future_skew_seconds = (source_time - fetched_at).total_seconds()
+    if future_skew_seconds > MAXIMUM_CLOCK_SKEW_SECONDS:
+        retry_after_seconds = None
+        if (
+            future_skew_seconds
+            <= MAXIMUM_RECOVERABLE_CLOCK_SKEW_SECONDS
+        ):
+            retry_after_seconds = (
+                future_skew_seconds
+                - MAXIMUM_CLOCK_SKEW_SECONDS
+                + CLOCK_SKEW_RETRY_EPSILON_SECONDS
+            )
         raise ExchangeOfficialSourceError(
-            "exchange_official_source_time_in_future"
+            "exchange_official_source_time_in_future",
+            retry_after_seconds=retry_after_seconds,
         )
 
 
@@ -452,6 +471,12 @@ def collect_exchange_official_observations(
                 )
                 return
             except ExchangeOfficialSourceError as exc:
+                if (
+                    attempt + 1 < REQUEST_ATTEMPTS
+                    and exc.retry_after_seconds is not None
+                ):
+                    time.sleep(exc.retry_after_seconds)
+                    continue
                 errors[index] = ("source_unverified", exc.reason_code)
                 return
             except Exception:

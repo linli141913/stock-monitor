@@ -78,7 +78,7 @@ def _default_requester(query_symbol: str) -> Any:
         return response.json()
 
 
-def _default_sina_daily_requester(symbol: str) -> Tuple[date, ...]:
+def fetch_sina_historical_trading_dates(symbol: str) -> Tuple[date, ...]:
     import akshare as ak
 
     prefix = "sh" if symbol.startswith("6") else "sz"
@@ -100,6 +100,9 @@ def _default_sina_daily_requester(symbol: str) -> Tuple[date, ...]:
     if not result:
         raise ValueError("sina_trading_presence_rows_empty")
     return result
+
+
+_default_sina_daily_requester = fetch_sina_historical_trading_dates
 
 
 def _digest(payload: Any) -> str:

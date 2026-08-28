@@ -424,6 +424,7 @@ def _build_leader_research_single_pass(
         risk_candidate_projections_by_symbol=(
             provider_result.risk_projection_batch.projections_by_symbol
         ),
+        candidate_symbols=tuple(item.symbol for item in plan.items),
     )
     if not _assembly_matches_plan(assembly, plan):
         return _result(

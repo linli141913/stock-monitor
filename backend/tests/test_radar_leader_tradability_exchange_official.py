@@ -1,5 +1,6 @@
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from radar.leader_tradability_features import (
@@ -277,6 +278,97 @@ class ExchangeOfficialObservationTests(unittest.TestCase):
             tuple(item.symbol for item in result.observations),
             ("600000",),
         )
+
+    def test_batch_waits_for_bounded_future_time_then_retries_real_payload(
+        self,
+    ):
+        attempts = 0
+        payload = szse_payload()
+        payload["data"]["marketTime"] = "2026-08-18 11:30:11"
+        fetched_times = iter((
+            FETCHED_AT,
+            FETCHED_AT + timedelta(seconds=2.1),
+        ))
+        waits = []
+
+        def fetch(_item):
+            nonlocal attempts
+            attempts += 1
+            return payload
+
+        with patch("time.sleep", side_effect=waits.append):
+            result = collect_exchange_official_observations(
+                contexts=(context("000725", "szse"),),
+                trading_date=TRADING_DATE,
+                request_json=fetch,
+                clock=lambda: next(fetched_times),
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(attempts, 2)
+        self.assertEqual(len(waits), 1)
+        self.assertGreaterEqual(waits[0], 2.0)
+        self.assertLessEqual(waits[0], 2.1)
+        self.assertEqual(
+            result.observations[0].source_time,
+            datetime(2026, 8, 18, 11, 30, 11, tzinfo=SHANGHAI_TZ),
+        )
+
+    def test_batch_keeps_failing_closed_when_future_time_is_implausible(self):
+        attempts = 0
+        payload = szse_payload()
+        payload["data"]["marketTime"] = "2026-08-18 11:30:30"
+        waits = []
+
+        def fetch(_item):
+            nonlocal attempts
+            attempts += 1
+            return payload
+
+        with patch("time.sleep", side_effect=waits.append):
+            result = collect_exchange_official_observations(
+                contexts=(context("000725", "szse"),),
+                trading_date=TRADING_DATE,
+                request_json=fetch,
+                clock=lambda: FETCHED_AT,
+            )
+
+        self.assertEqual(result.status, "source_unverified")
+        self.assertEqual(
+            result.reasons,
+            ("exchange_official_source_time_in_future",),
+        )
+        self.assertEqual(attempts, 1)
+        self.assertEqual(waits, [])
+        self.assertEqual(result.observations, ())
+
+    def test_batch_keeps_failing_closed_when_bounded_retry_stays_future(self):
+        attempts = 0
+        payload = szse_payload()
+        payload["data"]["marketTime"] = "2026-08-18 11:30:11"
+        waits = []
+
+        def fetch(_item):
+            nonlocal attempts
+            attempts += 1
+            return payload
+
+        with patch("time.sleep", side_effect=waits.append):
+            result = collect_exchange_official_observations(
+                contexts=(context("000725", "szse"),),
+                trading_date=TRADING_DATE,
+                request_json=fetch,
+                clock=lambda: FETCHED_AT,
+            )
+
+        self.assertEqual(result.status, "source_unverified")
+        self.assertEqual(
+            result.reasons,
+            ("exchange_official_source_time_in_future",),
+        )
+        self.assertEqual(attempts, 2)
+        self.assertEqual(len(waits), 1)
+        self.assertEqual(result.observations, ())
 
     def test_batch_rejects_invalid_scope_without_requesting(self):
         calls = []

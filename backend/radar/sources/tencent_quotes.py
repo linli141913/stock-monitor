@@ -113,26 +113,33 @@ def _market_cap_cny(
         or total_shares is None
         or total_shares <= 0
         or currency != "CNY"
-        or (
-            abs(
-            raw_market_cap * MARKET_CAP_SCALE_TO_CNY
-            - price * total_shares
-            ) > MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
-            and not math.isclose(
-                abs(
-                    raw_market_cap * MARKET_CAP_SCALE_TO_CNY
-                    - price * total_shares
-                ),
-                MARKET_CAP_CROSSCHECK_TOLERANCE_CNY,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            )
+        or not market_cap_crosscheck_matches(
+            raw_market_cap * MARKET_CAP_SCALE_TO_CNY,
+            price * total_shares,
         )
     ):
         return None, UnitVerificationStatus.UNVERIFIED
     return (
         raw_market_cap * MARKET_CAP_SCALE_TO_CNY,
         UnitVerificationStatus.VERIFIED,
+    )
+
+
+def market_cap_crosscheck_matches(
+    scaled_market_cap_cny: float,
+    derived_market_cap_cny: float,
+) -> bool:
+    """仅容忍两位小数市值的半单位边界及浮点微误差。"""
+
+    difference = abs(scaled_market_cap_cny - derived_market_cap_cny)
+    return bool(
+        difference <= MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
+        or math.isclose(
+            difference,
+            MARKET_CAP_CROSSCHECK_TOLERANCE_CNY,
+            rel_tol=0.0,
+            abs_tol=1e-3,
+        )
     )
 
 

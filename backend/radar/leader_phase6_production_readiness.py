@@ -1,4 +1,4 @@
-"""阶段6四源、D8风险证据与正式门的单入口只读验收。"""
+"""阶段6四源、官方确定性/人工风险证据与正式门的单入口只读验收。"""
 
 from __future__ import annotations
 
@@ -35,6 +35,10 @@ from radar.leader_tradability_production_collector import (
     LeaderTradabilityProductionFrozenBatch,
     build_leader_tradability_production_loader,
 )
+from radar.leader_risk_official_deterministic import (
+    LeaderOfficialDeterministicRiskFrozenBatch,
+    build_leader_official_deterministic_risk_loader,
+)
 from radar.sector_rule_production_collector import (
     SectorRuleProductionFrozenBatch,
     build_sector_rule_production_loader,
@@ -63,6 +67,7 @@ class LeaderPhase6ProductionFrozenInputs:
     business_catalyst: Any = field(repr=False)
     tradability: Any = field(repr=False)
     sector_rule: Any = field(repr=False)
+    risk: Any = field(default=None, repr=False)
     contract_id: str = LEADER_PHASE6_PRODUCTION_FROZEN_INPUTS_CONTRACT_ID
 
 
@@ -101,6 +106,11 @@ def _inputs_valid(value: Any) -> bool:
         and type(value.tradability)
         is LeaderTradabilityProductionFrozenBatch
         and type(value.sector_rule) is SectorRuleProductionFrozenBatch
+        and (
+            value.risk is None
+            or type(value.risk)
+            is LeaderOfficialDeterministicRiskFrozenBatch
+        )
     )
 
 
@@ -114,7 +124,7 @@ def build_leader_phase6_production_readiness(
         SectorThresholdApprovalLoadResult,
     ] = bind_latest_sector_threshold_approval,
 ) -> LeaderPhase6ProductionReadinessResult:
-    """一次重放四源和D8，再执行现有五源总装与正式门验收。"""
+    """一次重放四源和风险证据，再执行现有五源总装与正式门验收。"""
 
     if (
         not is_leader_research_runtime_source_context_valid(context)
@@ -140,6 +150,13 @@ def build_leader_phase6_production_readiness(
                     sector_threshold_approval_binder
                 ),
             ),
+            risk_loader=(
+                build_leader_official_deterministic_risk_loader(
+                    frozen_inputs.risk
+                )
+                if frozen_inputs.risk is not None
+                else None
+            ),
         )
     )
     assembly = build_leader_formal_research_runtime_assembly(
@@ -149,6 +166,11 @@ def build_leader_phase6_production_readiness(
         history_provider=providers.history_provider,
         business_catalyst_provider=providers.business_catalyst_provider,
         tradability_provider=providers.tradability_provider,
+        risk_provider=(
+            providers.risk_provider
+            if frozen_inputs.risk is not None
+            else None
+        ),
     )
     provenance = build_leader_formal_research_source_provenance_from_assembly(
         assembly

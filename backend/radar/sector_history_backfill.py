@@ -147,6 +147,7 @@ class SectorHistoricalAnalysis:
     persistence_ratio_samples: Tuple[HistoricalValue, ...]
     latest_turnover_ratio_20d: Optional[float]
     latest_persistence_positive_ratio_5d: float
+    comparable_time: Optional[time] = None
 
 
 @dataclass(frozen=True)
@@ -789,6 +790,7 @@ def build_sector_history_backfill(
             latest_persistence_positive_ratio_5d=(
                 persistence_ratios[-1].value
             ),
+            comparable_time=query.comparable_time,
         ))
         coverage_rows.append(SectorHistoryCoverage(
             division_code=division_code,

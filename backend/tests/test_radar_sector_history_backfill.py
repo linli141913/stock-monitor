@@ -421,6 +421,26 @@ class SectorHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(batch.failure_reason_counts, {"rate_limited": 1})
         self.assertNotIn("secret response body", repr(batch.to_evidence()))
 
+    def test_sina_nonstandard_456_is_classified_as_rate_limited(self):
+        response = requests.Response()
+        response.status_code = 456
+
+        def requester(_symbol):
+            raise requests.HTTPError(
+                "private limit page",
+                response=response,
+            )
+
+        batch = fetch_sector_history_minute_series_batch(
+            ("000001",),
+            (date(2026, 8, 20),),
+            requester=requester,
+            clock=lambda: AS_OF,
+        )
+
+        self.assertEqual(batch.failure_reason_counts, {"rate_limited": 1})
+        self.assertNotIn("private limit page", repr(batch.to_evidence()))
+
     def test_default_collector_path_can_freeze_sina_fallback_contract(self):
         batch = fetch_sector_history_minute_series_batch(
             ("000001",),

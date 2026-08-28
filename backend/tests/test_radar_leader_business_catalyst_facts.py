@@ -121,6 +121,188 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
             ("商品代鸡苗", "鸡肉", "水产加工"),
         )
 
+    def test_company_named_industry_field_revenue_extracts_exact_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明。公司在智慧交通行业领域取得了"
+                "显著成效，整体收入相较于2024年有所提升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("智慧交通",))
+
+    def test_confirmed_named_product_causal_revenue_extracts_exact_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、本期业绩预盈的主要原因。"
+                "报告期内，公司业绩预盈的主要原因如下：一是公司"
+                "持续迭代全线互联网产品，"
+                "通过功能升级与精细化运营，不断提升用户体验，"
+                "驱动互联网产品业务营收增长，毛利水平同步提升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("互联网",))
+
+    def test_named_product_causal_revenue_pattern_fails_closed(self):
+        cases = (
+            "公司计划持续迭代全线互联网产品，驱动互联网产品业务"
+            "营收增长，毛利水平同步提升。",
+            "公司持续迭代全线互联网产品，驱动数字安全业务营收增长，"
+            "毛利水平同步提升。",
+            "公司持续迭代全线相关产品，驱动相关产品业务营收增长，"
+            "毛利水平同步提升。",
+            "公司持续迭代全线互联网产品，提升用户体验。"
+            "互联网产品业务营收增长，毛利水平同步提升。",
+            "公司持续迭代全线互联网产品，驱动互联网产品业务"
+            "营收增长，毛利水平同步提升。公司随后否认上述说法。",
+            "其中，非学历培训业务预计净利润为31000万元至45000万元。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_confirmed_real_estate_settlement_metrics_extract_exact_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "2三、业绩变动原因说明报告期内，公司房地产开发业务"
+                "结转的收入虽较上年同期上升，但受结转收入的房地产项目"
+                "毛利率降低的影响，公司整体营业毛利率同比下降。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("房地产开发",))
+
+    def test_real_estate_settlement_pattern_fails_closed(self):
+        cases = (
+            "公司预计报告期内房地产开发业务结转收入上升，"
+            "房地产项目毛利率下降。",
+            "报告期内，行业房地产开发业务结转的收入虽上升，"
+            "但项目毛利率降低。",
+            "报告期内，公司房地产开发业务结转的收入虽较上年"
+            "同期上升，但公司未披露项目毛利率变化。",
+            "报告期内，公司房地产开发业务结转的收入虽较上年"
+            "同期上升，但受结转收入的房地产项目毛利率降低的影响，"
+            "公司整体营业毛利率同比下降。公司随后否认上述说法。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_confirmed_brokerage_transaction_impact_extracts_exact_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "此外，2025年公司在业务所在的核心城市市场占有率继续"
+                "保持稳定，但由于二手房价格出现了一定程度的下降，"
+                "对公司经纪业务的交易金额和佣金收入也产生了一定的负面影响。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("经纪",))
+
+    def test_brokerage_transaction_impact_pattern_fails_closed(self):
+        cases = (
+            "公司预计，但由于二手房价格出现了一定程度的下降，"
+            "对公司经纪业务的交易金额和佣金收入也产生了一定的"
+            "负面影响。",
+            "但由于二手房价格出现了一定程度的下降，对行业经纪业务"
+            "的交易金额和佣金收入产生负面影响。",
+            "但由于二手房价格出现了一定程度的下降，"
+            "公司经纪业务继续开展。",
+            "但由于二手房价格出现了一定程度的下降，"
+            "对公司经纪业务的交易金额和佣金收入也产生了一定的"
+            "负面影响。公司随后否认上述说法。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_named_industry_field_revenue_requires_company_actual_outcome(self):
+        cases = (
+            "智慧交通行业领域整体收入相较于2024年有所提升。",
+            "公司所在智慧交通行业领域整体收入相较于2024年有所提升。",
+            "公司在智慧交通行业领域取得了显著成效。",
+            "公司在智慧交通行业领域取得了显著成效，行业整体收入提升。",
+            "公司在智慧交通行业领域取得了显著成效，整体收入预计提升。",
+            "预计公司在智慧交通行业领域取得显著成效，整体收入相较于"
+            "2024年有所提升。",
+            "公司在相关行业领域取得了显著成效，整体收入相较于2024年"
+            "有所提升。",
+            "公司在智慧交通行业领域取得了显著成效，整体收入相较于"
+            "2024年有所提升。公司随后否认上述说法。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_official_metals_price_reason_extracts_atomic_objects(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、本期业绩变化的主要原因2026年半年度有色金属及"
+                "贵金属产品市场价格同比上升，公司毛利率同比上升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("有色金属", "贵金属"))
+
     def test_earnings_metric_objects_strip_structural_prefixes(self):
         result = extract_official_business_catalyst_facts(
             document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
@@ -202,6 +384,221 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
 
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("曼海欣®",))
+
+    def test_fixed_single_ticket_express_revenue_extracts_express_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "一、本期业绩预计情况：预计净利润同比增长。"
+                "三、业绩变动原因说明。在此背景下，公司积极调整"
+                "经营策略，优化货品结构，提高运营效率，保障末端权益，"
+                "报告期内公司单票快递服务收入2.33元，同比较大幅度上升，"
+                "整体带动公司实现归属于上市公司股东扣除非经常性"
+                "损益后的净利润同比增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("快递",))
+
+    def test_fixed_single_ticket_express_revenue_pattern_fails_closed(self):
+        cases = (
+            "自2025年8月起，快递行业价格得到理性回升。",
+            "报告期内快递行业单票服务收入2.33元，同比较大幅度上升。",
+            "报告期内单票快递服务收入2.33元，同比较大幅度上升。",
+            "报告期内公司单票服务收入2.33元，同比较大幅度上升。",
+            "报告期内公司单票快递物流服务收入2.33元，同比较大幅度上升。",
+            "报告期内公司单票快递服务成本2.33元，同比较大幅度上升。",
+            "报告期内公司单票快递服务收入预计2.33元，"
+            "同比较大幅度上升。",
+            "预计报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。",
+            "报告期内公司单票快递服务收入2.34元，同比较大幅度上升。",
+            "报告期内公司单票快递服务收入2.33元，同比上升。",
+            "报告期内公司单票快递服务收入2.33元。同比较大幅度上升。",
+            "公司否认：报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升仅为预测。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。上述说法不实。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。对此，公司予以否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该消息已被公司否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司已撤回上述表述。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。以上仅为推测。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司对此予以否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司予以否认该消息。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司撤回上述表述。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。对此消息，公司表示不实。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司否认了上述说法。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司明确否认上述说法。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司表示上述消息不属实。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司撤回了上述表述。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司已正式撤回上述表述。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司对此说法予以否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。对此，公司回应称该消息不属实。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该消息只是未经证实的市场推测。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该说法属于预测。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该内容只是推测。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该说法仍然成立，但该表述随后"
+            "被公司否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该说法并未被公司否认，随后却被撤回。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_unrelated_followup_denial_does_not_retract_express_revenue(self):
+        cases = (
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司已否认其他市场传闻，"
+            "上述经营事实不受影响。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。公司随后否认外界猜测，"
+            "该表述与本项收入无关。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。上述经营事实仍然有效且公司"
+            "否认其他市场传闻。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。该说法并未被公司否认。",
+            "报告期内公司单票快递服务收入2.33元，"
+            "同比较大幅度上升。上述说法仍然成立，公司否认"
+            "其他市场传闻。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.READY,
+                )
+                self.assertEqual(result.business_terms, ("快递",))
+
+    def test_named_footwear_sales_pressure_extracts_footwear_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、本期业绩变化的主要原因。报告期内，受行业竞争持续加剧、"
+                "市场有效需求疲软等因素影响，公司主营的皮鞋业务销售面临压力，"
+                "整体收入未达预期。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("皮鞋",))
+
+    def test_named_catering_product_sales_growth_extracts_catering_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "餐饮业务表现亮眼，年宵品、端午粽销售均实现大幅增长，"
+                "烘焙产业稳步落地。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("餐饮",))
+
+    def test_named_field_vehicle_cost_pressure_extracts_field_vehicle_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "除此之外，在非美国市场，场地电动车的市场需求较为分散且产品"
+                "以定制化为主，定制化业务对人员、研发及项目管理要求较高，"
+                "人工及管理成本上升，从而也一定程度影响了公司盈利能力。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("场地电动车",))
+
+    def test_named_operating_fact_patterns_fail_closed(self):
+        cases = (
+            "行业主营的皮鞋业务销售面临压力，整体收入未达预期。",
+            "公司主营的皮鞋业务销售预计面临压力，整体收入未达预期。",
+            "公司主营的皮鞋业务销售未面临压力，整体收入未达预期。",
+            "公司主营的皮鞋业务销售面临压力，整体收入达到预期。",
+            "公司主营的皮鞋业务销售面临压力。整体收入未达预期。",
+            "公司主营的皮鞋业务销售面临压力，整体收入未达预期。上述说法不实。",
+            "餐饮行业表现亮眼，年宵品、端午粽销售均实现大幅增长。",
+            "餐饮业务表现亮眼，产品销售均实现大幅增长。",
+            "餐饮业务表现亮眼，年宵品销售实现大幅增长。",
+            "餐饮业务表现亮眼，年宵品、端午粽销售预计实现大幅增长。",
+            "餐饮业务表现亮眼，年宵品、端午粽销售未实现大幅增长。",
+            "餐饮业务表现亮眼，年宵品、端午粽销售均实现大幅增长。以上仅为推测。",
+            "在非美国市场，电动车的市场需求较为分散且产品以定制化为主，"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本上升，"
+            "从而也一定程度影响了公司盈利能力。",
+            "在非美国市场，场地电动车的市场需求预计较为分散且产品以定制化为主，"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本上升，"
+            "从而也一定程度影响了公司盈利能力。",
+            "在非美国市场，场地电动车的市场需求较为分散且产品以定制化为主。"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本上升，"
+            "从而也一定程度影响了公司盈利能力。",
+            "在非美国市场，场地电动车的市场需求较为分散且产品以定制化为主，"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本下降，"
+            "从而也一定程度影响了公司盈利能力。",
+            "在非美国市场，场地电动车的市场需求较为分散且产品以定制化为主，"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本上升，"
+            "但并未影响公司盈利能力。",
+            "在非美国市场，场地电动车的市场需求较为分散且产品以定制化为主，"
+            "定制化业务对人员、研发及项目管理要求较高，人工及管理成本上升，"
+            "从而也一定程度影响了公司盈利能力。公司撤回上述表述。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
 
     def test_new_named_margin_and_registered_product_patterns_fail_closed(self):
         cases = (
@@ -1012,6 +1409,68 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
             result.business_terms,
             ("涪陵高新区新能源汽车轻量化零部件厂房及智能产线项目(一期)工程总承包",),
         )
+
+    def test_named_construction_notice_and_contract_extracts_construction_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content(
+                "北京市大龙伟业房地产开发股份有限公司关于建筑施工项目收到"
+                "中标通知书并签订合同的公告。重要内容提示：《建设工程施工合同》，"
+                "合同金额为人民币762,685,875.42元。风险提示：如遇政策、市场、"
+                "环境等不可预计因素，可能会导致合同无法如期履行。"
+                "2026年1月15日，大龙顺发收到《中标通知书》，被确认为该项目中标人。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("建筑施工",))
+
+    def test_named_construction_notice_and_contract_requires_final_same_page_confirmation(self):
+        cases = (
+            "关于建筑施工项目预中标公示的提示性公告。"
+            "大龙顺发为该项目的第一中标候选人。",
+            "关于建筑施工项目收到中标通知书并拟签订合同的公告。"
+            "大龙顺发收到《中标通知书》，被确认为该项目中标人。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。"
+            "大龙顺发拟收到《中标通知书》，被确认为该项目中标人。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。"
+            "大龙顺发未收到《中标通知书》，被确认为该项目中标人。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。"
+            "大龙顺发收到《中标通知书》，被确认为该项目中标候选人。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。"
+            "大龙顺发能否获得《中标通知书》尚存在不确定性。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。"
+            "另一公司收到《中标通知书》，被确认为该项目中标人。",
+            "关于施工项目收到中标通知书并签订合同的公告。"
+            "大龙顺发收到《中标通知书》，被确认为该项目中标人。",
+            "关于建筑施工项目收到中标通知书并签订合同的公告。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+        split_pages = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.PROJECT_AWARD),
+            content(
+                "关于建筑施工项目收到中标通知书并签订合同的公告。",
+                "大龙顺发收到《中标通知书》，被确认为该项目中标人。",
+            ),
+        )
+        self.assertEqual(
+            split_pages.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(split_pages.business_terms, ())
 
     def test_incomplete_or_uncertain_notice_award_remains_unverified(self):
         cases = (

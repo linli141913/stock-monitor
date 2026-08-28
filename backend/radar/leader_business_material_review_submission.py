@@ -294,32 +294,40 @@ def _source_packet_payload(
     candidate_plan: LeaderRuntimeCandidatePlan,
     review_queue: LeaderBusinessMaterialReviewQueue,
 ) -> Mapping[str, object]:
+    candidate_plan_payload = {
+        "status": candidate_plan.status.value,
+        "asOf": candidate_plan.as_of.isoformat(),
+        "radarRunId": candidate_plan.radar_run_id,
+        "quoteBatchId": candidate_plan.quote_batch_id,
+        "marketSourceContractId": candidate_plan.market_source_contract_id,
+        "scannedCount": candidate_plan.scanned_count,
+        "mappedCount": candidate_plan.mapped_count,
+        "candidateSetId": candidate_plan.candidate_set_id,
+        "items": [
+            {
+                "index": item.index,
+                "symbol": item.symbol,
+                "asOf": item.as_of.isoformat(),
+                "industryCode": item.industry_code,
+                "industryName": item.industry_name,
+                "industryReleaseId": item.industry_release_id,
+                "withinIndustryRank": item.within_industry_rank,
+                "quoteSourceContractId": item.quote_source_contract_id,
+                "sectorSourceContractId": item.sector_source_contract_id,
+                "contractId": item.contract_id,
+            }
+            for item in candidate_plan.items
+        ],
+    }
+    if candidate_plan.parent_candidate_set_id is not None:
+        candidate_plan_payload.update({
+            "parentCandidateSetId": (
+                candidate_plan.parent_candidate_set_id
+            ),
+            "derivationPolicyId": candidate_plan.derivation_policy_id,
+        })
     return {
-        "candidatePlan": {
-            "status": candidate_plan.status.value,
-            "asOf": candidate_plan.as_of.isoformat(),
-            "radarRunId": candidate_plan.radar_run_id,
-            "quoteBatchId": candidate_plan.quote_batch_id,
-            "marketSourceContractId": candidate_plan.market_source_contract_id,
-            "scannedCount": candidate_plan.scanned_count,
-            "mappedCount": candidate_plan.mapped_count,
-            "candidateSetId": candidate_plan.candidate_set_id,
-            "items": [
-                {
-                    "index": item.index,
-                    "symbol": item.symbol,
-                    "asOf": item.as_of.isoformat(),
-                    "industryCode": item.industry_code,
-                    "industryName": item.industry_name,
-                    "industryReleaseId": item.industry_release_id,
-                    "withinIndustryRank": item.within_industry_rank,
-                    "quoteSourceContractId": item.quote_source_contract_id,
-                    "sectorSourceContractId": item.sector_source_contract_id,
-                    "contractId": item.contract_id,
-                }
-                for item in candidate_plan.items
-            ],
-        },
+        "candidatePlan": candidate_plan_payload,
         "reviewQueue": {
             "status": review_queue.status.value,
             "candidatePlanId": review_queue.candidate_plan_id,
@@ -407,13 +415,20 @@ def load_leader_business_material_review_source_packet(
             raise ValueError
         raw_plan = payload["candidatePlan"]
         raw_queue = payload["reviewQueue"]
+        base_plan_keys = {
+            "status", "asOf", "radarRunId", "quoteBatchId",
+            "marketSourceContractId", "scannedCount", "mappedCount",
+            "candidateSetId", "items",
+        }
+        derived_plan_keys = {
+            "parentCandidateSetId", "derivationPolicyId",
+        }
         if (
             not isinstance(raw_plan, Mapping)
             or not isinstance(raw_queue, Mapping)
-            or set(raw_plan) != {
-                "status", "asOf", "radarRunId", "quoteBatchId",
-                "marketSourceContractId", "scannedCount", "mappedCount",
-                "candidateSetId", "items",
+            or frozenset(raw_plan) not in {
+                frozenset(base_plan_keys),
+                frozenset(base_plan_keys | derived_plan_keys),
             }
             or set(raw_queue) != {
                 "status", "candidatePlanId", "candidateCount", "reasons",
@@ -461,6 +476,10 @@ def load_leader_business_material_review_source_packet(
             scanned_count=raw_plan["scannedCount"],
             mapped_count=raw_plan["mappedCount"],
             candidate_set_id=raw_plan["candidateSetId"],
+            parent_candidate_set_id=raw_plan.get(
+                "parentCandidateSetId"
+            ),
+            derivation_policy_id=raw_plan.get("derivationPolicyId"),
         )
         queue_items = []
         for raw in raw_queue["items"]:

@@ -1,6 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from radar.contracts import (
     IndustryClassificationRecord,
@@ -20,6 +20,66 @@ from radar.contracts import (
     UnitVerificationStatus,
 )
 from radar.source_health import quote_item_time_reasons
+
+
+def build_sector_feature_runtime_rows(
+    batch: SectorFeatureBatch,
+    *,
+    industry_release_id: str,
+) -> Tuple[Mapping[str, Any], ...]:
+    """把内存行业特征转成与历史仓读模型同形的运行时行。"""
+    if not isinstance(industry_release_id, str) or not industry_release_id.strip():
+        raise ValueError("industry_release_id必须为非空字符串")
+    return tuple({
+        "radarRunId": batch.radar_run_id,
+        "industryReleaseId": industry_release_id,
+        "classificationBatchId": batch.classification_batch_id,
+        "quoteBatchId": batch.quote_batch_id,
+        "categoryCode": sector.category_code,
+        "categoryName": sector.category_name,
+        "divisionCode": sector.division_code,
+        "divisionName": sector.division_name,
+        "asOf": batch.as_of,
+        "sourceTime": batch.source_time,
+        "fetchedAt": batch.fetched_at,
+        "classificationMappingCoverage": (
+            batch.classification_mapping_coverage
+        ),
+        "mappedConstituentCount": batch.mapped_constituent_count,
+        "unconfirmedStockCount": batch.unconfirmed_stock_count,
+        "expectedCount": sector.completeness.expected_count,
+        "returnedCount": sector.completeness.returned_count,
+        "freshCount": sector.completeness.fresh_count,
+        "validReturnCount": sector.completeness.valid_return_count,
+        "validMarketCapCount": (
+            sector.completeness.valid_market_cap_count
+        ),
+        "validTurnoverCount": sector.completeness.valid_turnover_count,
+        "rowCoverage": sector.completeness.row_coverage,
+        "requiredFieldCoverage": dict(
+            sector.completeness.required_field_coverage
+        ),
+        "isComplete": sector.completeness.is_complete,
+        "equalReturn": sector.returns.equal_return.raw_value,
+        "capWeightedReturn": sector.returns.cap_weighted_return.raw_value,
+        "exTopReturn": sector.returns.ex_top_return.raw_value,
+        "topContributorSymbol": sector.returns.top_contributor_symbol,
+        "topContributionPercentPoints": (
+            sector.returns.top_contribution_percent_points
+        ),
+        "marketCapBasis": sector.returns.market_cap_basis,
+        "marketCapUnitStatus": sector.returns.market_cap_unit_status.value,
+        "advancers": sector.breadth.advancers,
+        "decliners": sector.breadth.decliners,
+        "flat": sector.breadth.flat,
+        "unavailable": sector.breadth.unavailable,
+        "upRatio": sector.breadth.up_ratio.raw_value,
+        "turnoverRawValue": sector.turnover.raw_value,
+        "turnoverContributingCount": sector.turnover.contributing_count,
+        "turnoverUnitStatus": sector.turnover.unit_status.value,
+        "shadowUsable": sector.shadow_usable,
+        "reasons": tuple(sector.reasons),
+    } for sector in batch.sectors if sector.shadow_usable)
 
 
 def _normalize_universe(values: Iterable[str], label: str) -> Tuple[str, ...]:

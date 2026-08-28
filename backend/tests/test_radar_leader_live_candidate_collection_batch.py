@@ -1,9 +1,11 @@
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from radar.contracts import (
     IndustryClassificationCompleteness,
+    IndustryClassificationGap,
     IndustryClassificationRecord,
     IndustryClassificationRelease,
     IndustryClassificationSnapshot,
@@ -16,6 +18,7 @@ from radar.contracts import (
     SecurityMasterRecord,
     SourceBatch,
     SourceStatus,
+    UnitVerificationStatus,
 )
 from radar.leader_live_candidate_collection_batch import (
     LeaderLiveCandidateCollectionRequest,
@@ -259,6 +262,80 @@ class LeaderLiveCandidateCollectionBatchTests(unittest.TestCase):
             classification_release_loader=classification_release_source,
         )
 
+    def sources_with_singleton(self):
+        base = self.sources()
+        singleton_symbol = "300021"
+
+        def security_loader(run_id, batch_id, as_of):
+            items = [
+                _security("000001"),
+                _security("000002"),
+                _security(singleton_symbol),
+            ]
+            return SourceBatch(
+                meta=_meta(
+                    run_id,
+                    batch_id,
+                    "official_exchange_security_master",
+                    as_of,
+                    len(items),
+                ),
+                items=items,
+            )
+
+        def classification_loader(
+            run_id,
+            batch_id,
+            as_of,
+            records=None,
+            **kwargs,
+        ):
+            del records
+            snapshot = _classification(
+                run_id,
+                batch_id,
+                as_of,
+                first_observed_at=(
+                    kwargs.get("first_observed_at") or as_of
+                ),
+            )
+            singleton = snapshot.records[0].model_copy(update={
+                "source_symbol": singleton_symbol,
+                "source_name": f"证券{singleton_symbol}",
+                "security_identity": singleton_symbol,
+                "division_code": "02",
+                "division_name": "林业",
+            })
+            all_records = [*snapshot.records, singleton]
+            return snapshot.model_copy(update={
+                "meta": _meta(
+                    run_id,
+                    batch_id,
+                    "capco_industry_classification",
+                    as_of,
+                    len(all_records),
+                ),
+                "release": snapshot.release.model_copy(update={
+                    "source_record_count": len(all_records),
+                    "unique_source_symbol_count": len(all_records),
+                }),
+                "records": all_records,
+                "completeness": snapshot.completeness.model_copy(update={
+                    "source_record_count": len(all_records),
+                    "unique_source_symbol_count": len(all_records),
+                    "current_master_count": len(all_records),
+                    "mapped_count": len(all_records),
+                }),
+            })
+
+        return LeaderLiveCandidateCollectionSources(
+            security_master_loader=security_loader,
+            classification_loader=classification_loader,
+            quote_loader=base.quote_loader,
+            index_loader=base.index_loader,
+            classification_release_loader=base.classification_release_loader,
+        )
+
     def _run(self, sources=None, clock_values=(DISCOVERY_AS_OF, COLLECTION_AS_OF)):
         return collect_leader_live_candidate_batch(
             self.request(),
@@ -305,12 +382,144 @@ class LeaderLiveCandidateCollectionBatchTests(unittest.TestCase):
         self.assertEqual(result.discovery_as_of, DISCOVERY_AS_OF)
         self.assertEqual(result.as_of, COLLECTION_COMPLETED_AT)
         self.assertEqual(result.candidate_count, 2)
+        self.assertEqual(
+            result.runtime_inputs.classification_snapshot.meta.as_of,
+            result.as_of,
+        )
+        self.assertEqual(
+            result.runtime_inputs.index_batch.meta.as_of,
+            result.as_of,
+        )
+        self.assertEqual(result.runtime_inputs.etf_symbols, ())
         evidence = result.to_evidence()
         self.assertEqual(evidence["candidateCount"], 2)
         self.assertTrue(evidence["runtimeInputsReady"])
         self.assertNotIn("000001", repr(evidence))
         self.assertNotIn("QuoteSnapshot", repr(evidence))
         self.assertFalse(result.formal_usable)
+
+    def test_unusable_single_member_sector_is_not_frozen_into_candidate_plan(self):
+        singleton_symbol = "300021"
+        result = self._run(self.sources_with_singleton())
+
+        self.assertEqual(
+            result.status,
+            LeaderLiveCandidateCollectionStatus.READY,
+            result.reasons,
+        )
+        self.assertEqual(result.candidate_count, 2)
+        self.assertNotIn(
+            singleton_symbol,
+            tuple(item.symbol for item in result.candidate_plan.items),
+        )
+        sector_by_code = {
+            item.division_code: item
+            for item in result.runtime_inputs.sector_feature_batch.sectors
+        }
+        self.assertFalse(sector_by_code["02"].shadow_usable)
+
+    def test_unconfirmed_stock_unit_gap_does_not_taint_mapped_sector_units(self):
+        base = self.sources()
+        gap_symbol = "000003"
+
+        def security_loader(run_id, batch_id, as_of):
+            items = [_security(symbol) for symbol in (
+                "000001", "000002", gap_symbol
+            )]
+            return SourceBatch(
+                meta=_meta(
+                    run_id,
+                    batch_id,
+                    "official_exchange_security_master",
+                    as_of,
+                    len(items),
+                ),
+                items=items,
+            )
+
+        def classification_loader(
+            run_id, batch_id, as_of, records=None, **kwargs
+        ):
+            del records
+            snapshot = _classification(
+                run_id,
+                batch_id,
+                as_of,
+                first_observed_at=(
+                    kwargs.get("first_observed_at") or as_of
+                ),
+            )
+            return snapshot.model_copy(update={
+                "status": SourceStatus.DEGRADED,
+                "current_master_gaps": [IndustryClassificationGap(
+                    securityIdentity=gap_symbol,
+                    symbol=gap_symbol,
+                    name=f"证券{gap_symbol}",
+                    listingDate=date(2026, 8, 1),
+                    issueCodes=("new_listing_after_classification_start",),
+                )],
+                "completeness": snapshot.completeness.model_copy(update={
+                    "current_master_count": 3,
+                    "unconfirmed_count": 1,
+                    "mapping_coverage": 2 / 3,
+                    "reasons": ("classification_mapping_incomplete",),
+                }),
+            })
+
+        def quote_loader(symbols, run_id, batch_id, as_of):
+            items = []
+            for symbol in symbols:
+                quote = _quote(symbol, as_of)
+                if symbol != gap_symbol:
+                    quote = quote.model_copy(update={
+                        "turnover_amount_cny": 1_000_000.0,
+                        "turnover_amount_unit_status": (
+                            UnitVerificationStatus.VERIFIED
+                        ),
+                        "market_cap_cny": 10_000_000_000.0,
+                        "market_cap_unit_status": (
+                            UnitVerificationStatus.VERIFIED
+                        ),
+                        "total_shares_source": 1_000_000_000.0,
+                        "currency": "CNY",
+                    })
+                items.append(quote)
+            return SourceBatch(
+                meta=_meta(
+                    run_id,
+                    batch_id,
+                    "tencent_finance",
+                    as_of,
+                    len(items),
+                    source_time=as_of,
+                ),
+                items=items,
+            )
+
+        sources = LeaderLiveCandidateCollectionSources(
+            security_master_loader=security_loader,
+            classification_loader=classification_loader,
+            quote_loader=quote_loader,
+            index_loader=base.index_loader,
+            classification_release_loader=base.classification_release_loader,
+        )
+
+        result = self._run(sources)
+
+        self.assertEqual(
+            result.status,
+            LeaderLiveCandidateCollectionStatus.READY,
+            result.reasons,
+        )
+        sector = result.runtime_inputs.sector_feature_batch.sectors[0]
+        self.assertEqual(
+            sector.returns.market_cap_unit_status,
+            UnitVerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            sector.turnover.unit_status,
+            UnitVerificationStatus.VERIFIED,
+        )
 
     def test_release_identity_drift_blocks_before_quote_collection(self):
         quote_calls = []
@@ -428,6 +637,33 @@ class LeaderLiveCandidateCollectionBatchTests(unittest.TestCase):
 
 
 class LeaderLiveCandidateCollectionRepositoryAdapterTests(unittest.TestCase):
+    def test_default_sources_can_require_official_archive_verification(self):
+        expected = object()
+        with patch(
+            "radar.leader_live_candidate_collection_batch."
+            "fetch_industry_classification",
+            return_value=expected,
+        ) as fetcher:
+            try:
+                sources = build_default_leader_live_candidate_collection_sources(
+                    classification_publication_page_url="https://example.com",
+                    verify_official_classification_archive=True,
+                )
+            except TypeError as exc:
+                self.fail(
+                    "official classification archive verification cannot be "
+                    f"required: {exc}"
+                )
+            result = sources.classification_loader(
+                "run-1",
+                "classification-1",
+                DISCOVERY_AS_OF,
+                (_security("000001"),),
+            )
+
+        self.assertIs(result, expected)
+        self.assertTrue(fetcher.call_args.kwargs["verify_official_archive"])
+
     def test_repository_adapter_delegates_read_only_release_lookup(self):
         calls = []
         expected = object()

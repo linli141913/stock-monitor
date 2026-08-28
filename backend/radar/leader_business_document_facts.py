@@ -31,10 +31,12 @@ BUSINESS_SECTION_ANCHORS = ("主要业务", "主营业务", "核心业务", "营
 BUSINESS_OVERVIEW_HEADINGS = (
     "报告期内公司从事的业务情况",
     "报告期内公司从事的主要业务",
+    "报告期内公司所从事的主要业务",
 )
 BUSINESS_OVERVIEW_ENDS = (
     "报告期内公司所处行业情况",
     "报告期内公司新增重要非主营业务的说明",
+    "新增重要非主营业务情况",
     "核心竞争力分析",
     "主营业务分析",
     "非主营业务分析",
@@ -53,18 +55,43 @@ BUSINESS_NUMBERED_HEADING_PATTERN = re.compile(
     r"([^\n:：。；;]{2,30})\s*[:：]?"
     r"(?=\s*(?:\n|公司|本公司|采购|生产|销售|经营|通过|报告期))"
 )
+EXISTING_NAMED_BUSINESS_PATTERN = re.compile(
+    r"基于现有"
+    r"(?!相关|其他|公司|主要|主营|整体|新|核心|业务)"
+    r"([^\n。；;,，]{2,20}?业务)[,，]"
+)
 EXPLICIT_MAIN_BUSINESS_PATTERNS = (
     re.compile(r"公司主要从事\s*([^，,。\n]{2,160})"),
     re.compile(
         r"公司(?:构建起)?以\s*([^。\n]{2,180}?)\s*为(?:核心)?主业"
+    ),
+    re.compile(
+        r"公司的主营业务(?:包括|为)\s*"
+        r"([^。\n]{2,160}?)(?=[，,](?:公司|本公司|主要产品)|。|\n)"
     ),
 )
 PRODUCT_PATTERN = re.compile(
     r"(?:主要产品|主营产品|核心产品|主要业务)\s*"
     r"(?:包括|涵盖|为|是)\s*[:：]?\s*([^。\n]{2,240})"
 )
+NUMBERED_NAMED_PRODUCT_DESCRIPTION_PATTERN = re.compile(
+    r"(?:^|\n)\s*\d+[、.．]\s*"
+    r"([^\n(（:：。；;]{2,30}?)"
+    r"(?:[(（][^()\n（）]{2,40}[)）])?为"
+)
+COMPANY_PRODUCT_OUTPUT_PATTERN = re.compile(
+    r"公司产品以([^，,。\n]{2,30}?)为主[，,]"
+    r"占公司([^，,。\n]{2,20}?)产量"
+)
+ATOMIC_METALS_ACTIVITY_PATTERN = re.compile(
+    r"(有色金属|贵金属)(?:的)?(?:采选|冶炼|加工)"
+)
+COMPANY_EXPLICIT_BUSINESS_LIST_PATTERN = re.compile(
+    r"报告期内[,，]\s*公司(?:从事的)?主要业务(?:包括|为)\s*"
+    r"([^。\n]{2,240})"
+)
 INDUSTRY_DECLARATION_PATTERN = re.compile(
-    r"所属行业\s*[:：]?\s*([^\n。；;]{2,80})"
+    r"(?<![一-鿿A-Za-z0-9])所属行业\s*[:：]?\s*([^\n。；;]{2,80})"
 )
 TERM_SPLIT_PATTERN = re.compile(r"[、,，;；]|以及|及|和")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -89,6 +116,7 @@ STRUCTURAL_TERM_MARKERS = (
 STRUCTURAL_TERMS = frozenset({
     "主要", "主营", "公司主要", "公司主营", "公司的主要",
     "主要业务及其变化", "报告期内主要",
+    "主要业务的情况", "主要产品和服务的情况",
 })
 
 
@@ -249,6 +277,7 @@ def _directory_page(text: str) -> bool:
 def _clean_term(value: str, industry_name: str) -> Optional[str]:
     term = _normalize(value).strip("：:。；;、,，‘’“”\"'()（）")
     term = re.sub(r"^(?:以|包括)", "", term)
+    term = re.sub(r"除(?:自用|内部自用)外.*$", "", term)
     if (
         not 2 <= len(term) <= 20
         or term in GENERIC_TERMS
@@ -256,11 +285,12 @@ def _clean_term(value: str, industry_name: str) -> Optional[str]:
         or term.startswith((
             "相关", "其他", "公司主要", "公司主营", "公司的主要",
             "公司的主营", "报告期内主要", "主要业务及",
+            "主要销售", "经销商用以",
         ))
         or term.endswith("模式")
         or any(marker in term for marker in STRUCTURAL_TERM_MARKERS)
         or term == _normalize(industry_name)
-        or not re.search(r"[\u4e00-\u9fffA-Za-z0-9]", term)
+        or not re.search(r"[\u4e00-\u9fffA-Za-z]", term)
     ):
         return None
     return term
@@ -343,6 +373,7 @@ def extract_official_business_facts(
         for pattern in (
             BUSINESS_SUBHEADING_PATTERN,
             BUSINESS_NUMBERED_HEADING_PATTERN,
+            EXISTING_NAMED_BUSINESS_PATTERN,
         ):
             for match in pattern.finditer(page_text):
                 term = _clean_term(
@@ -369,7 +400,7 @@ def extract_official_business_facts(
                 matched_terms = []
                 for raw_term in TERM_SPLIT_PATTERN.split(match.group(1)):
                     term = _clean_term(
-                        raw_term,
+                        re.sub(r"(?:业务|产品)$", "", raw_term),
                         plan_item.industry_name,
                     )
                     if term is not None and term not in matched_terms:
@@ -390,11 +421,113 @@ def extract_official_business_facts(
                 for term in matched_terms:
                     if term not in terms:
                         terms.append(term)
+        for match in PRODUCT_PATTERN.finditer(page_text):
+            fragment = _normalize(match.group(0))
+            digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+            if digest not in seen_fragments:
+                seen_fragments.add(digest)
+                fragments.append(OfficialBusinessEvidenceFragment(
+                    page_number=page.page_number,
+                    fragment_sha256=digest,
+                    text=fragment,
+                ))
+            for raw_term in TERM_SPLIT_PATTERN.split(match.group(1)):
+                term = _clean_term(raw_term, plan_item.industry_name)
+                if term is not None and term not in terms:
+                    terms.append(term)
+        for match in NUMBERED_NAMED_PRODUCT_DESCRIPTION_PATTERN.finditer(
+            page_text
+        ):
+            term = _clean_term(match.group(1), plan_item.industry_name)
+            if term is None:
+                continue
+            fragment = _normalize(match.group(0))
+            digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+            if digest not in seen_fragments:
+                seen_fragments.add(digest)
+                fragments.append(OfficialBusinessEvidenceFragment(
+                    page_number=page.page_number,
+                    fragment_sha256=digest,
+                    text=fragment,
+                ))
+            if term not in terms:
+                terms.append(term)
+        for match in COMPANY_PRODUCT_OUTPUT_PATTERN.finditer(page_text):
+            matched_terms = tuple(
+                term
+                for group in match.groups()
+                if (
+                    term := _clean_term(group, plan_item.industry_name)
+                ) is not None
+            )
+            if not matched_terms:
+                continue
+            fragment = _normalize(match.group(0))
+            digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+            if digest not in seen_fragments:
+                seen_fragments.add(digest)
+                fragments.append(OfficialBusinessEvidenceFragment(
+                    page_number=page.page_number,
+                    fragment_sha256=digest,
+                    text=fragment,
+                ))
+            for term in matched_terms:
+                if term not in terms:
+                    terms.append(term)
+        for match in ATOMIC_METALS_ACTIVITY_PATTERN.finditer(page_text):
+            term = match.group(1)
+            fragment = _normalize(match.group(0))
+            digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+            if digest not in seen_fragments:
+                seen_fragments.add(digest)
+                fragments.append(OfficialBusinessEvidenceFragment(
+                    page_number=page.page_number,
+                    fragment_sha256=digest,
+                    text=fragment,
+                ))
+            if term not in terms:
+                terms.append(term)
         if ends_overview:
             inside_business_overview = False
     for page in content.pages:
-        if _directory_page(page.text) or not any(
+        if _directory_page(page.text):
+            continue
+        page_text = _normalize_layout(page.text)
+        for match in COMPANY_EXPLICIT_BUSINESS_LIST_PATTERN.finditer(
+            page_text
+        ):
+            matched_terms = []
+            for raw_term in TERM_SPLIT_PATTERN.split(match.group(1)):
+                term = _clean_term(
+                    re.sub(r"(?:业务|产品)$", "", raw_term),
+                    plan_item.industry_name,
+                )
+                if term is not None and term not in matched_terms:
+                    matched_terms.append(term)
+            if not matched_terms:
+                continue
+            fragment = _normalize(match.group(0))
+            digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+            if digest not in seen_fragments:
+                seen_fragments.add(digest)
+                fragments.append(OfficialBusinessEvidenceFragment(
+                    page_number=page.page_number,
+                    fragment_sha256=digest,
+                    text=fragment,
+                ))
+            for term in matched_terms:
+                if term not in terms:
+                    terms.append(term)
+    for page in content.pages:
+        if (
+            _directory_page(page.text)
+            or any(
+                heading in page.text
+                for heading in BUSINESS_OVERVIEW_HEADINGS
+            )
+            or not any(
             anchor in page.text for anchor in BUSINESS_SECTION_ANCHORS
+            )
         ):
             continue
         for match in PRODUCT_PATTERN.finditer(page.text):

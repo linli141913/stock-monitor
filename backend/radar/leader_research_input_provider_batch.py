@@ -22,6 +22,9 @@ from radar.leader_risk_candidate_projection import (
     LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID,
     LeaderRiskCandidateProjection,
 )
+from radar.leader_risk_official_deterministic import (
+    is_leader_official_deterministic_risk_projection_valid,
+)
 from radar.leader_risk_candidate_projection_batch import (
     LeaderRiskCandidateProjectionBatchItem,
     LeaderRiskCandidateProjectionBatchResult,
@@ -379,6 +382,12 @@ def _projection_item_is_valid(
     if value.status != ResearchFeatureStatus.READY:
         return value.projection is None and bool(value.reasons)
     projection = value.projection
+    if is_leader_official_deterministic_risk_projection_valid(
+        projection,
+        symbol=symbol,
+        as_of=as_of,
+    ):
+        return not value.reasons
     return bool(
         isinstance(projection, LeaderRiskCandidateProjection)
         and projection.symbol == symbol

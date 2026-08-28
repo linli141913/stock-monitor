@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
+import unicodedata
 
 from radar.leader_business_annual_report_selector import (
     select_latest_official_annual_report,
@@ -26,7 +27,23 @@ from radar.leader_business_catalyst_facts import (
     OfficialBusinessCatalystFactResult,
     extract_official_business_catalyst_facts,
 )
-from radar.leader_business_catalyst_features import BusinessCatalystRelation
+from radar.leader_business_catalyst_features import (
+    BusinessCatalystRelation,
+    BusinessProofType,
+)
+from radar.leader_business_catalyst_official_adapter import (
+    OFFICIAL_BUSINESS_SOURCE_CONTRACTS,
+    LeaderOfficialBusinessMaterialBatchEntry,
+    LeaderOfficialBusinessProofArtifact,
+    LeaderOfficialCatalystArtifact,
+    OfficialDisclosurePlatform,
+)
+from radar.leader_business_catalyst_production_collector import (
+    LeaderBusinessCatalystProductionFrozenBatch,
+)
+from radar.leader_business_catalyst_runtime_bridge import (
+    LeaderBusinessCatalystRuntimeSourceBatch,
+)
 from radar.leader_business_deterministic_verification import (
     DeterministicOfficialBusinessVerificationArtifact,
     build_deterministic_official_business_verification,
@@ -41,6 +58,13 @@ from radar.leader_business_material_review_submission import (
     LeaderBusinessMaterialReviewSourcePacketStatus,
     load_leader_business_material_review_source_packet,
 )
+from radar.leader_business_official_verification_adapter import (
+    LeaderOfficialBusinessDeterministicVerificationBatchEntry,
+)
+from radar.leader_formal_research_production_provider import (
+    LeaderFormalResearchProductionSourceStatus,
+)
+from radar.leader_research_features import ResearchFeatureStatus
 from radar.sources.leader_business_catalyst_official import (
     OfficialBusinessCatalystDocument,
     OfficialBusinessCatalystKind,
@@ -69,10 +93,21 @@ MAXIMUM_PDF_WORKERS = 2
 CATALYST_LOOKBACK_DAYS = 365
 MAXIMUM_DIAGNOSTIC_SNIPPETS_PER_DOCUMENT = 8
 MAXIMUM_DIAGNOSTIC_SNIPPET_CHARACTERS = 600
+MAXIMUM_RELATION_TERM_OCCURRENCES = 24
+MAXIMUM_RELATION_TERM_OCCURRENCES_PER_TERM = 3
+MAXIMUM_RELATION_TERM_SNIPPET_CHARACTERS = 240
 DIAGNOSTIC_TEXT_MARKERS = (
     "收入", "销量", "销售", "价格", "均价", "毛利", "利润", "盈利",
     "产量", "出货", "交付", "投产", "中标", "合同", "认证", "业务",
 )
+GAP_DIAGNOSTIC_OBJECT_MISSING = "business_catalyst_fact_object_missing"
+GAP_DIAGNOSTIC_RELATION_UNCONFIRMED = (
+    "business_deterministic_relation_unconfirmed"
+)
+GAP_DIAGNOSTIC_TARGETS = frozenset({
+    GAP_DIAGNOSTIC_OBJECT_MISSING,
+    GAP_DIAGNOSTIC_RELATION_UNCONFIRMED,
+})
 
 
 @dataclass(frozen=True)
@@ -94,6 +129,9 @@ class LeaderBusinessAutomaticEvidenceBatchItem:
     artifact: Optional[
         DeterministicOfficialBusinessVerificationArtifact
     ] = field(default=None, repr=False)
+    material_entry: Optional[
+        LeaderOfficialBusinessMaterialBatchEntry
+    ] = field(default=None, repr=False)
     gap_diagnostic: Optional[Mapping[str, object]] = field(
         default=None,
         repr=False,
@@ -110,6 +148,9 @@ class LeaderBusinessAutomaticEvidenceBatchResult:
     packet_path: Optional[Path] = None
     delivery_packet_path: Optional[Path] = None
     gap_diagnostic_path: Optional[Path] = None
+    production_frozen_batch: Optional[
+        LeaderBusinessCatalystProductionFrozenBatch
+    ] = field(default=None, repr=False)
     contract_id: str = LEADER_BUSINESS_AUTOMATIC_EVIDENCE_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -164,6 +205,9 @@ class LeaderBusinessAutomaticEvidenceBatchResult:
             "deliveryPacketPath": (
                 str(self.delivery_packet_path)
                 if self.delivery_packet_path else None
+            ),
+            "productionFrozenInputsReady": (
+                self.production_frozen_batch is not None
             ),
             "gate": {
                 "formalScoreReady": False,
@@ -231,6 +275,75 @@ def _diagnostic_snippets(
             if len(snippets) >= MAXIMUM_DIAGNOSTIC_SNIPPETS_PER_DOCUMENT:
                 return tuple(snippets)
     return tuple(snippets)
+
+
+def _diagnostic_term_occurrences(
+    content: OfficialBusinessDocumentContentResult,
+    terms: Sequence[str],
+) -> Tuple[Mapping[str, object], ...]:
+    occurrences = []
+    seen = set()
+    for term in dict.fromkeys(terms):
+        normalized_term = re.sub(
+            r"\s+",
+            "",
+            unicodedata.normalize("NFKC", term),
+        )
+        if not normalized_term:
+            continue
+        term_count = 0
+        for page in content.pages:
+            normalized = re.sub(
+                r"\s+",
+                "",
+                unicodedata.normalize("NFKC", page.text),
+            )
+            for match in re.finditer(re.escape(normalized_term), normalized):
+                sentence_start = max(
+                    (
+                        normalized.rfind(marker, 0, match.start())
+                        for marker in "。；;!?！？"
+                    ),
+                    default=-1,
+                ) + 1
+                sentence_ends = tuple(
+                    position
+                    for marker in "。；;!?！？"
+                    if (
+                        position := normalized.find(marker, match.end())
+                    ) >= 0
+                )
+                sentence_end = (
+                    min(sentence_ends) + 1
+                    if sentence_ends
+                    else len(normalized)
+                )
+                text = normalized[
+                    sentence_start:sentence_end
+                ][:MAXIMUM_RELATION_TERM_SNIPPET_CHARACTERS]
+                identity = (term, page.page_number, text)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                occurrences.append({
+                    "term": term,
+                    "pageNumber": page.page_number,
+                    "text": text,
+                })
+                term_count += 1
+                if (
+                    term_count >= MAXIMUM_RELATION_TERM_OCCURRENCES_PER_TERM
+                    or len(occurrences) >= MAXIMUM_RELATION_TERM_OCCURRENCES
+                ):
+                    break
+            if (
+                term_count >= MAXIMUM_RELATION_TERM_OCCURRENCES_PER_TERM
+                or len(occurrences) >= MAXIMUM_RELATION_TERM_OCCURRENCES
+            ):
+                break
+        if len(occurrences) >= MAXIMUM_RELATION_TERM_OCCURRENCES:
+            break
+    return tuple(occurrences)
 
 
 def _fragment_payload(value: OfficialBusinessEvidenceFragment):
@@ -441,6 +554,75 @@ def _item(index, symbol, status, reasons, **changes):
     )
 
 
+def _production_material_entry(
+    plan_item: Any,
+    annual: Any,
+    catalysts: Sequence[Any],
+    artifact: Any,
+) -> Optional[LeaderOfficialBusinessMaterialBatchEntry]:
+    if (
+        type(artifact)
+        is not DeterministicOfficialBusinessVerificationArtifact
+        or annual.document_id != artifact.annual_document_id
+        or annual.document_version != artifact.annual_document_version
+        or annual.symbol != plan_item.symbol
+        or annual.published_at > plan_item.as_of
+        or not artifact.annual_facts.fragments
+        or not artifact.catalyst_facts.fragments
+    ):
+        return None
+    matched = tuple(
+        document
+        for document in catalysts
+        if document.document_id == artifact.catalyst_document_id
+        and document.document_version == artifact.catalyst_document_version
+        and document.symbol == plan_item.symbol
+        and document.issuer_identity == artifact.issuer_identity
+    )
+    if len(matched) != 1 or matched[0].published_at > plan_item.as_of:
+        return None
+    catalyst = matched[0]
+    source_contract_id = OFFICIAL_BUSINESS_SOURCE_CONTRACTS[
+        OfficialDisclosurePlatform.CNINFO
+    ]
+    return LeaderOfficialBusinessMaterialBatchEntry(
+        symbol=plan_item.symbol,
+        catalyst_artifact=LeaderOfficialCatalystArtifact(
+            platform=OfficialDisclosurePlatform.CNINFO,
+            source_contract_id=source_contract_id,
+            catalyst_id=(
+                f"business-catalyst:{catalyst.document_id}:"
+                f"{catalyst.document_version}"
+            ),
+            industry_code=plan_item.industry_code,
+            industry_release_id=plan_item.industry_release_id,
+            document_id=catalyst.document_id,
+            document_version=catalyst.document_version,
+            source_url=catalyst.source_url,
+            published_at=catalyst.published_at,
+            effective_from=catalyst.published_at,
+            effective_until=None,
+            summary=artifact.catalyst_facts.fragments[0].text,
+        ),
+        proof_artifacts=(LeaderOfficialBusinessProofArtifact(
+            platform=OfficialDisclosurePlatform.CNINFO,
+            source_contract_id=source_contract_id,
+            evidence_id=f"business-proof:{annual.document_id}",
+            evidence_version=annual.document_version,
+            symbol=plan_item.symbol,
+            proof_type=BusinessProofType.OTHER_OFFICIAL,
+            document_id=annual.document_id,
+            document_version=annual.document_version,
+            source_url=annual.source_url,
+            published_at=annual.published_at,
+            effective_from=annual.published_at,
+            effective_until=None,
+            fact_summary=artifact.annual_facts.fragments[0].text,
+        ),),
+        source_status=ResearchFeatureStatus.READY,
+    )
+
+
 def _process_candidate(
     plan_id,
     plan_item,
@@ -450,6 +632,7 @@ def _process_candidate(
     sources,
     validated_at,
     write_gap_diagnostic,
+    gap_diagnostic_target,
 ):
     selection = select_latest_official_annual_report(plan_item, queue_item)
     if selection.status is not AutomaticBusinessEvidenceStatus.READY:
@@ -508,6 +691,19 @@ def _process_candidate(
     )
     cached = _load_checkpoint(checkpoint_path, scope)
     if cached is not None:
+        material_entry = _production_material_entry(
+            plan_item,
+            annual,
+            catalysts,
+            cached,
+        )
+        if material_entry is None:
+            return _item(
+                plan_item.index,
+                plan_item.symbol,
+                AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                ("business_automatic_production_material_unverified",),
+            )
         return _item(
             plan_item.index,
             plan_item.symbol,
@@ -516,6 +712,7 @@ def _process_candidate(
             checkpoint_path=checkpoint_path,
             reused=True,
             artifact=cached,
+            material_entry=material_entry,
         )
     try:
         annual_content = sources.fetch_document_content(
@@ -575,7 +772,10 @@ def _process_candidate(
         if facts.status is not AutomaticBusinessEvidenceStatus.READY:
             if facts.reasons == ("business_catalyst_fact_object_missing",):
                 object_missing_reasons.extend(facts.reasons)
-                if write_gap_diagnostic:
+                if (
+                    write_gap_diagnostic
+                    and gap_diagnostic_target == GAP_DIAGNOSTIC_OBJECT_MISSING
+                ):
                     catalyst_diagnostics.append({
                         "documentId": catalyst.document_id,
                         "documentVersion": catalyst.document_version,
@@ -596,7 +796,11 @@ def _process_candidate(
         catalyst_facts.append(facts)
     if not catalyst_facts:
         gap_diagnostic = None
-        if write_gap_diagnostic and catalyst_diagnostics:
+        if (
+            write_gap_diagnostic
+            and gap_diagnostic_target == GAP_DIAGNOSTIC_OBJECT_MISSING
+            and catalyst_diagnostics
+        ):
             gap_diagnostic = {
                 "index": plan_item.index,
                 "symbol": plan_item.symbol,
@@ -625,11 +829,62 @@ def _process_candidate(
         verified.status is not AutomaticBusinessEvidenceStatus.READY
         or verified.artifact is None
     ):
+        gap_diagnostic = None
+        if (
+            write_gap_diagnostic
+            and gap_diagnostic_target in verified.reasons
+        ):
+            documents = {
+                document.document_id: document
+                for document in catalysts
+            }
+            catalyst_terms = tuple(
+                term
+                for facts in catalyst_facts
+                for term in facts.business_terms
+            )
+            gap_diagnostic = {
+                "index": plan_item.index,
+                "symbol": plan_item.symbol,
+                "issuerIdentity": annual.issuer_identity,
+                "annualDocumentId": annual.document_id,
+                "annualDocumentVersion": annual.document_version,
+                "annualContentSha256": annual_content.content_sha256,
+                "annualTerms": list(annual_facts.business_terms),
+                "annualFragments": [{
+                    "pageNumber": fragment.page_number,
+                    "text": fragment.text,
+                } for fragment in annual_facts.fragments],
+                "annualTermOccurrences": list(
+                    _diagnostic_term_occurrences(
+                        annual_content,
+                        catalyst_terms,
+                    )
+                ),
+                "catalysts": [{
+                    "documentId": facts.document_id,
+                    "documentVersion": facts.document_version,
+                    "title": documents[facts.document_id].title,
+                    "eventKind": documents[facts.document_id].event_kind.value,
+                    "publishedAt": documents[
+                        facts.document_id
+                    ].published_at.isoformat(),
+                    "sourceUrl": documents[facts.document_id].source_url,
+                    "contentSha256": facts.content_sha256,
+                    "businessTerms": list(facts.business_terms),
+                    "negativeEvent": facts.negative_event,
+                    "fragments": [{
+                        "pageNumber": fragment.page_number,
+                        "text": fragment.text,
+                    } for fragment in facts.fragments],
+                } for facts in catalyst_facts],
+            }
         return _item(
             plan_item.index,
             plan_item.symbol,
             verified.status,
             verified.reasons,
+            gap_diagnostic=gap_diagnostic,
         )
     checkpoint_payload = {
         "scope": scope,
@@ -640,6 +895,19 @@ def _process_candidate(
         "payloadSha256": _digest(checkpoint_payload),
         "payload": checkpoint_payload,
     })
+    material_entry = _production_material_entry(
+        plan_item,
+        annual,
+        catalysts,
+        verified.artifact,
+    )
+    if material_entry is None:
+        return _item(
+            plan_item.index,
+            plan_item.symbol,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+            ("business_automatic_production_material_unverified",),
+        )
     return _item(
         plan_item.index,
         plan_item.symbol,
@@ -647,6 +915,7 @@ def _process_candidate(
         (),
         checkpoint_path=checkpoint_path,
         artifact=verified.artifact,
+        material_entry=material_entry,
     )
 
 
@@ -673,6 +942,7 @@ def run_leader_business_automatic_evidence(
     sources: Optional[LeaderBusinessAutomaticEvidenceSources] = None,
     clock: Callable[[], datetime],
     write_gap_diagnostic: bool = False,
+    gap_diagnostic_target: str = GAP_DIAGNOSTIC_OBJECT_MISSING,
 ) -> LeaderBusinessAutomaticEvidenceBatchResult:
     """为候选全集产生长期官方证据；结果不回填原候选时点。"""
 
@@ -686,6 +956,11 @@ def run_leader_business_automatic_evidence(
         raise ValueError("business_automatic_sources_unverified")
     if type(write_gap_diagnostic) is not bool:
         raise ValueError("business_automatic_gap_diagnostic_unverified")
+    if (
+        not isinstance(gap_diagnostic_target, str)
+        or gap_diagnostic_target not in GAP_DIAGNOSTIC_TARGETS
+    ):
+        raise ValueError("business_automatic_gap_diagnostic_target_unverified")
     validated_at = clock()
     if not _aware(validated_at):
         raise ValueError("business_automatic_clock_unverified")
@@ -709,6 +984,7 @@ def run_leader_business_automatic_evidence(
                 sources=actual_sources,
                 validated_at=validated_at,
                 write_gap_diagnostic=write_gap_diagnostic,
+                gap_diagnostic_target=gap_diagnostic_target,
             )
         except OSError:
             raise
@@ -767,7 +1043,7 @@ def run_leader_business_automatic_evidence(
             "validatedAt": validated_at.isoformat(),
             "ruleVersion": DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
             "diagnosticOnly": True,
-            "targetReason": "business_catalyst_fact_object_missing",
+            "targetReason": gap_diagnostic_target,
             "candidateCount": len(gap_items),
             "items": gap_items,
             "gate": {
@@ -808,6 +1084,34 @@ def run_leader_business_automatic_evidence(
     reasons = _dedupe(
         reason for item in items for reason in item.reasons
     )
+    production_frozen_batch = None
+    if status is AutomaticBusinessEvidenceStatus.READY:
+        source_batch = LeaderBusinessCatalystRuntimeSourceBatch(
+            candidate_plan_id=plan.candidate_set_id,
+            radar_run_id=plan.radar_run_id,
+            quote_batch_id=plan.quote_batch_id,
+            as_of=plan.as_of,
+            material_entries=tuple(
+                item.material_entry for item in items
+            ),
+            review_entries=(),
+            verification_entries=tuple(
+                LeaderOfficialBusinessDeterministicVerificationBatchEntry(
+                    symbol=item.symbol,
+                    verification_artifact=item.artifact,
+                )
+                for item in items
+            ),
+        )
+        production_frozen_batch = (
+            LeaderBusinessCatalystProductionFrozenBatch(
+                source_batch=source_batch,
+                fetched_at=validated_at,
+                source_status=(
+                    LeaderFormalResearchProductionSourceStatus.COMPLETED
+                ),
+            )
+        )
     return LeaderBusinessAutomaticEvidenceBatchResult(
         status=status,
         candidate_plan_id=plan.candidate_set_id,
@@ -817,4 +1121,5 @@ def run_leader_business_automatic_evidence(
         packet_path=packet_path,
         delivery_packet_path=delivery_path,
         gap_diagnostic_path=gap_diagnostic_path,
+        production_frozen_batch=production_frozen_batch,
     )

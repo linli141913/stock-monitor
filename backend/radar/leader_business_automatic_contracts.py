@@ -4,8 +4,9 @@ from enum import Enum
 
 
 DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION = (
-    "radar-leader-business-deterministic-relation-v24"
+    "radar-leader-business-deterministic-relation-v31"
 )
+MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS = 24 * 60 * 60
 
 
 class AutomaticBusinessEvidenceStatus(str, Enum):

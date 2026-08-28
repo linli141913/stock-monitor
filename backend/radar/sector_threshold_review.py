@@ -356,6 +356,38 @@ def _threshold_set_id(
     })
 
 
+def is_sector_threshold_approval_record_valid(value: Any) -> bool:
+    """复核完整八状态批准记录及其内容摘要。"""
+
+    return bool(
+        type(value) is SectorThresholdApprovalRecord
+        and value.contract_id
+        == SECTOR_THRESHOLD_APPROVAL_RECORD_CONTRACT_ID
+        and all(
+            isinstance(item, str) and item.strip()
+            for item in (
+                value.rule_version,
+                value.threshold_set_id,
+                value.approval_id,
+                value.approved_by,
+            )
+        )
+        and all(
+            isinstance(item, str)
+            and len(item) == 64
+            and all(character in "0123456789abcdef" for character in item)
+            for item in (
+                value.calibration_identity,
+                value.source_evidence_sha256,
+                value.record_sha256,
+            )
+        )
+        and _aware(value.approved_at)
+        and _validate_state_policies(value.state_policies)
+        and value.record_sha256 == _digest(value.payload_without_hash())
+    )
+
+
 def _approval_id(
     *,
     threshold_set_id: str,

@@ -232,6 +232,65 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
         self.assertEqual(second.fetched_count, 0)
         self.assertEqual(len(calls), 1)
 
+    def test_external_checkpoint_store_is_read_only_and_output_stays_separate(self):
+        value, series = request()
+        calls = []
+
+        def loader(symbols, dates):
+            calls.append(symbols)
+            return SectorHistoryMinuteFrozenBatch(
+                expected_trade_dates=dates,
+                series_by_symbol={symbol: series[symbol] for symbol in symbols},
+                source_status="ready",
+                failure_count=0,
+                requested_count=len(symbols),
+            )
+
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as source_dir, \
+                tempfile.TemporaryDirectory(dir="/private/tmp") as output_dir:
+            source_root = Path(source_dir)
+            first = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=source_root,
+                minute_loader=loader,
+            )
+            manifest = source_root / "latest.json"
+            manifest.write_text(json.dumps({
+                "contractId": "radar-sector-history-store-manifest-v1",
+                "evidenceRelativePath": str(
+                    first.evidence_path.relative_to(source_root)
+                ),
+            }), encoding="utf-8")
+            source_snapshot = {
+                path.relative_to(source_root): path.read_bytes()
+                for path in source_root.rglob("*")
+                if path.is_file()
+            }
+
+            try:
+                second = run_sector_history_automatic_backfill(
+                    value,
+                    artifact_dir=Path(output_dir),
+                    reuse_store_dir=source_root,
+                    minute_loader=loader,
+                )
+            except TypeError as exc:
+                self.fail(
+                    f"external read-only checkpoint reuse unsupported: {exc}"
+                )
+            source_after = {
+                path.relative_to(source_root): path.read_bytes()
+                for path in source_root.rglob("*")
+                if path.is_file()
+            }
+
+        self.assertEqual(second.status, "ready", second.reasons)
+        self.assertEqual(second.reused_count, 40)
+        self.assertEqual(second.fetched_count, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(source_after, source_snapshot)
+        self.assertTrue(second.evidence_path.is_relative_to(Path(output_dir)))
+
     def test_corrupt_checkpoint_refetches_only_that_symbol(self):
         value, series = request()
         calls = []
@@ -270,6 +329,11 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
 
     def test_checkpoint_missing_latest_completed_day_refetches_only_that_symbol(self):
         value, series = request()
+        terminal_symbol = next(iter(series))
+        value = replace(
+            value,
+            terminal_non_trading_symbols=(terminal_symbol,),
+        )
         calls = []
 
         def loader(symbols, dates):
@@ -289,7 +353,9 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
                 artifact_dir=root,
                 minute_loader=loader,
             )
-            checkpoint = next(root.rglob("series-*.json"))
+            checkpoint = next(
+                root.rglob(f"series-{terminal_symbol}.json")
+            )
             payload = json.loads(checkpoint.read_text(encoding="utf-8"))
             latest = value.expected_trade_dates[-1].isoformat()
             payload["bars"] = [
@@ -309,6 +375,74 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
         self.assertEqual(second.fetched_count, 1)
         self.assertEqual(second.reused_count, 39)
         self.assertEqual(len(calls[-1]), 1)
+
+    def test_same_run_verified_non_trading_latest_day_reuses_checkpoint(self):
+        value, series = request()
+        terminal_symbol = next(iter(series))
+        latest = value.expected_trade_dates[-1]
+        value = replace(
+            value,
+            terminal_non_trading_symbols=(terminal_symbol,),
+            verified_non_trading_dates_by_symbol={
+                terminal_symbol: (latest,),
+            },
+        )
+        calls = []
+
+        def loader(symbols, dates):
+            calls.append(symbols)
+            return SectorHistoryMinuteFrozenBatch(
+                expected_trade_dates=dates,
+                series_by_symbol={symbol: series[symbol] for symbol in symbols},
+                source_status="ready",
+                failure_count=0,
+                requested_count=len(symbols),
+            )
+
+        def presence_loader(targets, **_kwargs):
+            return HistoricalTradingPresenceBatch(
+                verified_trading_dates_by_symbol={terminal_symbol: ()},
+                verified_non_trading_dates_by_symbol={
+                    terminal_symbol: (latest,),
+                },
+                source_hashes_by_symbol={
+                    terminal_symbol: "sha256:" + "c" * 64,
+                },
+                source_status="ready",
+                requested_count=1,
+                failure_count=0,
+            )
+
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            first = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=loader,
+                presence_loader=presence_loader,
+            )
+            checkpoint = next(
+                root.rglob(f"series-{terminal_symbol}.json")
+            )
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            payload["bars"] = [
+                row for row in payload["bars"]
+                if not row[0].startswith(latest.isoformat())
+            ]
+            checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+
+            second = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=loader,
+                presence_loader=presence_loader,
+            )
+
+        self.assertEqual(first.status, "ready")
+        self.assertEqual(second.status, "ready", second.reasons)
+        self.assertEqual(second.fetched_count, 0)
+        self.assertEqual(second.reused_count, 40)
+        self.assertEqual(len(calls), 1)
 
     def test_failed_source_keeps_success_checkpoints_and_never_emits_gate_packet(self):
         value, series = request()

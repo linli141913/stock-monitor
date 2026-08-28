@@ -23,7 +23,7 @@ from radar.sources.leader_history_public_poc import (
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 8, 8, 20, 0, tzinfo=SHANGHAI_TZ)
 TENCENT_URL = (
-    "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
 )
 
 
@@ -123,6 +123,14 @@ class PublicHistoryPocTests(unittest.TestCase):
         self.assertEqual(
             value.knowledge_effective_from,
             release.knowledge_effective_from,
+        )
+        self.assertEqual(
+            value.release_id,
+            (
+                f"{release.classification_system}:"
+                f"{release.release_period}:"
+                f"{release.document_sha256[:16]}"
+            ),
         )
 
     def test_complete_public_history_builds_existing_research_input(self):

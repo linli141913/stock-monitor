@@ -182,6 +182,9 @@ def build_sector_rule_runtime_bridge(
             threshold_approval_evidence=(
                 source_batch.threshold_approval_evidence
             ),
+            required_division_codes=tuple(sorted({
+                item.industry_code for item in plan.items
+            })),
             rule_version=source_batch.rule_version,
         )
     except (AttributeError, KeyError, TypeError, ValueError):

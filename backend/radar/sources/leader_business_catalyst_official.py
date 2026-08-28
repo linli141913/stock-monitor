@@ -62,7 +62,7 @@ KIND_TITLE_PATTERNS = {
     OfficialBusinessCatalystKind.EARNINGS_FORECAST: re.compile(r"业绩预告"),
 }
 TITLE_EXCLUSION_PATTERN = re.compile(
-    r"管理制度|披露标准|核查意见|"
+    r"管理(?:制度|办法)|披露标准|核查意见|"
     r"(?:监管工作函|问询函|关注函).*(?:回复|意见)|"
     r"(?:会计师|律师|保荐机构).*业绩预告.*(?:回复|意见)"
 )

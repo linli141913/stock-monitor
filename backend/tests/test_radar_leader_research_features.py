@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from radar.contracts import QuoteSnapshot, SecurityMasterRecord
+from radar.contracts import MarketIndexKey, QuoteSnapshot, SecurityMasterRecord
 from radar.leader_research_features import (
     LEADER_RESEARCH_FEATURE_VERSION,
     LeaderResearchDimension,
@@ -173,6 +173,23 @@ class LeaderResearchFeatureContractTests(unittest.TestCase):
             5.0,
         )
         self.assertFalse(result.to_evidence()["scoreReady"])
+
+    def test_live_market_snapshot_enum_index_keys_keep_board_mapping(self):
+        fixture = self.fixture()
+        fixture["market_snapshot"] = {
+            **fixture["market_snapshot"],
+            "indices": tuple({
+                **item,
+                "indexKey": MarketIndexKey(item["indexKey"]),
+            } for item in fixture["market_snapshot"]["indices"]),
+        }
+
+        result = build_leader_research_features(**fixture)
+
+        self.assertEqual(
+            result.dimension("market_leadership").status,
+            ResearchFeatureStatus.READY,
+        )
 
     def test_negative_sector_returns_do_not_receive_rank_score(self):
         result = build_leader_research_features(**self.fixture(

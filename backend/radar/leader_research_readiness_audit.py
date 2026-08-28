@@ -29,6 +29,10 @@ from radar.leader_risk_candidate_projection import (
 from radar.leader_risk_candidate_projection_batch import (
     LeaderRiskCandidateProjectionBatchItem,
 )
+from radar.leader_risk_official_deterministic import (
+    LeaderOfficialDeterministicRiskProjection,
+    is_leader_official_deterministic_risk_projection_valid,
+)
 from radar.leader_risk_evidence_bundle import (
     FormalRiskGateGap,
     RISK_RESEARCH_EVIDENCE_BUNDLE_CONTRACT_ID,
@@ -328,6 +332,12 @@ def _risk_contract_reason(
     if item.reasons:
         return CONTRACT_UNVERIFIED
     projection = item.projection
+    if is_leader_official_deterministic_risk_projection_valid(
+        projection,
+        symbol=value.symbol,
+        as_of=as_of,
+    ):
+        return None
     if not isinstance(projection, LeaderRiskCandidateProjection):
         return CONTRACT_UNVERIFIED
     if projection.symbol != value.symbol:
@@ -489,6 +499,19 @@ def _risk_item(
             reasons=value.reasons,
         )
     projection = value.projection
+    if isinstance(projection, LeaderOfficialDeterministicRiskProjection):
+        return LeaderResearchReadinessAuditItem(
+            key="risk_projection",
+            status=value.status,
+            evidence_available=True,
+            requirement_satisfied=False,
+            veto_reason=FORMAL_RISK_UNAVAILABLE,
+            reasons=tuple(
+                f"formal_gate_gap:{gap}"
+                for gap in projection.formal_gate_gaps
+            ),
+            source_contract_ids=projection.source_contract_ids,
+        )
     gap_reasons = tuple(
         f"formal_gate_gap:{gap.value}"
         for gap in projection.formal_gate_gaps

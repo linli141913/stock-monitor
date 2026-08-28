@@ -13,6 +13,8 @@ from radar.leader_business_automatic_contracts import (
     AutomaticBusinessEvidenceStatus,
 )
 from radar.leader_business_automatic_evidence import (
+    GAP_DIAGNOSTIC_OBJECT_MISSING,
+    GAP_DIAGNOSTIC_TARGETS,
     LeaderBusinessAutomaticEvidenceSources,
     run_leader_business_automatic_evidence,
 )
@@ -27,7 +29,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gap-diagnostic",
         action="store_true",
-        help="写出仅供规则设计的对象缺失新鲜语料，不参与正式门",
+        help="写出仅供规则设计的有界新鲜语料，不参与正式门",
+    )
+    parser.add_argument(
+        "--gap-diagnostic-target",
+        choices=tuple(sorted(GAP_DIAGNOSTIC_TARGETS)),
+        default=GAP_DIAGNOSTIC_OBJECT_MISSING,
+        help="选择要输出的缺口原因；默认保持对象缺失语义",
     )
     return parser
 
@@ -56,6 +64,7 @@ def run_cli(
             sources=sources,
             clock=clock,
             write_gap_diagnostic=arguments.gap_diagnostic,
+            gap_diagnostic_target=arguments.gap_diagnostic_target,
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         _print({

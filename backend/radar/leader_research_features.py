@@ -295,10 +295,15 @@ def build_leader_research_market_context(
             market_reasons = ("market_snapshot_source_time_future",)
 
     index_changes = {
-        str(item.get("indexKey") or ""): change_percent
+        str(
+            index_key.value
+            if isinstance(index_key, Enum)
+            else index_key or ""
+        ): change_percent
         for item in market_snapshot.get("indices", ())
         if (
             isinstance(item, Mapping)
+            and (index_key := item.get("indexKey")) is not None
             and (
                 change_percent := _number(
                     item.get("changePercent")

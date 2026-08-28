@@ -22,6 +22,16 @@ from radar.leader_phase6_production_readiness import (
     LeaderPhase6ProductionFrozenInputs,
     build_leader_phase6_production_readiness,
 )
+from radar.leader_risk_lifecycle_batch import LeaderRiskLifecycleBatchEntry
+from radar.leader_risk_lifecycle_delivery import (
+    LeaderRiskLifecycleDeliveryInput,
+    deliver_leader_risk_lifecycle,
+)
+from radar.leader_risk_official_deterministic import (
+    LeaderOfficialDeterministicRiskFrozenBatch,
+)
+from radar.sources.leader_risk_official import CninfoRiskIssuerScope
+from zoneinfo import ZoneInfo
 from radar.leader_tradability_production_collector import (
     LeaderTradabilityProductionFrozenBatch,
 )
@@ -40,6 +50,13 @@ class _EmptyReviewRepository:
     def list_review_version_chains(symbols, as_of):
         del symbols, as_of
         return ()
+
+
+class _ReviewRepositoryMustNotBeUsed:
+    @staticmethod
+    def list_review_version_chains(symbols, as_of):
+        del symbols, as_of
+        raise AssertionError("官方风险输入存在时不得读取人工D8仓库")
 
 
 class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
@@ -75,7 +92,7 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
         sector.setUp()
         self.sector_batch = sector.source_batch()
 
-    def inputs(self, *, tradability_bundle=None):
+    def inputs(self, *, tradability_bundle=None, risk=None):
         return LeaderPhase6ProductionFrozenInputs(
             history=LeaderHistoryProductionFrozenBatch(
                 expected_trade_dates=self.history_batch.expected_trade_dates,
@@ -112,6 +129,52 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
                     LeaderFormalResearchProductionSourceStatus.COMPLETED
                 ),
             ),
+            risk=risk,
+        )
+
+    def risk_frozen(self):
+        plan = self.context.candidate_plan
+        scopes = tuple(
+            CninfoRiskIssuerScope(
+                symbol=item.symbol,
+                issuer_identity=f"cninfo-org:phase6{item.symbol}",
+                resolved_at=plan.as_of,
+            )
+            for item in plan.items
+        )
+        entries = tuple(
+            LeaderRiskLifecycleBatchEntry(
+                symbol=item.symbol,
+                issuer_identity=scopes[index].issuer_identity,
+                versions=(),
+            )
+            for index, item in enumerate(plan.items)
+        )
+        window_until = plan.as_of.astimezone(
+            ZoneInfo("Asia/Shanghai")
+        ).date()
+        delivery = deliver_leader_risk_lifecycle(
+            LeaderRiskLifecycleDeliveryInput(
+                candidate_plan=plan,
+                entries=entries,
+                candidate_scopes=scopes,
+                window_from=window_until - timedelta(days=365),
+                window_until=window_until,
+                collected_at=plan.as_of,
+                confirm_live_poc=True,
+                max_page_requests=7,
+            ),
+            transport=lambda *args, **kwargs: {
+                "totalRecordNum": 0,
+                "totalAnnouncement": 0,
+                "totalpages": 0,
+                "hasMore": False,
+                "announcements": [],
+            },
+        )
+        return LeaderOfficialDeterministicRiskFrozenBatch(
+            delivery=delivery,
+            document_contents=(),
         )
 
     @staticmethod
@@ -159,6 +222,31 @@ class LeaderPhase6ProductionReadinessTests(unittest.TestCase):
                 "risk",
             },
         )
+        self.assertFalse(result.formal_gate_ready)
+        self.assertFalse(result.formal_usable)
+        self.assertFalse(result.state_transition_allowed)
+
+    def test_official_deterministic_risk_completes_five_source_review_gate(self):
+        result = build_leader_phase6_production_readiness(
+            self.context,
+            repository=_ReviewRepositoryMustNotBeUsed(),
+            frozen_inputs=self.inputs(risk=self.risk_frozen()),
+            sector_threshold_approval_binder=self.approved_binder,
+        )
+
+        statuses = {
+            item.name: item.status for item in result.assembly.components
+        }
+        self.assertTrue(all(
+            status == LeaderFormalResearchRuntimeComponentStatus.READY
+            for status in statuses.values()
+        ), (statuses, result.assembly.reasons))
+        self.assertEqual(
+            result.acceptance.status,
+            LeaderFormalResearchProductionAcceptanceStatus.READY_FOR_REVIEW,
+        )
+        self.assertEqual(result.acceptance.missing_components, ())
+        self.assertFalse(result.formal_score_ready)
         self.assertFalse(result.formal_gate_ready)
         self.assertFalse(result.formal_usable)
         self.assertFalse(result.state_transition_allowed)

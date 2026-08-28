@@ -719,6 +719,20 @@ class LeaderRuntimeInputsTests(unittest.TestCase):
         )
         self.assertEqual(result.evidence_items, ())
 
+    def test_live_market_snapshot_arrays_are_accepted_without_legacy_counts(
+        self,
+    ):
+        market_snapshot = self.market_snapshot()
+        market_snapshot.pop("duplicateSymbolCount")
+        market_snapshot.pop("unknownSymbolCount")
+        market_snapshot["duplicateSymbols"] = ()
+        market_snapshot["unknownSymbols"] = ()
+
+        result = self.build(market_snapshot=market_snapshot)
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.item_count, 5)
+
     def test_top_five_keep_real_zero_without_inventing_scores(self):
         result = self.build()
 

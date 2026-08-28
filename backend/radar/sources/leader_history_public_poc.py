@@ -22,16 +22,32 @@ from radar.leader_history_features import (
 from radar.contracts import (
     IndustryClassificationRelease,
     IndustryHistoryStatus,
+    industry_classification_release_id,
 )
 from radar.leader_research_features import ResearchFeatureStatus
 
 
 PUBLIC_HISTORY_POC_CONTRACT_ID = "radar-leader-public-history-poc-v1"
 TENCENT_HISTORY_URL = (
-    "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
 )
 TENCENT_QFQ_CONTRACT_ID = "tencent-qfq-daily-history-v1"
+VERIFIED_NON_TRADING_ZERO_RETURN_CONTRACT_ID = (
+    "verified-non-trading-zero-return-alignment-v1"
+)
+TENCENT_QFQ_VERIFIED_NON_TRADING_CONTRACT_ID = (
+    f"{TENCENT_QFQ_CONTRACT_ID}+"
+    f"{VERIFIED_NON_TRADING_ZERO_RETURN_CONTRACT_ID}"
+)
+VERIFIED_NON_TRADING_PRESENCE_SOURCE_CONTRACT_ID = (
+    "tencent-qfq-daily-trading-presence-v1+"
+    "sina-daily-trading-presence-v1"
+)
 TENCENT_INDEX_CONTRACT_ID = "tencent-continuous-index-daily-v1"
+EASTMONEY_QFQ_CONTRACT_ID = "eastmoney-qfq-daily-history-v1"
+EASTMONEY_QFQ_URL = (
+    "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+)
 MAXIMUM_INDUSTRY_MEMBER_COUNT = 80
 REQUIRED_HISTORY_DATES = 21
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
@@ -54,6 +70,10 @@ class PublicHistorySeries:
     fetched_at: datetime
     content_sha256: str
     points: Tuple[AdjustedHistoryPoint, ...]
+    verified_non_trading_dates: Tuple[date, ...] = ()
+    upstream_content_sha256: Optional[str] = None
+    trading_presence_content_sha256: Optional[str] = None
+    trading_presence_source_contract_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -137,7 +157,7 @@ def build_point_in_time_industry_membership(
     if type(release) is not IndustryClassificationRelease:
         raise ValueError("industry_release_unverified")
     return PointInTimeIndustryMembership(
-        release_id=f"capco-{release.release_period}",
+        release_id=industry_classification_release_id(release),
         source_contract_id="capco-industry-classification-v1",
         industry_code=industry_code,
         candidate_symbol=candidate_symbol,
@@ -232,7 +252,56 @@ def parse_tencent_history_payload(
     )
 
 
-def _series_is_complete(
+def parse_eastmoney_qfq_rows(
+    *,
+    symbol: str,
+    rows: Any,
+    expected_trade_dates: Sequence[date],
+    fetched_at: datetime,
+) -> PublicHistorySeries:
+    """解析 AKShare 东方财富前复权日线，保持独立备用源身份。"""
+
+    if (
+        not _valid_symbol(symbol)
+        or not isinstance(rows, Sequence)
+        or isinstance(rows, (str, bytes))
+        or not _aware(fetched_at)
+    ):
+        raise ValueError("eastmoney_qfq_rows_invalid")
+    expected = set(expected_trade_dates)
+    points = []
+    canonical_rows = []
+    for row in rows:
+        if not isinstance(row, Mapping) or row.get("股票代码") != symbol:
+            continue
+        try:
+            trade_date = date.fromisoformat(str(row.get("日期"))[:10])
+            close = float(row.get("收盘"))
+        except (TypeError, ValueError):
+            continue
+        canonical_rows.append({
+            "date": trade_date.isoformat(),
+            "symbol": symbol,
+            "close": close,
+        })
+        if trade_date in expected:
+            points.append(AdjustedHistoryPoint(
+                trade_date=trade_date,
+                close=close,
+            ))
+    points.sort(key=lambda item: item.trade_date)
+    return PublicHistorySeries(
+        symbol=symbol,
+        source_contract_id=EASTMONEY_QFQ_CONTRACT_ID,
+        source_url=EASTMONEY_QFQ_URL,
+        adjustment_basis=HistoryAdjustmentBasis.FORWARD_ADJUSTED,
+        fetched_at=fetched_at,
+        content_sha256=_canonical_sha256(canonical_rows),
+        points=tuple(points),
+    )
+
+
+def is_public_history_series_complete(
     series: PublicHistorySeries,
     *,
     symbol: str,
@@ -240,16 +309,33 @@ def _series_is_complete(
     expected_adjustment: HistoryAdjustmentBasis,
     as_of: datetime,
 ) -> bool:
-    expected_contract = (
-        TENCENT_QFQ_CONTRACT_ID
+    expected_contracts = (
+        {
+            TENCENT_QFQ_CONTRACT_ID,
+            TENCENT_QFQ_VERIFIED_NON_TRADING_CONTRACT_ID,
+            EASTMONEY_QFQ_CONTRACT_ID,
+        }
         if expected_adjustment == HistoryAdjustmentBasis.FORWARD_ADJUSTED
-        else TENCENT_INDEX_CONTRACT_ID
+        else {TENCENT_INDEX_CONTRACT_ID}
+    )
+    expected_urls = {
+        TENCENT_QFQ_CONTRACT_ID: TENCENT_HISTORY_URL,
+        TENCENT_QFQ_VERIFIED_NON_TRADING_CONTRACT_ID: TENCENT_HISTORY_URL,
+        TENCENT_INDEX_CONTRACT_ID: TENCENT_HISTORY_URL,
+        EASTMONEY_QFQ_CONTRACT_ID: EASTMONEY_QFQ_URL,
+    }
+    derived = (
+        series.source_contract_id
+        == TENCENT_QFQ_VERIFIED_NON_TRADING_CONTRACT_ID
+        if isinstance(series, PublicHistorySeries)
+        else False
     )
     if (
         not isinstance(series, PublicHistorySeries)
         or series.symbol != symbol
-        or series.source_contract_id != expected_contract
-        or series.source_url != TENCENT_HISTORY_URL
+        or series.source_contract_id not in expected_contracts
+        or series.source_url
+        != expected_urls.get(series.source_contract_id)
         or series.adjustment_basis != expected_adjustment
         or not _aware(series.fetched_at)
         or series.fetched_at > as_of + timedelta(
@@ -257,6 +343,38 @@ def _series_is_complete(
         )
         or _SHA256_PATTERN.fullmatch(series.content_sha256) is None
         or tuple(item.trade_date for item in series.points) != expected_dates
+        or (
+            derived
+            and (
+                not series.verified_non_trading_dates
+                or series.verified_non_trading_dates
+                != tuple(sorted(set(series.verified_non_trading_dates)))
+                or not set(series.verified_non_trading_dates).issubset(
+                    set(expected_dates)
+                )
+                or _SHA256_PATTERN.fullmatch(
+                    series.upstream_content_sha256 or ""
+                ) is None
+                or _SHA256_PATTERN.fullmatch(
+                    series.trading_presence_content_sha256 or ""
+                ) is None
+                or not isinstance(
+                    series.trading_presence_source_contract_id,
+                    str,
+                )
+                or series.trading_presence_source_contract_id
+                != VERIFIED_NON_TRADING_PRESENCE_SOURCE_CONTRACT_ID
+            )
+        )
+        or (
+            not derived
+            and any((
+                series.verified_non_trading_dates,
+                series.upstream_content_sha256 is not None,
+                series.trading_presence_content_sha256 is not None,
+                series.trading_presence_source_contract_id is not None,
+            ))
+        )
     ):
         return False
     return all(
@@ -419,7 +537,7 @@ def run_public_history_input_poc(
             if symbol == query.board_index_symbol
             else HistoryAdjustmentBasis.FORWARD_ADJUSTED
         )
-        if series is not None and _series_is_complete(
+        if series is not None and is_public_history_series_complete(
             series,
             symbol=symbol,
             expected_dates=expected_dates,

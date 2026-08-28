@@ -1,5 +1,6 @@
 import copy
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 
 from radar.leader_business_material_human_extraction import (
@@ -13,6 +14,9 @@ from radar.leader_business_material_review_submission import (
     build_leader_business_material_review_template,
     load_leader_business_material_review_source_packet,
     parse_leader_business_material_review_submission,
+)
+from radar.leader_runtime_candidate_plan import (
+    derive_leader_runtime_candidate_plan_subset,
 )
 from tests.test_radar_leader_business_material_human_extraction import (
     LeaderBusinessMaterialHumanExtractionTests,
@@ -117,6 +121,39 @@ class LeaderBusinessMaterialReviewSubmissionTests(unittest.TestCase):
         self.assertEqual(
             loaded.candidate_plan.candidate_set_id,
             self.plan.candidate_set_id,
+        )
+
+    def test_derived_source_packet_preserves_parent_and_policy_identity(self):
+        derived = derive_leader_runtime_candidate_plan_subset(
+            self.plan,
+            symbols=tuple(item.symbol for item in self.plan.items[:2]),
+            derivation_policy_id="evidence-selection-v1",
+        )
+        queue = replace(
+            self.queue,
+            candidate_plan_id=derived.candidate_set_id,
+            candidate_count=derived.candidate_count,
+            items=self.queue.items[:2],
+        )
+
+        packet = build_leader_business_material_review_source_packet(
+            derived,
+            queue,
+        )
+        loaded = load_leader_business_material_review_source_packet(packet)
+
+        self.assertEqual(
+            loaded.status,
+            LeaderBusinessMaterialReviewSourcePacketStatus.READY,
+        )
+        self.assertEqual(loaded.candidate_plan, derived)
+        self.assertEqual(
+            loaded.candidate_plan.parent_candidate_set_id,
+            self.plan.candidate_set_id,
+        )
+        self.assertEqual(
+            loaded.candidate_plan.derivation_policy_id,
+            "evidence-selection-v1",
         )
         self.assertEqual(
             loaded.review_queue.items[0].documents[0].document_id,

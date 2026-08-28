@@ -15,14 +15,19 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from radar.contracts import (
+    IndustryClassificationRecord,
     IndustryClassificationSnapshot,
     IndustryClassificationRelease,
+    IndustryIdentityStatus,
+    IndustryRecordStatus,
     IndexQuoteSnapshot,
     QuoteSnapshot,
     SecurityMasterRecord,
+    SectorFeatureBatch,
     SourceBatch,
     SourceHealthResult,
     SourceStatus,
+    industry_classification_release_id,
 )
 from radar.leader_research_runtime_provider import (
     LeaderResearchRuntimeSourceContext,
@@ -36,7 +41,10 @@ from radar.leader_runtime_candidate_plan import (
 )
 from radar.market_cap_unit_evidence import build_market_cap_unit_evidence
 from radar.market_features import build_market_features
-from radar.sector_features import build_sector_features
+from radar.sector_features import (
+    build_sector_feature_runtime_rows,
+    build_sector_features,
+)
 from radar.source_health import SourceHealthPolicy, evaluate_source_health
 from radar.sources.industry_classification import fetch_industry_classification
 from radar.sources.market_indices import fetch_market_indices
@@ -163,12 +171,18 @@ class LeaderLiveCandidateRuntimeInputs:
     as_of: datetime
     security_master_batch: SourceBatch = field(repr=False)
     quote_batch: SourceBatch = field(repr=False)
+    index_batch: SourceBatch = field(repr=False)
+    classification_snapshot: IndustryClassificationSnapshot = field(
+        repr=False
+    )
     quote_health: SourceHealthResult = field(repr=False)
     market_snapshot: Mapping[str, Any] = field(repr=False)
     sector_rows: Tuple[Mapping[str, Any], ...] = field(repr=False)
+    sector_feature_batch: SectorFeatureBatch = field(repr=False)
     industry_records: Tuple[Any, ...] = field(repr=False)
     industry_release: IndustryClassificationRelease = field(repr=False)
     security_records: Tuple[SecurityMasterRecord, ...] = field(repr=False)
+    etf_symbols: Tuple[str, ...] = ()
     contract_id: str = (
         "radar-leader-live-candidate-runtime-inputs-v1"
     )
@@ -183,10 +197,8 @@ class LeaderLiveCandidateRuntimeInputs:
             "quoteHealthStatus": self.quote_health.status.value,
             "sectorCount": len(self.sector_rows),
             "industryRecordCount": len(self.industry_records),
-            "industryReleaseId": (
-                f"{self.industry_release.classification_system}:"
-                f"{self.industry_release.release_period}:"
-                f"{self.industry_release.document_sha256[:16]}"
+            "industryReleaseId": industry_classification_release_id(
+                self.industry_release
             ),
             "industryFirstObservedAt": (
                 self.industry_release.first_observed_at.isoformat()
@@ -342,6 +354,24 @@ def _release_document_identity(release: Any) -> Tuple[Any, ...]:
 
 def _release_identity(snapshot: IndustryClassificationSnapshot) -> Tuple[Any, ...]:
     return _release_document_identity(snapshot.release)
+
+
+def mapped_industry_unit_scope_symbols(
+    snapshot: IndustryClassificationSnapshot,
+) -> Tuple[str, ...]:
+    symbols = tuple(
+        record.security_identity
+        for record in snapshot.records
+        if (
+            type(record) is IndustryClassificationRecord
+            and record.record_status == IndustryRecordStatus.ACCEPTED
+            and record.identity_status != IndustryIdentityStatus.UNRESOLVED
+            and record.security_identity is not None
+        )
+    )
+    if not symbols or len(symbols) != len(set(symbols)):
+        raise ValueError("industry_mapped_unit_scope_unverified")
+    return symbols
 
 
 def _valid_security_batch(
@@ -797,20 +827,27 @@ def collect_leader_live_candidate_batch(
 
     try:
         stock_symbols = security_symbols
+        mapped_industry_symbols = mapped_industry_unit_scope_symbols(
+            collection_classification
+        )
         market_cap_evidence = build_market_cap_unit_evidence(
+            tuple(quote_batch.items),
+            stock_symbols=mapped_industry_symbols,
+        )
+        market_turnover_evidence = build_turnover_unit_evidence(
             tuple(quote_batch.items),
             stock_symbols=stock_symbols,
         )
-        turnover_evidence = build_turnover_unit_evidence(
+        sector_turnover_evidence = build_turnover_unit_evidence(
             tuple(quote_batch.items),
-            stock_symbols=stock_symbols,
+            stock_symbols=mapped_industry_symbols,
         )
         market_features = build_market_features(
             index_batch,
             quote_batch,
             stock_symbols=stock_symbols,
             etf_symbols=request.etf_symbols,
-            turnover_unit_status=turnover_evidence.status,
+            turnover_unit_status=market_turnover_evidence.status,
         )
         sector_features = build_sector_features(
             collection_classification,
@@ -818,7 +855,7 @@ def collect_leader_live_candidate_batch(
             stock_symbols=stock_symbols,
             etf_symbols=request.etf_symbols,
             market_cap_unit_status=market_cap_evidence.status,
-            turnover_unit_status=turnover_evidence.status,
+            turnover_unit_status=sector_turnover_evidence.status,
         )
     except Exception:
         return _result(
@@ -832,18 +869,13 @@ def collect_leader_live_candidate_batch(
         )
 
     market_snapshot = market_features.model_dump(by_alias=True)
-    industry_release_id = (
-        f"{collection_classification.release.classification_system}:"
-        f"{collection_classification.release.release_period}:"
-        f"{collection_classification.release.document_sha256[:16]}"
+    industry_release_id = industry_classification_release_id(
+        collection_classification.release
     )
-    sector_rows = tuple({
-        "radarRunId": sector_features.radar_run_id,
-        "asOf": sector_features.as_of,
-        "divisionCode": sector.division_code,
-        "divisionName": sector.division_name,
-        "industryReleaseId": industry_release_id,
-    } for sector in sector_features.sectors)
+    sector_rows = build_sector_feature_runtime_rows(
+        sector_features,
+        industry_release_id=industry_release_id,
+    )
     candidate_plan = build_leader_runtime_candidate_plan(
         LeaderRuntimeCandidatePlanInput(
             as_of=candidate_as_of,
@@ -895,11 +927,16 @@ def collect_leader_live_candidate_batch(
         as_of=candidate_as_of,
         security_master_batch=security_batch.model_copy(deep=True),
         quote_batch=quote_batch.model_copy(deep=True),
+        index_batch=index_batch.model_copy(deep=True),
+        classification_snapshot=(
+            collection_classification.model_copy(deep=True)
+        ),
         quote_health=quote_health.model_copy(deep=True),
         market_snapshot=MappingProxyType(copy.deepcopy(market_snapshot)),
         sector_rows=tuple(
             MappingProxyType(copy.deepcopy(row)) for row in sector_rows
         ),
+        sector_feature_batch=sector_features.model_copy(deep=True),
         industry_records=tuple(
             record.model_copy(deep=True)
             for record in collection_classification.records
@@ -908,6 +945,7 @@ def collect_leader_live_candidate_batch(
         security_records=tuple(
             record.model_copy(deep=True) for record in security_records
         ),
+        etf_symbols=request.etf_symbols,
     )
     return _result(
         status=LeaderLiveCandidateCollectionStatus.READY,
@@ -928,12 +966,18 @@ def build_default_leader_live_candidate_collection_sources(
     *,
     classification_publication_page_url: str,
     security_master_providers: Optional[SecurityMasterProviders] = None,
+    verify_official_classification_archive: bool = False,
     classification_release_loader: Optional[
         ClassificationReleaseLoader
     ] = None,
     classification_release_repository: Any = None,
 ) -> LeaderLiveCandidateCollectionSources:
     """构造默认公开源回调；仅创建回调，不在构造阶段联网。"""
+
+    if type(verify_official_classification_archive) is not bool:
+        raise ValueError(
+            "verify_official_classification_archive必须是布尔值"
+        )
 
     if (
         classification_release_loader is not None
@@ -972,6 +1016,9 @@ def build_default_leader_live_candidate_collection_sources(
             security_records,
             first_observed_at=kwargs.get("first_observed_at"),
             known_document_hashes=kwargs.get("known_document_hashes"),
+            verify_official_archive=(
+                verify_official_classification_archive
+            ),
         )
 
     def quote_loader(

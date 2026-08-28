@@ -105,7 +105,7 @@ def _failure_reason(exc: Exception) -> str:
         return "timeout"
     if isinstance(exc, requests.HTTPError):
         status = getattr(exc.response, "status_code", None)
-        if status == 429:
+        if status in {429, 456}:
             return "rate_limited"
         if status in {401, 403}:
             return "access_denied"

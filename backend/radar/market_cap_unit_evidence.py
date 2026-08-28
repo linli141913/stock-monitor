@@ -9,13 +9,13 @@ from typing import Any, Iterable, Sequence, Tuple
 
 from radar.contracts import QuoteSnapshot, UnitVerificationStatus
 from radar.sources.tencent_quotes import (
-    MARKET_CAP_CROSSCHECK_TOLERANCE_CNY,
     MARKET_CAP_SCALE_TO_CNY,
+    market_cap_crosscheck_matches,
 )
 
 
 MARKET_CAP_UNIT_EVIDENCE_CONTRACT_ID = "radar-market-cap-unit-evidence-v1"
-SYMBOL_PATTERN = re.compile(r"^[036][0-9]{5}$")
+SYMBOL_PATTERN = re.compile(r"^[034689][0-9]{5}$")
 
 
 @dataclass(frozen=True)
@@ -62,8 +62,10 @@ def _values_match(quote: QuoteSnapshot) -> bool:
     )
     return bool(
         abs(scaled_market_cap - float(quote.market_cap_cny)) <= 1e-6
-        and abs(scaled_market_cap - derived_market_cap)
-        <= MARKET_CAP_CROSSCHECK_TOLERANCE_CNY
+        and market_cap_crosscheck_matches(
+            scaled_market_cap,
+            derived_market_cap,
+        )
     )
 
 

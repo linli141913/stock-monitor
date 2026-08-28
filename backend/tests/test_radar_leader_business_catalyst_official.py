@@ -176,6 +176,11 @@ class LeaderBusinessCatalystOfficialTests(unittest.TestCase):
                     days_ago=2,
                 ),
                 row(
+                    "8054",
+                    "日常经营重大合同信息披露管理办法（2026年4月修订）",
+                    days_ago=2,
+                ),
+                row(
                     "8053",
                     "关于签订智算中心建设设备采购协议的公告",
                     days_ago=3,

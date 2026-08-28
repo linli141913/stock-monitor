@@ -315,11 +315,32 @@ def evaluate_sector_rule_readiness(
     threshold_approval_evidence: Optional[
         SectorThresholdApprovalEvidence
     ] = None,
+    required_division_codes: Optional[Tuple[str, ...]] = None,
     rule_version: str = SECTOR_RULE_VERSION,
 ) -> SectorRuleReadinessResult:
     """审计行业正式规则输入，任何证据缺口均封闭返回missing。"""
 
     _require_nonempty(rule_version, "行业规则版本")
+    if required_division_codes is not None:
+        _require_unique_strings(required_division_codes, "必需行业大类")
+        if not required_division_codes or any(
+            len(code) != 2 or not code.isdigit()
+            for code in required_division_codes
+        ):
+            raise ValueError("必需行业大类必须为非空2位数字代码")
+    required_codes = (
+        set(required_division_codes)
+        if required_division_codes is not None
+        else None
+    )
+    feature_codes = {
+        sector.division_code for sector in feature_batch.sectors
+    }
+    scoped_sectors = tuple(
+        sector
+        for sector in feature_batch.sectors
+        if required_codes is None or sector.division_code in required_codes
+    )
 
     classification_history_reasons = []
     if classification_release is None:
@@ -366,10 +387,14 @@ def evaluate_sector_rule_readiness(
     )
 
     mapping_reasons = []
-    if (
+    if required_codes is None and (
         feature_batch.classification_mapping_coverage != 1.0
         or feature_batch.unconfirmed_stock_count != 0
     ):
+        mapping_reasons.append(
+            "sector_classification_mapping_incomplete"
+        )
+    elif required_codes is not None and not required_codes <= feature_codes:
         mapping_reasons.append(
             "sector_classification_mapping_incomplete"
         )
@@ -383,12 +408,23 @@ def evaluate_sector_rule_readiness(
         for sector in feature_batch.sectors
         if _current_sector_ready(sector)
     )
+    scoped_ready_codes = tuple(
+        code
+        for code in current_ready_codes
+        if required_codes is None or code in required_codes
+    )
     allowed_batch_reasons = {"formal_use_not_approved"}
+    if required_codes is not None:
+        allowed_batch_reasons.update({
+            "classification_source_degraded",
+            "classification_mapping_incomplete",
+            "sector_features_incomplete",
+        })
     current_feature_reasons = []
     if any((
-        not feature_batch.shadow_usable,
-        not feature_batch.sectors,
-        len(current_ready_codes) != len(feature_batch.sectors),
+        required_codes is None and not feature_batch.shadow_usable,
+        not scoped_sectors,
+        len(scoped_ready_codes) != len(scoped_sectors),
         bool(feature_batch.duplicate_quote_symbols),
         bool(feature_batch.unknown_quote_symbols),
         bool(set(feature_batch.reasons) - allowed_batch_reasons),

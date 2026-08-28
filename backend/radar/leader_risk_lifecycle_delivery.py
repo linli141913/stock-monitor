@@ -88,6 +88,8 @@ class LeaderRiskLifecycleDeliveryResult:
     radar_run_id: Optional[str]
     quote_batch_id: Optional[str]
     as_of: Optional[datetime]
+    window_from: Optional[date] = None
+    window_until: Optional[date] = None
     request_count: int = 0
     fetched_page_count: int = 0
     category_count: int = 0
@@ -97,6 +99,14 @@ class LeaderRiskLifecycleDeliveryResult:
     lifecycle_result: Optional[
         LeaderRiskLifecycleBatchResult
     ] = field(default=None, repr=False)
+    discovery_batches: Tuple[OfficialRiskDiscoveryBatch, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
+    candidate_scopes: Tuple[CninfoRiskIssuerScope, ...] = field(
+        default_factory=tuple,
+        repr=False,
+    )
     contract_id: str = LEADER_RISK_LIFECYCLE_DELIVERY_CONTRACT_ID
     formal_score_ready: bool = False
     formal_gate_ready: bool = False
@@ -118,6 +128,12 @@ class LeaderRiskLifecycleDeliveryResult:
             "radarRunId": _safe_report_id(self.radar_run_id),
             "quoteBatchId": _safe_report_id(self.quote_batch_id),
             "asOf": self.as_of.isoformat() if self.as_of else None,
+            "windowFrom": (
+                self.window_from.isoformat() if self.window_from else None
+            ),
+            "windowUntil": (
+                self.window_until.isoformat() if self.window_until else None
+            ),
             "requestCount": self.request_count,
             "fetchedPageCount": self.fetched_page_count,
             "categoryCount": self.category_count,
@@ -377,6 +393,9 @@ def _result(
     candidate_scope_count: int = 0,
     shard_count: int = 0,
     lifecycle_result: Optional[LeaderRiskLifecycleBatchResult] = None,
+    candidate_scopes: Sequence[CninfoRiskIssuerScope] = (),
+    window_from: Optional[date] = None,
+    window_until: Optional[date] = None,
 ) -> LeaderRiskLifecycleDeliveryResult:
     fetched_batches = tuple(
         batch
@@ -399,6 +418,8 @@ def _result(
         radar_run_id=plan.radar_run_id if plan is not None else None,
         quote_batch_id=plan.quote_batch_id if plan is not None else None,
         as_of=as_of,
+        window_from=window_from,
+        window_until=window_until,
         request_count=request_count,
         fetched_page_count=len(fetched_batches),
         category_count=len(categories),
@@ -406,6 +427,8 @@ def _result(
         shard_count=shard_count,
         reasons=_dedupe(reasons),
         lifecycle_result=lifecycle_result,
+        discovery_batches=tuple(batches),
+        candidate_scopes=tuple(candidate_scopes),
     )
 
 
@@ -968,4 +991,7 @@ def deliver_leader_risk_lifecycle(
         candidate_scope_count=len(input_value.candidate_scopes),
         shard_count=len(scope_shards),
         lifecycle_result=lifecycle,
+        candidate_scopes=input_value.candidate_scopes,
+        window_from=input_value.window_from,
+        window_until=input_value.window_until,
     )

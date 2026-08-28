@@ -9,7 +9,11 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
-from radar.contracts import SourceHealthResult, SourceStatus
+from radar.contracts import (
+    SourceHealthResult,
+    SourceStatus,
+    industry_classification_release_id,
+)
 from radar.leader_formal_research_production_provider import (
     LeaderFormalResearchProductionCollectedSource,
     LeaderFormalResearchProductionSourceStatus,
@@ -20,7 +24,14 @@ from radar.leader_live_candidate_collection_batch import (
     LeaderLiveCandidateCollectionSources,
     LeaderLiveCandidateCollectionStatus,
     LeaderLiveCandidateRuntimeInputs,
+    mapped_industry_unit_scope_symbols,
     collect_leader_live_candidate_batch,
+)
+from radar.leader_phase6_live_prefreeze import (
+    LeaderPhase6PlanPrefreezeEvidence,
+    LeaderPhase6PrefrozenInputs,
+    bind_leader_phase6_prefrozen_inputs,
+    validate_leader_phase6_plan_prefreeze_evidence,
 )
 from radar.leader_research_runtime_provider import (
     build_leader_research_runtime_source_context,
@@ -38,9 +49,16 @@ from radar.leader_tradability_production_collector import (
     LeaderTradabilityProductionFrozenBatch,
     collect_leader_tradability_production_source,
 )
+from radar.market_cap_unit_evidence import build_market_cap_unit_evidence
+from radar.market_features import build_market_features
+from radar.sector_features import (
+    build_sector_feature_runtime_rows,
+    build_sector_features,
+)
 from radar.source_health import SourceHealthPolicy, evaluate_source_health
 from radar.sources.leader_tradability_exchange_official import (
     ExchangeOfficialObservationBatch,
+    MAXIMUM_WORKERS as EXCHANGE_OFFICIAL_MAXIMUM_WORKERS,
     collect_exchange_official_observations,
 )
 from radar.sources.leader_tradability_public_live_poc import (
@@ -60,6 +78,7 @@ from radar.sources.leader_tradability_public_poc import (
     PublicCompositeTradabilityReport,
     run_public_composite_tradability_poc,
 )
+from radar.turnover_unit_evidence import build_turnover_unit_evidence
 
 
 LEADER_TRADABILITY_LIVE_ACCEPTANCE_CONTRACT_ID = (
@@ -77,6 +96,10 @@ class LeaderTradabilityLiveAcceptanceStatus(str, Enum):
 OfficialLoader = Callable[[Tuple[Any, ...], date], Any]
 LifecycleLoader = Callable[[Tuple[Any, ...]], Any]
 CalendarLoader = Callable[[datetime], Any]
+Phase6PrefreezeLoader = Callable[
+    [LeaderLiveCandidateRuntimeInputs, datetime],
+    LeaderPhase6PlanPrefreezeEvidence,
+]
 
 
 @dataclass(frozen=True)
@@ -112,6 +135,14 @@ class LeaderTradabilityLiveAcceptanceResult:
         default=None,
         repr=False,
     )
+    source_context: Optional[LeaderResearchRuntimeSourceContext] = field(
+        default=None,
+        repr=False,
+    )
+    runtime_inputs: Optional[LeaderLiveCandidateRuntimeInputs] = field(
+        default=None,
+        repr=False,
+    )
     report: Optional[PublicCompositeTradabilityReport] = field(
         default=None,
         repr=False,
@@ -122,6 +153,9 @@ class LeaderTradabilityLiveAcceptanceResult:
     )
     collected_source: Optional[
         LeaderFormalResearchProductionCollectedSource
+    ] = field(default=None, repr=False)
+    phase6_prefrozen_inputs: Optional[
+        LeaderPhase6PrefrozenInputs
     ] = field(default=None, repr=False)
     contract_id: str = LEADER_TRADABILITY_LIVE_ACCEPTANCE_CONTRACT_ID
     formal_score_ready: bool = False
@@ -166,6 +200,10 @@ class LeaderTradabilityLiveAcceptanceResult:
                 if self.collected_source is not None
                 else None
             ),
+            "phase6PrefrozenInputsReady": (
+                self.phase6_prefrozen_inputs is not None
+            ),
+            "runtimeInputsReady": self.runtime_inputs is not None,
             "gate": {
                 "formalScoreReady": False,
                 "formalGateReady": False,
@@ -197,12 +235,17 @@ def _result(
     ] = None,
     as_of: Optional[datetime] = None,
     candidate_plan: Optional[LeaderRuntimeCandidatePlan] = None,
+    source_context: Optional[LeaderResearchRuntimeSourceContext] = None,
+    runtime_inputs: Optional[LeaderLiveCandidateRuntimeInputs] = None,
     reasons: Sequence[str] = (),
     source_statuses: Optional[Mapping[str, str]] = None,
     report: Optional[PublicCompositeTradabilityReport] = None,
     frozen_batch: Optional[LeaderTradabilityProductionFrozenBatch] = None,
     collected_source: Optional[
         LeaderFormalResearchProductionCollectedSource
+    ] = None,
+    phase6_prefrozen_inputs: Optional[
+        LeaderPhase6PrefrozenInputs
     ] = None,
 ) -> LeaderTradabilityLiveAcceptanceResult:
     active_plan = candidate_plan or (
@@ -232,9 +275,12 @@ def _result(
         source_statuses=MappingProxyType(dict(source_statuses or {})),
         candidate_collection=candidate_collection,
         candidate_plan=active_plan,
+        source_context=source_context,
+        runtime_inputs=runtime_inputs,
         report=report,
         frozen_batch=frozen_batch,
         collected_source=collected_source,
+        phase6_prefrozen_inputs=phase6_prefrozen_inputs,
     )
 
 
@@ -245,6 +291,7 @@ def build_default_leader_tradability_live_acceptance_sources(
             collect_exchange_official_observations(
                 contexts=contexts,
                 trading_date=trading_date,
+                max_workers=EXCHANGE_OFFICIAL_MAXIMUM_WORKERS,
             )
         ),
         lifecycle_loader=lambda contexts: _fetch_sina_lifecycle_frame(
@@ -296,6 +343,22 @@ def _refreeze_runtime_inputs(
         },
         deep=True,
     )
+    index_batch = runtime.index_batch.model_copy(
+        update={
+            "meta": runtime.index_batch.meta.model_copy(
+                update={"as_of": as_of}
+            )
+        },
+        deep=True,
+    )
+    classification = runtime.classification_snapshot.model_copy(
+        update={
+            "meta": runtime.classification_snapshot.meta.model_copy(
+                update={"as_of": as_of}
+            )
+        },
+        deep=True,
+    )
     quote_health = _quote_health(quote_batch, as_of)
     if (
         quote_health.status != SourceStatus.HEALTHY
@@ -305,13 +368,58 @@ def _refreeze_runtime_inputs(
             "quote_source_not_healthy_after_evidence",
             *quote_health.reasons,
         )
+    try:
+        stock_symbols = tuple(
+            record.symbol for record in runtime.security_records
+        )
+        mapped_industry_symbols = mapped_industry_unit_scope_symbols(
+            classification
+        )
+        market_cap_evidence = build_market_cap_unit_evidence(
+            tuple(quote_batch.items),
+            stock_symbols=mapped_industry_symbols,
+        )
+        market_turnover_evidence = build_turnover_unit_evidence(
+            tuple(quote_batch.items),
+            stock_symbols=stock_symbols,
+        )
+        sector_turnover_evidence = build_turnover_unit_evidence(
+            tuple(quote_batch.items),
+            stock_symbols=mapped_industry_symbols,
+        )
+        market_features = build_market_features(
+            index_batch,
+            quote_batch,
+            stock_symbols=stock_symbols,
+            etf_symbols=runtime.etf_symbols,
+            turnover_unit_status=market_turnover_evidence.status,
+        )
+        sector_features = build_sector_features(
+            classification,
+            quote_batch,
+            stock_symbols=stock_symbols,
+            etf_symbols=runtime.etf_symbols,
+            market_cap_unit_status=market_cap_evidence.status,
+            turnover_unit_status=sector_turnover_evidence.status,
+        )
+    except Exception:
+        return None, ("feature_refreeze_contract_rejected",)
+    market_snapshot = market_features.model_dump(by_alias=True)
+    release = classification.release
+    if release is None:
+        return None, ("classification_release_missing_after_refreeze",)
+    industry_release_id = industry_classification_release_id(release)
+    sector_rows = build_sector_feature_runtime_rows(
+        sector_features,
+        industry_release_id=industry_release_id,
+    )
     candidate_plan = build_leader_runtime_candidate_plan(
         LeaderRuntimeCandidatePlanInput(
             as_of=as_of,
             quote_batch=quote_batch,
             quote_health=quote_health,
-            market_snapshot=runtime.market_snapshot,
-            sector_rows=runtime.sector_rows,
+            market_snapshot=market_snapshot,
+            sector_rows=sector_rows,
             industry_records=runtime.industry_records,
             security_records=runtime.security_records,
         )
@@ -339,14 +447,17 @@ def _refreeze_runtime_inputs(
         as_of=as_of,
         security_master_batch=runtime.security_master_batch.model_copy(deep=True),
         quote_batch=quote_batch,
+        index_batch=index_batch,
+        classification_snapshot=classification,
         quote_health=quote_health.model_copy(deep=True),
         market_snapshot=MappingProxyType(copy.deepcopy(
-            dict(runtime.market_snapshot)
+            market_snapshot
         )),
         sector_rows=tuple(
             MappingProxyType(copy.deepcopy(dict(row)))
-            for row in runtime.sector_rows
+            for row in sector_rows
         ),
+        sector_feature_batch=sector_features.model_copy(deep=True),
         industry_records=tuple(
             record.model_copy(deep=True)
             for record in runtime.industry_records
@@ -356,6 +467,7 @@ def _refreeze_runtime_inputs(
             record.model_copy(deep=True)
             for record in runtime.security_records
         ),
+        etf_symbols=runtime.etf_symbols,
     ), ()
 
 
@@ -384,6 +496,8 @@ def _frame_fetched_at(
 def finalize_leader_tradability_live_acceptance(
     candidate_collection: Any,
     evidence_sources: Any,
+    *,
+    phase6_prefreeze_loader: Optional[Phase6PrefreezeLoader] = None,
 ) -> LeaderTradabilityLiveAcceptanceResult:
     statuses = {"candidateCollection": "source_unverified"}
     if (
@@ -568,11 +682,55 @@ def finalize_leader_tradability_live_acceptance(
         )
     statuses["tradingCalendar"] = "completed"
 
-    final_as_of = max(
+    provisional_as_of = max(
         runtime.as_of,
         official_fetched_at,
         lifecycle_fetched_at,
         calendar_fetched_at,
+    )
+    phase6_prefreeze_evidence = None
+    if phase6_prefreeze_loader is not None:
+        if not callable(phase6_prefreeze_loader):
+            statuses["phase6Prefreeze"] = "source_unverified"
+            return _result(
+                LeaderTradabilityLiveAcceptanceStatus.SOURCE_UNVERIFIED,
+                candidate_collection=candidate_collection,
+                as_of=provisional_as_of,
+                reasons=("phase6_prefreeze_loader_unverified",),
+                source_statuses=statuses,
+            )
+        try:
+            phase6_prefreeze_evidence = phase6_prefreeze_loader(
+                runtime,
+                provisional_as_of,
+            )
+        except Exception:
+            statuses["phase6Prefreeze"] = "source_failed"
+            return _result(
+                LeaderTradabilityLiveAcceptanceStatus.SOURCE_FAILED,
+                candidate_collection=candidate_collection,
+                as_of=provisional_as_of,
+                reasons=("phase6_prefreeze_source_failed",),
+                source_statuses=statuses,
+            )
+        prefreeze_reasons = validate_leader_phase6_plan_prefreeze_evidence(
+            runtime,
+            phase6_prefreeze_evidence,
+            provisional_as_of=provisional_as_of,
+        )
+        if prefreeze_reasons:
+            statuses["phase6Prefreeze"] = "source_unverified"
+            return _result(
+                LeaderTradabilityLiveAcceptanceStatus.SOURCE_UNVERIFIED,
+                candidate_collection=candidate_collection,
+                as_of=provisional_as_of,
+                reasons=prefreeze_reasons,
+                source_statuses=statuses,
+            )
+        statuses["phase6Prefreeze"] = "completed"
+    final_as_of = max(
+        provisional_as_of,
+        getattr(phase6_prefreeze_evidence, "completed_at", provisional_as_of),
     )
     refrozen, refreeze_reasons = _refreeze_runtime_inputs(
         runtime,
@@ -588,6 +746,23 @@ def finalize_leader_tradability_live_acceptance(
             source_statuses=statuses,
         )
     statuses["candidateRefreeze"] = "completed"
+    phase6_prefrozen_inputs = None
+    if phase6_prefreeze_evidence is not None:
+        try:
+            phase6_prefrozen_inputs = bind_leader_phase6_prefrozen_inputs(
+                refrozen,
+                phase6_prefreeze_evidence,
+            )
+        except (TypeError, ValueError):
+            statuses["phase6Prefreeze"] = "source_unverified"
+            return _result(
+                LeaderTradabilityLiveAcceptanceStatus.SOURCE_UNVERIFIED,
+                candidate_collection=candidate_collection,
+                as_of=final_as_of,
+                candidate_plan=refrozen.candidate_plan,
+                reasons=("phase6_prefreeze_final_binding_unverified",),
+                source_statuses=statuses,
+            )
     try:
         quotes, quote_evidence = build_public_quote_evidence(
             refrozen.quote_batch,
@@ -685,10 +860,13 @@ def finalize_leader_tradability_live_acceptance(
         candidate_collection=candidate_collection,
         as_of=final_as_of,
         candidate_plan=refrozen.candidate_plan,
+        source_context=refrozen.source_context,
+        runtime_inputs=refrozen,
         source_statuses=statuses,
         report=report,
         frozen_batch=frozen,
         collected_source=collected,
+        phase6_prefrozen_inputs=phase6_prefrozen_inputs,
     )
 
 
@@ -700,6 +878,7 @@ def run_leader_tradability_live_acceptance(
     evidence_sources: Optional[
         LeaderTradabilityLiveAcceptanceSources
     ] = None,
+    phase6_prefreeze_loader: Optional[Phase6PrefreezeLoader] = None,
 ) -> LeaderTradabilityLiveAcceptanceResult:
     candidate_collection = collect_leader_live_candidate_batch(
         request,
@@ -710,4 +889,5 @@ def run_leader_tradability_live_acceptance(
         candidate_collection,
         evidence_sources
         or build_default_leader_tradability_live_acceptance_sources(),
+        phase6_prefreeze_loader=phase6_prefreeze_loader,
     )

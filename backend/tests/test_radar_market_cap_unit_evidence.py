@@ -97,6 +97,32 @@ class MarketCapUnitEvidenceTests(unittest.TestCase):
             ("market_cap_unit_value_unverified",),
         )
 
+    def test_exact_half_unit_float_boundary_remains_verified(self):
+        result = self.build(
+            (quote(
+                "600563",
+                raw_market_cap=283.90,
+                market_cap_cny=283.90 * 100_000_000.0,
+                price=126.18,
+                total_shares=225_000_000.0,
+            ),),
+            ("600563",),
+        )
+
+        self.assertEqual(result.status, UnitVerificationStatus.VERIFIED)
+        self.assertEqual(result.verified_stock_count, 1)
+        self.assertEqual(result.reasons, ())
+
+    def test_bse_a_share_codes_are_inside_the_unit_evidence_scope(self):
+        result = self.build(
+            (quote("920001"), quote("430001")),
+            ("920001", "430001"),
+        )
+
+        self.assertEqual(result.status, UnitVerificationStatus.VERIFIED)
+        self.assertEqual(result.verified_stock_count, 2)
+        self.assertEqual(result.reasons, ())
+
     def test_missing_or_duplicate_stock_quotes_never_verify_the_batch(self):
         cases = (
             (

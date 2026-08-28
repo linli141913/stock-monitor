@@ -311,6 +311,19 @@ class IndustryClassificationRelease(ContractModel):
         return self
 
 
+def industry_classification_release_id(
+    release: IndustryClassificationRelease,
+) -> str:
+    """生成行业发布版本在雷达合同中的唯一身份。"""
+
+    if type(release) is not IndustryClassificationRelease:
+        raise ValueError("industry_release_unverified")
+    return (
+        f"{release.classification_system}:{release.release_period}:"
+        f"{release.document_sha256[:16]}"
+    )
+
+
 class IndustryClassificationRecord(ContractModel):
     classification_system: str = Field(
         default="capco_listed_company_industry",

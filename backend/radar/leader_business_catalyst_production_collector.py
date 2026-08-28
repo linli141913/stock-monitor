@@ -14,6 +14,9 @@ from radar.leader_business_catalyst_manual_review import (
     LeaderOfficialBusinessManualReviewArtifact,
     LeaderOfficialBusinessManualReviewBatchEntry,
 )
+from radar.leader_business_automatic_contracts import (
+    MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS,
+)
 from radar.leader_business_catalyst_official_adapter import (
     LeaderOfficialBusinessMaterialBatchEntry,
     LeaderOfficialBusinessProofArtifact,
@@ -190,8 +193,37 @@ def _source_time(source_batch: Any) -> Optional[datetime]:
                 or not _aware(entry.verification_artifact.validated_at)
             ):
                 return None
-            times.append(entry.verification_artifact.validated_at)
+            artifact = entry.verification_artifact
+            official_times = (
+                artifact.annual_facts.source_time,
+                artifact.catalyst_facts.source_time,
+            )
+            if any(not _aware(value) for value in official_times):
+                return None
+            times.extend(official_times)
     return max(times) if times else None
+
+
+def _completion_time(source_batch: Any) -> Optional[datetime]:
+    verification_entries = getattr(
+        source_batch,
+        "verification_entries",
+        None,
+    )
+    entries = (
+        tuple(
+            getattr(entry.review_artifact, "reviewed_at", None)
+            for entry in source_batch.review_entries
+        )
+        if verification_entries is None
+        else tuple(
+            getattr(entry.verification_artifact, "validated_at", None)
+            for entry in verification_entries
+        )
+    )
+    if not entries or any(not _aware(value) for value in entries):
+        return None
+    return max(entries)
 
 
 def collect_leader_business_catalyst_production_source(
@@ -224,14 +256,30 @@ def collect_leader_business_catalyst_production_source(
         return _collected(frozen.source_status)
 
     source_time = _source_time(frozen.source_batch)
+    completion_time = _completion_time(frozen.source_batch)
+    deterministic = getattr(
+        frozen.source_batch,
+        "verification_entries",
+        None,
+    ) is not None
+    maximum_collection_delay = (
+        MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS
+        if deterministic
+        else MAXIMUM_FUTURE_SKEW_SECONDS
+    )
     if (
         source_time is None
+        or completion_time is None
         or not _aware(frozen.fetched_at)
         or frozen.fetched_at + timedelta(
             seconds=MAXIMUM_FUTURE_SKEW_SECONDS
-        ) < source_time
+        ) < completion_time
         or frozen.fetched_at > context.as_of + timedelta(
-            seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            seconds=maximum_collection_delay
+        )
+        or (
+            deterministic
+            and source_time > context.as_of
         )
     ):
         return _collected(

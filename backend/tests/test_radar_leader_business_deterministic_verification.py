@@ -13,6 +13,7 @@ from radar.leader_business_catalyst_facts import (
 from radar.leader_business_catalyst_features import BusinessCatalystRelation
 from radar.leader_business_deterministic_verification import (
     build_deterministic_official_business_verification,
+    replay_deterministic_official_business_verification,
 )
 from radar.leader_business_document_facts import (
     OfficialBusinessEvidenceFragment,
@@ -98,6 +99,55 @@ def catalyst_facts(*, terms=("工业软件",), negative=False, **changes):
 
 
 class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
+    def test_post_plan_validation_replays_against_original_fact_cutoff(self):
+        validated_at = AS_OF + timedelta(hours=1)
+        built = build_deterministic_official_business_verification(
+            plan_item(),
+            annual_facts(validated_at=validated_at),
+            (catalyst_facts(validated_at=validated_at),),
+            validated_at=validated_at,
+        )
+
+        replayed = replay_deterministic_official_business_verification(
+            built.artifact,
+            as_of=AS_OF,
+        )
+
+        self.assertEqual(built.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            replayed.status,
+            AutomaticBusinessEvidenceStatus.READY,
+        )
+        self.assertEqual(replayed.artifact.validated_at, validated_at)
+        self.assertLessEqual(
+            replayed.artifact.annual_facts.source_time,
+            AS_OF,
+        )
+        self.assertLessEqual(
+            replayed.artifact.catalyst_facts.source_time,
+            AS_OF,
+        )
+
+    def test_validation_more_than_one_day_after_plan_is_rejected(self):
+        validated_at = AS_OF + timedelta(days=1, seconds=1)
+        built = build_deterministic_official_business_verification(
+            plan_item(),
+            annual_facts(validated_at=validated_at),
+            (catalyst_facts(validated_at=validated_at),),
+            validated_at=validated_at,
+        )
+
+        replayed = replay_deterministic_official_business_verification(
+            built.artifact,
+            as_of=AS_OF,
+        )
+
+        self.assertEqual(
+            replayed.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertIsNone(replayed.artifact)
+
     def test_exact_non_generic_term_builds_direct_versioned_artifact(self):
         result = build_deterministic_official_business_verification(
             plan_item(),
@@ -111,7 +161,7 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
         self.assertEqual(result.artifact.matched_terms, ("工业软件",))
         self.assertEqual(
             result.artifact.rule_version,
-            "radar-leader-business-deterministic-relation-v24",
+            "radar-leader-business-deterministic-relation-v31",
         )
         self.assertRegex(result.artifact.verification_id, r"^business-auto:[0-9a-f]{64}$")
         self.assertFalse(result.artifact.formal_usable)

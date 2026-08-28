@@ -7,6 +7,9 @@ from radar.leader_business_catalyst_production_collector import (
     build_leader_business_catalyst_production_loader,
     collect_leader_business_catalyst_production_source,
 )
+from radar.leader_business_deterministic_verification import (
+    build_deterministic_official_business_verification,
+)
 from radar.leader_formal_research_production_collectors import (
     LeaderFormalResearchProductionSourceLoaders,
     build_leader_formal_research_validated_provider_set,
@@ -95,6 +98,43 @@ class LeaderBusinessCatalystProductionCollectorTests(unittest.TestCase):
             tuple(item.symbol for item in self.context.candidate_plan.items),
         )
 
+    def test_post_plan_deterministic_collection_preserves_official_cutoff(self):
+        collected_at = self.context.as_of + timedelta(hours=1)
+        original = self.helper.deterministic_source_batch()
+        entries = tuple(
+            replace(
+                entry,
+                verification_artifact=(
+                    build_deterministic_official_business_verification(
+                        plan_item,
+                        entry.verification_artifact.annual_facts,
+                        (entry.verification_artifact.catalyst_facts,),
+                        validated_at=collected_at,
+                    ).artifact
+                ),
+            )
+            for plan_item, entry in zip(
+                self.context.candidate_plan.items,
+                original.verification_entries,
+            )
+        )
+        source_batch = replace(original, verification_entries=entries)
+
+        source = collect_leader_business_catalyst_production_source(
+            self.context,
+            self.frozen(
+                source_batch=source_batch,
+                fetched_at=collected_at,
+            ),
+        )
+
+        self.assertEqual(
+            source.status,
+            LeaderFormalResearchProductionSourceStatus.COMPLETED,
+        )
+        self.assertLessEqual(source.source_time, self.context.as_of)
+        self.assertEqual(source.fetched_at, collected_at)
+
     def test_one_second_source_server_clock_lead_reaches_provider(self):
         source_batch = replace(
             self.source_batch,
@@ -180,14 +220,16 @@ class LeaderBusinessCatalystProductionCollectorTests(unittest.TestCase):
         )
         self.assertIsNone(source.payload)
 
-    def test_cross_plan_and_late_fetch_are_rejected(self):
+    def test_cross_plan_and_more_than_one_day_late_fetch_are_rejected(self):
         cases = (
             self.frozen(source_batch=replace(
                 self.source_batch,
                 candidate_plan_id="other-plan",
             )),
             self.frozen(
-                fetched_at=self.context.as_of + timedelta(seconds=6),
+                fetched_at=(
+                    self.context.as_of + timedelta(days=1, seconds=1)
+                ),
             ),
         )
 

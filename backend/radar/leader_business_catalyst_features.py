@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from radar.leader_business_automatic_contracts import (
     DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION,
+    MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS,
 )
 from radar.leader_research_features import ResearchFeatureStatus
 
@@ -588,7 +589,15 @@ def build_leader_business_catalyst_features(
         )
     if any(
         reviewed_at > as_of
-        for reviewed_at, _ in review_times
+        and (
+            review.review_method != "deterministic_official"
+            or reviewed_at > as_of + timedelta(
+                seconds=(
+                    MAXIMUM_DETERMINISTIC_COLLECTION_DELAY_SECONDS
+                )
+            )
+        )
+        for review, (reviewed_at, _) in zip(reviews, review_times)
     ):
         return _invalid_result(
             ResearchFeatureStatus.SOURCE_UNVERIFIED,

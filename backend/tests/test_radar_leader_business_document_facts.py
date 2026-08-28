@@ -116,6 +116,28 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
         self.assertNotIn("工业软件", repr(result))
         self.assertFalse(result.formal_usable)
 
+    def test_official_metals_activity_keeps_atomic_business_object(self):
+        result = extract_official_business_facts(
+            plan_item(
+                industry_code="32",
+                industry_name="有色金属矿采选业",
+            ),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司主要从事铜、铅、锌、金、银等多种有色金属、"
+                    "贵金属的采选、冶炼和加工。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertIn("贵金属", result.business_terms)
+
     def test_directory_only_business_hit_is_not_evidence(self):
         result = extract_official_business_facts(
             plan_item(),
@@ -159,6 +181,32 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
             ("business_fact_identity_unverified",),
         )
 
+    def test_inline_industry_phrase_is_not_a_declared_industry(self):
+        result = extract_official_business_facts(
+            plan_item(
+                industry_code="70",
+                industry_name="房地产业",
+            ),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "1、房地产经纪服务\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+                (
+                    89,
+                    "评价管理层对资产组的认定，以及宏观经济和所属行业"
+                    "的发展趋势；复核评估机构出具的报告。"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("房地产经纪服务",))
+
     def test_versioned_plan_industry_need_not_be_repeated_in_annual_report(self):
         result = extract_official_business_facts(
             plan_item(),
@@ -190,6 +238,29 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("工业软件", "云平台"))
 
+    def test_exchange_heading_with_suo_enters_primary_business_section(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    15,
+                    "一、报告期内公司所从事的主要业务、经营模式、"
+                    "行业情况说明\n"
+                    "(一)主要业务、主要产品或服务情况\n"
+                    "1.主要业务的情况\n"
+                    "(1)操作系统业务\n公司提供相关产品和服务。\n"
+                    "新增重要非主营业务情况\n"
+                    "(二)主要经营模式\n"
+                    "1.行业解决方案\n公司介绍采购流程。"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("操作系统",))
+
     def test_real_main_business_heading_and_numbered_items_are_extracted(self):
         result = extract_official_business_facts(
             plan_item(),
@@ -202,6 +273,7 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
                     "报告期内，公司以森林经营和板材家居为主业。\n"
                     "1、森林经营：公司开展良种繁育和造林营林。\n"
                     "2、板材家居领域：公司提供全屋定制产品。\n"
+                    "4.67\n75.42\n69.00%433,6\n"
                     "二、报告期内公司所处行业情况\n"
                     "1、林业行业发展情况。"
                 ),
@@ -216,6 +288,56 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
         self.assertTrue(all(
             fragment.page_number == 12 for fragment in result.fragments
         ))
+
+    def test_existing_named_business_in_primary_section_is_official_term(self):
+        result = extract_official_business_facts(
+            plan_item(
+                industry_code="70",
+                industry_name="房地产业",
+            ),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    10,
+                    "一、报告期内公司从事的主要业务\n"
+                    "1、产城空间开发\n"
+                    "公司空间开发板块致力于住宅、写字楼、产业园区"
+                    "等不同业态的开发。基于现有房地产开发业务，公司将通过"
+                    "存量优化提升与增量开发建设并进。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertIn("房地产开发", result.business_terms)
+
+    def test_existing_business_phrase_rejects_generic_objects(self):
+        for phrase in (
+            "基于现有相关业务，公司稳步经营。",
+            "基于现有公司业务，管理层提升效率。",
+            "基于现有业务，公司将优化布局。",
+        ):
+            with self.subTest(phrase=phrase):
+                result = extract_official_business_facts(
+                    plan_item(),
+                    selection(),
+                    content(
+                        (8, "证券代码000001"),
+                        (20,
+                            "一、报告期内公司从事的主要业务\n"
+                            f"{phrase}\n"
+                            "二、报告期内公司所处行业情况"
+                        ),
+                    ),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
 
     def test_pdf_spacing_inside_official_business_subheading_is_normalized(self):
         result = extract_official_business_facts(
@@ -357,6 +479,161 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
 
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("工业软件",))
+
+    def test_multi_page_business_overview_keeps_explicit_product_lists(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司开展养殖与销售。"
+                ),
+                (
+                    21,
+                    "2、公司主要产品及用途\n"
+                    "主要产品为商品代肉鸡苗、商品代鸡苗除自用外，"
+                    "主要销售给养殖客户。\n"
+                    "主要产品包括钨矿、锡矿。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            ("商品代肉鸡苗", "商品代鸡苗", "钨矿", "锡矿"),
+        )
+
+    def test_explicit_main_business_includes_named_businesses(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "报告期内，公司的主营业务包括乳业和信息业务，"
+                    "主要产品及经营模式未发生变化。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("乳业", "信息"))
+
+    def test_numbered_named_product_description_is_business_evidence(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "2、盐酸贝尼地平片（注册商标：元治®）为国内首仿，"
+                    "用于原发性高血压。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("盐酸贝尼地平片",))
+
+    def test_company_product_output_sentence_keeps_both_named_products(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司产品以炼焦精煤为主，占公司商品煤产量50%以上。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("炼焦精煤", "商品煤"))
+
+    def test_named_product_patterns_do_not_cross_business_section_boundary(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司经营保持稳定。\n"
+                    "二、报告期内公司所处行业情况\n"
+                    "行业主要产品包括钨矿、锡矿。\n"
+                    "2、盐酸贝尼地平片（注册商标）为行业常见产品。\n"
+                    "行业产品以炼焦精煤为主，占全国商品煤产量较高。"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
+
+    def test_company_business_list_after_industry_heading_remains_evidence(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司经营保持稳定。\n"
+                    "二、报告期内公司所处行业情况\n"
+                    "（一）公司主要业务、产品及应用领域\n"
+                    "报告期内，公司从事的主要业务包括钨精矿、"
+                    "仲钨酸铵、钨粉及碳化钨粉、硬质合金。"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(
+            result.business_terms,
+            ("钨精矿", "仲钨酸铵", "钨粉", "碳化钨粉", "硬质合金"),
+        )
+
+    def test_peer_company_business_list_after_industry_heading_is_not_evidence(self):
+        result = extract_official_business_facts(
+            plan_item(),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "公司经营保持稳定。\n"
+                    "二、报告期内公司所处行业情况\n"
+                    "同行业公司从事的主要业务包括钨精矿、"
+                    "仲钨酸铵和硬质合金。"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
 
     def test_duplicate_terms_are_deduped_and_generic_terms_are_rejected(self):
         result = extract_official_business_facts(

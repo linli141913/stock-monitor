@@ -209,6 +209,37 @@ def object_missing_sources():
     )
 
 
+def relation_unconfirmed_sources():
+    base = ready_sources()
+
+    def content(document, *, kind, fetched_at):
+        result = base.fetch_document_content(
+            document,
+            kind=kind,
+            fetched_at=fetched_at,
+        )
+        if kind is OfficialBusinessDocumentKind.ANNUAL_REPORT:
+            text = result.pages[0].text + "\n研发讨论曾提及智慧交通，不构成业务证明。"
+            return replace(
+                result,
+                content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                pages=(OfficialBusinessDocumentPage(1, text),),
+            )
+        if kind is OfficialBusinessDocumentKind.CATALYST:
+            text = "公司签订智慧交通项目合同。"
+            return replace(
+                result,
+                content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                pages=(OfficialBusinessDocumentPage(1, text),),
+            )
+        return result
+
+    return LeaderBusinessAutomaticEvidenceSources(
+        discover_catalysts=base.discover_catalysts,
+        fetch_document_content=content,
+    )
+
+
 class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
     def run_batch(self, packet, directory, *, sources=None):
         return run_leader_business_automatic_evidence(
@@ -234,6 +265,30 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             )
             self.assertTrue(result.packet_path.is_file())
             self.assertTrue(result.delivery_packet_path.is_file())
+            frozen = getattr(result, "production_frozen_batch", None)
+            self.assertIsNotNone(frozen)
+            self.assertEqual(
+                frozen.fetched_at,
+                VALIDATED_AT,
+            )
+            self.assertEqual(
+                len(
+                    frozen.source_batch
+                    .material_entries
+                ),
+                385,
+            )
+            self.assertEqual(
+                len(
+                    frozen.source_batch
+                    .verification_entries
+                ),
+                385,
+            )
+            self.assertEqual(
+                frozen.source_batch.candidate_plan_id,
+                result.candidate_plan_id,
+            )
             self.assertFalse(result.formal_gate_ready)
             self.assertEqual(
                 tuple(Path(directory).rglob("*.pdf")),
@@ -255,6 +310,9 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertEqual(result.ready_count, 11)
             self.assertEqual(result.missing_count, 1)
             self.assertIsNone(result.delivery_packet_path)
+            self.assertIsNone(
+                getattr(result, "production_frozen_batch", None)
+            )
             self.assertTrue(result.packet_path.is_file())
 
     def test_explicit_gap_diagnostic_records_fresh_bounded_object_missing_corpus(self):
@@ -300,6 +358,53 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             )
             self.assertFalse(payload["gate"]["formalGateReady"])
 
+    def test_relation_gap_diagnostic_records_both_sides_of_exact_match_failure(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            result = run_leader_business_automatic_evidence(
+                source_packet(1),
+                artifact_dir=Path(directory),
+                sources=relation_unconfirmed_sources(),
+                clock=lambda: VALIDATED_AT,
+                write_gap_diagnostic=True,
+                gap_diagnostic_target=(
+                    "business_deterministic_relation_unconfirmed"
+                ),
+            )
+
+            self.assertEqual(
+                result.items[0].reasons,
+                ("business_deterministic_relation_unconfirmed",),
+            )
+            payload = __import__("json").loads(
+                result.gap_diagnostic_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                payload["targetReason"],
+                "business_deterministic_relation_unconfirmed",
+            )
+            self.assertEqual(payload["candidateCount"], 1)
+            self.assertEqual(payload["items"][0]["annualTerms"], ["工业软件"])
+            self.assertEqual(
+                payload["items"][0]["catalysts"][0]["businessTerms"],
+                ["智慧交通"],
+            )
+            self.assertEqual(
+                payload["items"][0]["catalysts"][0]["fragments"],
+                [{
+                    "pageNumber": 1,
+                    "text": "签订智慧交通项目合同",
+                }],
+            )
+            self.assertEqual(
+                payload["items"][0]["annualTermOccurrences"],
+                [{
+                    "term": "智慧交通",
+                    "pageNumber": 1,
+                    "text": "研发讨论曾提及智慧交通,不构成业务证明。",
+                }],
+            )
+            self.assertFalse(payload["gate"]["formalUsable"])
+
     def test_gap_diagnostic_is_not_written_by_default(self):
         with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
             result = self.run_batch(
@@ -310,6 +415,23 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
 
             self.assertIsNone(result.gap_diagnostic_path)
             self.assertEqual(tuple(Path(directory).glob("gap-diagnostic-*.json")), ())
+
+    def test_gap_diagnostic_rejects_unhashable_or_unknown_target(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            for target in ([], "business_unknown_gap"):
+                with self.subTest(target=target):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "business_automatic_gap_diagnostic_target_unverified",
+                    ):
+                        run_leader_business_automatic_evidence(
+                            source_packet(1),
+                            artifact_dir=Path(directory),
+                            sources=ready_sources(),
+                            clock=lambda: VALIDATED_AT,
+                            write_gap_diagnostic=True,
+                            gap_diagnostic_target=target,
+                        )
 
     def test_generic_catalyst_without_object_does_not_hide_explicit_document(self):
         base = ready_sources()
@@ -443,6 +565,9 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
 
             self.assertEqual(first.reused_count, 0)
             self.assertEqual(second.reused_count, 2)
+            self.assertIsNotNone(
+                getattr(second, "production_frozen_batch", None)
+            )
             self.assertEqual(len(calls), initial_call_count + 6)
             self.assertEqual(third.reused_count, 1)
 
@@ -461,12 +586,12 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
                 patch(
                     "radar.leader_business_automatic_evidence."
                     "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
-                    "radar-leader-business-deterministic-relation-v25",
+                    "radar-leader-business-deterministic-relation-v32",
                 ),
                 patch(
                     "radar.leader_business_deterministic_verification."
                     "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
-                    "radar-leader-business-deterministic-relation-v25",
+                    "radar-leader-business-deterministic-relation-v32",
                 ),
             ):
                 second = self.run_batch(
@@ -485,7 +610,7 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertIsNotNone(second.items[0].artifact)
             self.assertEqual(
                 second.items[0].artifact.rule_version,
-                "radar-leader-business-deterministic-relation-v25",
+                "radar-leader-business-deterministic-relation-v32",
             )
 
 

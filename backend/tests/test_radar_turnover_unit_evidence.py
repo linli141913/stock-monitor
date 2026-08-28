@@ -72,6 +72,16 @@ class TurnoverUnitEvidenceTests(unittest.TestCase):
             ("turnover_unit_value_unverified",),
         )
 
+    def test_bse_a_share_codes_are_inside_the_unit_evidence_scope(self):
+        result = build_turnover_unit_evidence(
+            (quote("920001"), quote("430001")),
+            stock_symbols=("920001", "430001"),
+        )
+
+        self.assertEqual(result.status, UnitVerificationStatus.VERIFIED)
+        self.assertEqual(result.verified_stock_count, 2)
+        self.assertEqual(result.reasons, ())
+
     def test_missing_or_duplicate_stock_quotes_never_verify_the_batch(self):
         cases = (
             (

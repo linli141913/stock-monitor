@@ -485,6 +485,10 @@ class LeaderFormalResearchProductionProviderSet:
         default=None,
         repr=False,
     )
+    risk_collector: Optional[ProductionCollector] = field(
+        default=None,
+        repr=False,
+    )
     contract_id: str = (
         LEADER_FORMAL_RESEARCH_PRODUCTION_PROVIDER_SET_CONTRACT_ID
     )
@@ -537,6 +541,12 @@ class LeaderFormalResearchProductionProviderSet:
             self.sector_rule_collector,
         )
 
+    def risk_provider(
+        self,
+        context: LeaderResearchRuntimeSourceContext,
+    ) -> LeaderFormalResearchProductionSourceDelivery:
+        return self._delivery(context, "risk", self.risk_collector)
+
     def to_runtime_provider_kwargs(self) -> Mapping[str, Callable]:
         return {
             "leader_history_input_provider": self.history_provider,
@@ -560,6 +570,7 @@ class LeaderFormalResearchProductionProviderSet:
                     ),
                     ("tradability", self.tradability_collector),
                     ("sector_rule", self.sector_rule_collector),
+                    ("risk", self.risk_collector),
                 )
                 if collector is not None
             ],
@@ -572,12 +583,14 @@ def build_leader_formal_research_production_provider_set(
     business_catalyst_collector: Optional[ProductionCollector] = None,
     tradability_collector: Optional[ProductionCollector] = None,
     sector_rule_collector: Optional[ProductionCollector] = None,
+    risk_collector: Optional[ProductionCollector] = None,
 ) -> LeaderFormalResearchProductionProviderSet:
     return LeaderFormalResearchProductionProviderSet(
         history_collector=history_collector,
         business_catalyst_collector=business_catalyst_collector,
         tradability_collector=tradability_collector,
         sector_rule_collector=sector_rule_collector,
+        risk_collector=risk_collector,
     )
 
 

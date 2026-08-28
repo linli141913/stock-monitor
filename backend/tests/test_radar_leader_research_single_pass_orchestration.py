@@ -23,6 +23,7 @@ from radar.leader_runtime_candidate_plan import (
     LeaderRuntimeCandidatePlanInput,
     LeaderRuntimeCandidatePlanStatus,
     build_leader_runtime_candidate_plan,
+    derive_leader_runtime_candidate_plan_subset,
 )
 from tests import (
     test_radar_leader_research_input_provider_batch as f5_helpers,
@@ -297,6 +298,55 @@ class LeaderResearchSinglePassOrchestrationTests(unittest.TestCase):
         self.assertIs(result.formal_gate_ready, False)
         self.assertIs(result.formal_usable, False)
         self.assertIs(result.state_transition_allowed, False)
+
+    def test_child_plan_keeps_parent_quote_universe_for_cross_section(self):
+        parent_plan = self.candidate_plan()
+        child_plan = derive_leader_runtime_candidate_plan_subset(
+            parent_plan,
+            symbols=(parent_plan.items[-1].symbol,),
+            derivation_policy_id="phase6-cross-section-test-v1",
+        )
+        raw = self.raw_inputs()
+        child_context = build_leader_research_runtime_source_context(
+            candidate_plan=child_plan,
+            quote_batch=raw["quote_batch"],
+            quote_health=raw["quote_health"],
+            security_records=raw["security_records"],
+            industry_records=raw["industry_records"],
+        )
+
+        result = build_leader_research_single_pass(
+            LeaderResearchSinglePassInput(
+                candidate_plan=child_plan,
+                provider_input=self.provider_input(child_plan),
+                source_context=child_context,
+                **raw,
+            )
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderResearchSinglePassStatus.PARTIAL,
+        )
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(
+            tuple(
+                item.symbol
+                for item in result.runtime_assembly.evidence_items
+            ),
+            (child_plan.items[0].symbol,),
+        )
+        cross_section = result.formal_research_result.items[0].item(
+            "cross_section"
+        )
+        self.assertEqual(cross_section.status.value, "ready")
+        market = result.runtime_assembly.research_component_items[
+            0
+        ].cross_sectional_features.dimension("market_leadership")
+        self.assertTrue(all(
+            component.population_size > 1
+            for component in market.components
+        ))
 
     def test_invalid_provider_blocks_before_any_feature_builder_runs(self):
         plan = self.candidate_plan()

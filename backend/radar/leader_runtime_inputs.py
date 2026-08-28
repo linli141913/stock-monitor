@@ -63,6 +63,10 @@ from radar.leader_risk_candidate_projection import (
     LEADER_RISK_CANDIDATE_PROJECTION_CONTRACT_ID,
     LeaderRiskCandidateProjection,
 )
+from radar.leader_risk_official_deterministic import (
+    LeaderOfficialDeterministicRiskProjection,
+    is_leader_official_deterministic_risk_projection_valid,
+)
 from radar.leader_risk_evidence_bundle import (
     RISK_RESEARCH_EVIDENCE_BUNDLE_CONTRACT_ID,
 )
@@ -221,6 +225,23 @@ def _risk_candidate_projection_evidence(
         return _risk_candidate_projection_result(
             status=ResearchFeatureStatus.MISSING,
             reasons=("risk_candidate_projection_missing",),
+        )
+    if isinstance(projection, LeaderOfficialDeterministicRiskProjection):
+        if not is_leader_official_deterministic_risk_projection_valid(
+            projection,
+            symbol=symbol,
+            as_of=as_of,
+        ):
+            return _risk_candidate_projection_result(
+                status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
+                reasons=(
+                    "risk_candidate_projection_contract_unverified",
+                ),
+            )
+        return _risk_candidate_projection_result(
+            status=ResearchFeatureStatus.READY,
+            reasons=(),
+            projection=projection,
         )
     if not isinstance(projection, LeaderRiskCandidateProjection):
         return _risk_candidate_projection_result(
@@ -667,15 +688,37 @@ def _market_source(
 ) -> LeaderSourceEvidence:
     index_completeness = market_snapshot["indexCompleteness"]
     breadth_completeness = market_snapshot["breadth"]["completeness"]
+    duplicate_symbol_count = market_snapshot.get("duplicateSymbolCount")
+    if duplicate_symbol_count is None:
+        duplicate_symbols = market_snapshot.get("duplicateSymbols")
+        duplicate_symbol_count = (
+            len(duplicate_symbols)
+            if isinstance(duplicate_symbols, (tuple, list))
+            else None
+        )
+    unknown_symbol_count = market_snapshot.get("unknownSymbolCount")
+    if unknown_symbol_count is None:
+        unknown_symbols = market_snapshot.get("unknownSymbols")
+        unknown_symbol_count = (
+            len(unknown_symbols)
+            if isinstance(unknown_symbols, (tuple, list))
+            else None
+        )
     complete = bool(
         index_completeness["isComplete"]
         and breadth_completeness["isComplete"]
-        and market_snapshot["duplicateSymbolCount"] == 0
-        and market_snapshot["unknownSymbolCount"] == 0
+        and duplicate_symbol_count == 0
+        and unknown_symbol_count == 0
     )
     reasons = _dedupe((
         *index_completeness.get("reasons", ()),
         *breadth_completeness.get("reasons", ()),
+        (
+            "market_identity_scope_unverified"
+            if duplicate_symbol_count is None
+            or unknown_symbol_count is None
+            else None
+        ),
         "market_aggregate_incomplete" if not complete else None,
     ))
     return LeaderSourceEvidence(
@@ -872,12 +915,33 @@ def build_leader_runtime_evidence(
     research_readiness_audits_by_symbol: Optional[
         Mapping[str, LeaderResearchReadinessAuditResult]
     ] = None,
+    candidate_symbols: Optional[Sequence[str]] = None,
 ) -> LeaderRuntimeAssembly:
     """组装每个行业涨跌幅前5名的研究性输入，不生成正式分数。"""
 
     as_of = _aware_utc(as_of, "as_of")
     if _aware_utc(quote_batch.meta.as_of, "quote_batch.as_of") != as_of:
         raise ValueError("行情批次as_of必须与龙头批次一致")
+    candidate_symbol_order = (
+        tuple(candidate_symbols)
+        if candidate_symbols is not None
+        else None
+    )
+    quote_symbols = tuple(quote.symbol for quote in quote_batch.items)
+    if candidate_symbol_order is not None and (
+        not candidate_symbol_order
+        or len(candidate_symbol_order) != len(set(candidate_symbol_order))
+        or any(
+            not isinstance(symbol, str) or symbol not in quote_symbols
+            for symbol in candidate_symbol_order
+        )
+    ):
+        raise ValueError("候选子计划不属于行情比较全集")
+    candidate_symbol_set = (
+        set(candidate_symbol_order)
+        if candidate_symbol_order is not None
+        else None
+    )
     scanned_count = len(quote_batch.items)
     if (
         quote_health.status != SourceStatus.HEALTHY
@@ -1004,6 +1068,11 @@ def build_leader_runtime_evidence(
             key=lambda quote: (-float(quote.change_percent), quote.symbol),
         )[:MAX_CANDIDATES_PER_INDUSTRY]
         for rank, quote in enumerate(ordered_quotes, start=1):
+            if (
+                candidate_symbol_set is not None
+                and quote.symbol not in candidate_symbol_set
+            ):
+                continue
             security = security_by_symbol[quote.symbol]
             industry = industry_by_symbol[quote.symbol]
             quote_source = _quote_source(
@@ -1345,6 +1414,31 @@ def build_leader_runtime_evidence(
                 },
             ))
 
+    if candidate_symbol_order is not None:
+        evidence_by_symbol = {
+            item.symbol: item for item in evidence_items
+        }
+        component_by_symbol = {
+            item.symbol: item for item in research_component_items
+        }
+        if (
+            set(evidence_by_symbol) != candidate_symbol_set
+            or set(component_by_symbol) != candidate_symbol_set
+        ):
+            return _not_ready(
+                as_of=as_of,
+                reasons=("leader_candidate_subset_not_in_research_universe",),
+                scanned_count=scanned_count,
+                mapped_count=mapped_count,
+            )
+        evidence_items = [
+            evidence_by_symbol[symbol]
+            for symbol in candidate_symbol_order
+        ]
+        research_component_items = [
+            replace(component_by_symbol[symbol], index=index)
+            for index, symbol in enumerate(candidate_symbol_order)
+        ]
     if not evidence_items:
         return _not_ready(
             as_of=as_of,
