@@ -1,5 +1,20 @@
 # 股票监测助手 V5 当前续做检查点
 
+> 保存时间：2026-09-08 16:31 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08阶段5—10增量发布、正式域名切换与线上验收
+
+- 用户明确授权提交、推送和生产发布。发布前审计233个路径，未发现`.env`、SQLite、日志、密钥、二进制或新增行敏感凭证；修正`backend/run_radar_replay_label_tasks.py`文件尾空白后，`git diff --cached --check`通过。
+- 新鲜发布门全部通过：精确重定向到`/private/tmp`的完整后端2838项全部`OK`且生产SQLite护栏命中0次；前端Node合同10项、TypeScript、ESLint、Next.js 16.2.10正式build全部通过；全部后端Python文件编译、`pip check`和LaunchAgent资产校验通过。为避免Next build与开发服务抢占`.next`，仅受控重启4000；未重载8001。
+- 业务代码已提交为`b1528bd9c346f9dfa8fb4eb426b1edd52a9067cb`（`feat: 完成主线雷达阶段5至10增量开发`）并成功推送到`origin/main`。GitHub系统直连TLS两次失败后，只对推送命令显式使用已存在的本机代理；未改Git全局配置。
+- Vercel项目未连接Git，推送不会自动发布。在CLI设备授权已成功但本地回执因TLS断线丢失后，使用Vercel官方`@vercel/client`+`tgz`单包通道与显式代理完成生产发布。部署ID为`dpl_AyJgSx6eLAe1nUj5qPQanNaxuGpc`，专属URL为`https://stock-monitor-7gksob4do-linlis-projects-e28b9516.vercel.app`，Vercel控制台确认`Ready / Production`，构建耗时34秒。
+- 已通过Vercel官方Alias API将既有正式域名`https://stock-monitor-murex-one.vercel.app`切到上述新部署。Chrome全新页真实验收确认正式域名加载新版主线雷达，可进入“历史验证”并看到“阶段10·正式启用准备度”、“严格时点历史回放”和“行业历史与阈值校准”；浏览器控制台0错误/0警告。`/api/health`为HTTP 200，Vercel/隧道/FastAPI均healthy，仅后台任务因真实行业数据质量保持degraded；影子台账接口为HTTP 200，真实进度为趋势`2/20`、ETF`2/5`、龙头`1/20`。
+- 发布只使用1小时临时Vercel令牌，完成后已在控制台同时撤销两枚手工临时令牌和一枚回执丢失的CLI令牌；未保留长期凭证。本轮未读写生产SQLite、未调用付费AI、未修改生产环境变量、雷达正式开关或后端运行配置。
+- 最终本地服务为4000 node PID64476、8001 Python PID47135；两者均继续监听标准端口。
+
+下一步：1）下一有效交易日继续由阶段10单入口登记`calibration`样本并独立累计趋势、ETF和龙头观察；2）当日15:05后对新样本登记真实收盘基线；3）再下一不同交易日登记`holdout`，随后按冻结规则补齐5个后续交易日事实并生成阶段9客观质量报告；期间非交易时段仍可继续产品与工程收口。
+
 > 保存时间：2026-09-08 15:20 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
 
