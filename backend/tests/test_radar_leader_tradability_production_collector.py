@@ -105,11 +105,11 @@ class LeaderTradabilityProductionCollectorTests(unittest.TestCase):
             tuple(item.symbol for item in self.context.candidate_plan.items),
         )
 
-    def test_source_clock_skew_within_existing_five_seconds_is_accepted(self):
+    def test_official_ten_second_bucket_skew_is_accepted(self):
         official = tuple(
             replace(
                 item,
-                source_time=item.fetched_at + timedelta(seconds=1),
+                source_time=item.fetched_at + timedelta(seconds=6),
             )
             for item in self.bundle.official_observations
         )

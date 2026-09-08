@@ -1029,6 +1029,97 @@
   font-size: 11px;
 }
 
+.etfResearchSummary {
+  margin: 0 15px 8px;
+  padding: 9px 11px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 16px;
+  border: 1px solid #e5ebf3;
+  border-radius: 7px;
+  background: #f8faff;
+  color: #718096;
+  font-size: 10px;
+}
+
+.etfResearchSummary b {
+  margin-left: 3px;
+  color: #30405a;
+  font-size: 12px;
+}
+
+.etfResearchList {
+  padding: 0 15px;
+}
+
+.etfResearchRow {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 1fr 1fr;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid #edf1f6;
+  color: #66748a;
+  font-size: 11px;
+}
+
+.etfResearchRow > * {
+  min-width: 0;
+}
+
+.etfResearchRow div strong,
+.etfResearchRow div span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.etfResearchRow div strong,
+.etfResearchRow > strong {
+  color: #2c3950;
+}
+
+.etfResearchRow div span {
+  margin-top: 2px;
+  color: #8a96a8;
+  font-size: 10px;
+}
+
+.progressiveListFooter {
+  min-height: 44px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #e3e9f2;
+  background: #f8faff;
+  color: #718096;
+  font-size: 11px;
+}
+
+.progressiveListFooter button {
+  padding: 6px 11px;
+  border: 1px solid #bfd0f4;
+  border-radius: 999px;
+  background: #edf3ff;
+  color: #2862cf;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.progressiveListFooter button:hover {
+  border-color: #6f96e8;
+  background: #e3edff;
+}
+
+.progressiveListFooter button:focus-visible {
+  outline: 2px solid #2862cf;
+  outline-offset: 2px;
+}
+
 .etfProductTable {
   padding: 0 15px 14px;
 }
@@ -1187,6 +1278,13 @@
   color: #263247;
   font-size: 17px;
   font-variant-numeric: tabular-nums;
+}
+
+.leaderReviewMetrics small {
+  display: block;
+  margin-top: 2px;
+  color: #8b96a7;
+  font-size: 9px;
 }
 
 .leaderReviewQueue > footer {

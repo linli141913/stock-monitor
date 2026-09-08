@@ -23,6 +23,7 @@ import type {
 } from '@/types/stock';
 import type { IndustryMonitor } from '@/types/industry';
 import type { RadarStockResponse } from '@/types/radar';
+import { radarLeaderReasonLabel } from '@/lib/radar-reasons';
 
 // Removed mock data imports
 
@@ -327,6 +328,7 @@ function HomeContent() {
     setOverviewError('');
     setOverviewStatusMessage('');
     void fetchOverview(false);
+    void fetchRadarStock(stockCode);
   };
 
   const handleKlineRefresh = () => {
@@ -367,6 +369,7 @@ function HomeContent() {
         snapshot: null,
         freshness: { ageSeconds: null, staleAfterSeconds: 0, isStale: false, reasonCodes: ['request_failed'] },
         leader: null,
+        observationItem: null,
         reasonCodes: ['request_failed'],
       });
     }
@@ -407,11 +410,12 @@ function HomeContent() {
     if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     slowDataRefreshTimer.current = setInterval(() => {
       void fetchIndustry(stockCode, true);
+      void fetchRadarStock(stockCode);
     }, SLOW_DATA_REFRESH_INTERVAL);
     return () => {
       if (slowDataRefreshTimer.current) clearInterval(slowDataRefreshTimer.current);
     };
-  }, [fetchIndustry, stockCode]);
+  }, [fetchIndustry, fetchRadarStock, stockCode]);
 
   // ── 渲染 ──────────────────────────────────────────────────
   // 关键修复：当组件被 Next.js 路由缓存复用时，判断旧数据是否和当前网址的 stockCode 匹配
@@ -477,7 +481,7 @@ function HomeContent() {
             <section className={styles.radarStockCard}>
               <div>
                 <h2>主线雷达状态</h2>
-                <span>影子规则状态，不是投资建议</span>
+                <span>真实观察与影子规则状态，不是投资建议</span>
               </div>
               {radarStock.leader ? (
                 <div className={styles.radarStockGrid}>
@@ -488,14 +492,29 @@ function HomeContent() {
                   <span>行业：{radarStock.leader.industryName || '暂无'}</span>
                   <span>规则：{radarStock.snapshot?.ruleVersion || '暂无'}</span>
                   <span>数据时间：{radarStock.snapshot?.asOf ? new Date(radarStock.snapshot.asOf).toLocaleString('zh-CN') : '暂无'}</span>
-                  <span>首个否决原因：{radarStock.leader.firstRejectionReason || '无'}</span>
+                  <span>首个否决原因：{radarLeaderReasonLabel(radarStock.leader.firstRejectionReason)}</span>
+                </div>
+              ) : radarStock.observationItem ? (
+                <div className={styles.radarStockGrid}>
+                  <strong>
+                    {radarStock.status === 'stale' ? '数据已过期 · ' : ''}
+                    观察候选（非评级）
+                  </strong>
+                  <span>行业：{radarStock.observationItem.industryName}</span>
+                  <span>行业内当轮排名：第 {radarStock.observationItem.withinIndustryRank} 名</span>
+                  <span>
+                    当轮价格：{radarStock.observationItem.price.toFixed(2)} · 涨跌幅 {radarStock.observationItem.changePercent.toFixed(2)}%
+                  </span>
+                  <span>行情时间：{new Date(radarStock.observationItem.sourceTime).toLocaleString('zh-CN')}</span>
+                  <span>当前仅为观察候选，尚未形成三级龙头评分或状态。</span>
                 </div>
               ) : (
                 <p>{({
                   matched: '已命中公开梯队，条目数据暂不可用。',
-                  not_listed: '该股未进入最新公开龙头梯队。',
-                  no_snapshot: '尚无龙头影子快照，等待真实数据。',
-                  stale: '龙头快照已过期，暂不展示为当前状态。',
+                  observed: '已进入真实观察候选，条目数据暂不可用。',
+                  not_listed: '该股未进入最新公开梯队或当轮观察候选。',
+                  no_snapshot: '尚无龙头或观察快照，等待真实数据。',
+                  stale: '最近一次监测数据已过期，页面不把它冒充当前状态。',
                   failed: '龙头状态读取失败。',
                   not_enabled: '主线雷达龙头模块尚未启用。',
                 } as const)[radarStock.status] || '等待主线雷达状态。'}</p>

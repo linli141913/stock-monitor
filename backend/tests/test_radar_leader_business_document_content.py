@@ -236,7 +236,10 @@ class LeaderBusinessDocumentContentTests(unittest.TestCase):
                 self.assertIn(reason, result.reasons)
 
     def test_network_failure_is_distinct_from_malformed_transport_result(self):
+        calls = []
+
         def failed_transport(*args, **kwargs):
+            calls.append((args, kwargs))
             raise requests.ConnectionError("offline")
 
         failed = fetch_official_business_document_content(
@@ -253,10 +256,80 @@ class LeaderBusinessDocumentContentTests(unittest.TestCase):
         )
 
         self.assertEqual(failed.status, AutomaticBusinessEvidenceStatus.SOURCE_FAILED)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(
             malformed.status,
             AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
         )
+
+    def test_transient_network_failure_retries_once_then_accepts_strict_pdf(self):
+        calls = []
+
+        def transport(*args, **kwargs):
+            calls.append((args, kwargs))
+            if len(calls) == 1:
+                raise requests.ConnectionError("transient")
+            return make_response()
+
+        result = fetch_official_business_document_content(
+            make_document(),
+            kind=OfficialBusinessDocumentKind.ANNUAL_REPORT,
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(len(calls), 2)
+
+    def test_invalid_http_response_is_not_retried(self):
+        calls = []
+
+        def transport(*args, **kwargs):
+            calls.append((args, kwargs))
+            return make_response(status_code=404)
+
+        result = fetch_official_business_document_content(
+            make_document(),
+            kind=OfficialBusinessDocumentKind.ANNUAL_REPORT,
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_document_content_http_status_unverified",),
+        )
+        self.assertEqual(len(calls), 1)
+
+    def test_transient_failure_then_invalid_response_stays_unverified(self):
+        calls = []
+
+        def transport(*args, **kwargs):
+            calls.append((args, kwargs))
+            if len(calls) == 1:
+                raise requests.ConnectionError("transient")
+            return make_response(status_code=404)
+
+        result = fetch_official_business_document_content(
+            make_document(),
+            kind=OfficialBusinessDocumentKind.ANNUAL_REPORT,
+            fetched_at=FETCHED_AT,
+            transport=transport,
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(
+            result.reasons,
+            ("business_document_content_http_status_unverified",),
+        )
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

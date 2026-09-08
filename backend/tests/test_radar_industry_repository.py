@@ -9,6 +9,7 @@ from radar.contracts import (
     IndustryClassificationRecord,
     IndustryClassificationRelease,
     IndustryClassificationSnapshot,
+    IndustryRecordProvenance,
     RadarBatchMeta,
     SectorFeatureBatch,
     SourceStatus,
@@ -255,6 +256,73 @@ class RadarIndustryRepositoryTests(unittest.TestCase):
                 "2025H2",
             ),
             tuple(snapshot.records),
+        )
+
+    def test_bse_crosswalk_provenance_survives_existing_json_storage(self):
+        supplement = self.record(
+            source_symbol="920001",
+            security_identity="920001",
+            source_name="北交新股",
+        ).model_copy(update={
+            "record_provenance": (
+                IndustryRecordProvenance.BSE_EXACT_CATEGORY_CROSSWALK
+            ),
+            "knowledge_effective_from": FETCHED_AT,
+            "evidence_url": (
+                "https://www.bse.cn/nqxxController/nqxxCnzq.do"
+            ),
+            "source_fields": {
+                "证券代码": "920001",
+                "证券简称": "北交新股",
+                "classificationProvenance": (
+                    IndustryRecordProvenance
+                    .BSE_EXACT_CATEGORY_CROSSWALK.value
+                ),
+                "knowledgeEffectiveFrom": FETCHED_AT.isoformat(),
+                "evidenceUrl": (
+                    "https://www.bse.cn/nqxxController/nqxxCnzq.do"
+                ),
+            },
+        })
+        base = self.record()
+        snapshot = self.classification_snapshot(
+            release=self.release(record_count=1),
+            records=[base],
+        ).model_copy(update={
+            "records": [base, supplement],
+            "completeness": IndustryClassificationCompleteness(
+                sourceRecordCount=1,
+                uniqueSourceSymbolCount=1,
+                currentMasterCount=2,
+                mappedCount=2,
+                unconfirmedCount=0,
+                excludedSourceCount=0,
+                supplementalRecordCount=1,
+                mappingCoverage=1.0,
+                requiredFieldCoverage={"sourceSymbol": 1.0},
+                shadowUsable=True,
+                formalUsable=False,
+                reasons=("history_is_retrospective",),
+            ),
+        })
+        snapshot = IndustryClassificationSnapshot.model_validate(snapshot)
+
+        self.repository.record_industry_classification(snapshot)
+        stored = self.repository.list_industry_classification_records(
+            "capco_listed_company_industry",
+            "2025H2",
+        )
+
+        stored_supplement = next(
+            item for item in stored if item.source_symbol == "920001"
+        )
+        self.assertEqual(
+            stored_supplement.record_provenance,
+            IndustryRecordProvenance.BSE_EXACT_CATEGORY_CROSSWALK,
+        )
+        self.assertEqual(
+            stored_supplement.knowledge_effective_from,
+            FETCHED_AT,
         )
 
     def test_industry_release_conflict_rolls_back_without_overwrite(self):

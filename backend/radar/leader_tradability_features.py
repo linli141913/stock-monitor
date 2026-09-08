@@ -22,6 +22,8 @@ from radar.leader_research_features import (
     ResearchFeatureStatus,
 )
 
+MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS = 10
+
 
 LEADER_TRADABILITY_FEATURE_VERSION = (
     "radar-leader-tradability-feature-v1"
@@ -435,7 +437,7 @@ def build_leader_tradability_features(
     )
     if (
         lifecycle_published - as_of
-    ).total_seconds() > MAXIMUM_FUTURE_SKEW_SECONDS:
+    ).total_seconds() > MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS:
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -452,7 +454,7 @@ def build_leader_tradability_features(
         )
     if (
         lifecycle_fetched
-        + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        + timedelta(seconds=MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS)
         < lifecycle_published
     ):
         return _invalid_result(
@@ -521,7 +523,7 @@ def build_leader_tradability_features(
 
     trading_source_time, trading_fetched_at = trading_times
     trading_age_seconds = (as_of - trading_source_time).total_seconds()
-    if trading_age_seconds < -MAXIMUM_FUTURE_SKEW_SECONDS:
+    if trading_age_seconds < -MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS:
         return _invalid_result(
             value,
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
@@ -535,7 +537,7 @@ def build_leader_tradability_features(
         )
     if (
         trading_fetched_at
-        + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        + timedelta(seconds=MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS)
         < trading_source_time
     ):
         return _invalid_result(

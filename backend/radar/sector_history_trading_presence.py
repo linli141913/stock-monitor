@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
@@ -13,6 +14,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from radar.sources.leader_history_public_poc import TENCENT_HISTORY_URL
+from radar.sector_history_backfill import HistoricalDailyTradingProof
 
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
@@ -39,6 +41,9 @@ class HistoricalTradingPresenceBatch:
     source_status: str
     requested_count: int
     failure_count: int
+    daily_trading_proofs_by_symbol: Mapping[
+        str, Tuple[HistoricalDailyTradingProof, ...]
+    ] = field(default_factory=dict, repr=False)
     source_contract_ids_by_symbol: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -57,6 +62,10 @@ class HistoricalTradingPresenceBatch:
             "requestedCount": self.requested_count,
             "returnedCount": len(self.source_hashes_by_symbol),
             "failureCount": self.failure_count,
+            "dailyProofCount": sum(
+                len(values)
+                for values in self.daily_trading_proofs_by_symbol.values()
+            ),
             "failureReasonCounts": dict(self.failure_reason_counts),
         }
 
@@ -115,7 +124,10 @@ def _digest(payload: Any) -> str:
     ).encode("utf-8")).hexdigest()
 
 
-def _parse_dates(payload: Any, query_symbol: str) -> Tuple[date, ...]:
+def _parse_daily_rows(
+    payload: Any,
+    query_symbol: str,
+) -> Tuple[Tuple[date, ...], Mapping[date, Tuple[Decimal, int]]]:
     if not isinstance(payload, Mapping) or payload.get("code") != 0:
         raise ValueError("trading_presence_payload_invalid")
     data = payload.get("data")
@@ -124,17 +136,38 @@ def _parse_dates(payload: Any, query_symbol: str) -> Tuple[date, ...]:
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
         raise ValueError("trading_presence_rows_missing")
     values = []
+    proof_values = {}
     for row in rows:
         if not isinstance(row, Sequence) or isinstance(row, (str, bytes)):
             continue
         try:
-            values.append(date.fromisoformat(str(row[0])[:10]))
+            trade_day = date.fromisoformat(str(row[0])[:10])
         except (IndexError, ValueError):
             continue
+        values.append(trade_day)
+        try:
+            close = Decimal(str(row[2]))
+            raw_volume = Decimal(str(row[5]))
+            volume_shares = (
+                raw_volume
+                if query_symbol.startswith("sh688")
+                else raw_volume * 100
+            )
+            if (
+                not close.is_finite()
+                or close <= 0
+                or not volume_shares.is_finite()
+                or volume_shares < 0
+                or volume_shares != volume_shares.to_integral_value()
+            ):
+                continue
+        except (IndexError, InvalidOperation, TypeError, ValueError):
+            continue
+        proof_values[trade_day] = (close, int(volume_shares))
     values = tuple(sorted(set(values)))
     if not values:
         raise ValueError("trading_presence_rows_empty")
-    return values
+    return values, proof_values
 
 
 def _failure_reason(exc: Exception) -> str:
@@ -223,6 +256,7 @@ def fetch_historical_trading_presence_batch(
     non_trading = {}
     hashes = {}
     contracts = {}
+    daily_proofs = {}
     failures = []
 
     def load(symbol: str):
@@ -233,7 +267,10 @@ def fetch_historical_trading_presence_batch(
         target_dates = targets[symbol]
         try:
             payload = requester(query_symbol)
-            returned_dates = _parse_dates(payload, query_symbol)
+            returned_dates, proof_values = _parse_daily_rows(
+                payload,
+                query_symbol,
+            )
             source_contract_id = TRADING_PRESENCE_SOURCE_CONTRACT_ID
             content_digest = _digest(payload)
         except Exception:
@@ -244,6 +281,7 @@ def fetch_historical_trading_presence_batch(
                 raise ValueError("trading_presence_rows_empty")
             source_contract_id = SINA_TRADING_PRESENCE_SOURCE_CONTRACT_ID
             content_digest = _digest(returned_dates)
+            proof_values = {}
         def unresolved_absences(values: Tuple[date, ...]) -> Tuple[date, ...]:
             returned = set(values)
             first = values[0]
@@ -274,16 +312,36 @@ def fetch_historical_trading_presence_batch(
                         SINA_TRADING_PRESENCE_SOURCE_CONTRACT_ID
                     )
                     content_digest = _digest(returned_dates)
+                    proof_values = {}
                     unresolved = unresolved_absences(returned_dates)
             if unresolved:
                 raise ValueError("trading_presence_window_not_enclosed")
         returned = set(returned_dates)
+        proofs = tuple(
+            HistoricalDailyTradingProof(
+                trade_date=target,
+                close=proof_values[target][0],
+                volume_shares=proof_values[target][1],
+                source_contract_id=source_contract_id,
+                source_url=TENCENT_HISTORY_URL,
+                fetched_at=fetched_at,
+                content_sha256=content_digest,
+            )
+            for target in target_dates
+            if (
+                target in returned
+                and target in proof_values
+                and source_contract_id
+                == TRADING_PRESENCE_SOURCE_CONTRACT_ID
+            )
+        )
         return (
             symbol,
             tuple(value for value in target_dates if value in returned),
             tuple(value for value in target_dates if value not in returned),
             content_digest,
             source_contract_id,
+            proofs,
         )
 
     with ThreadPoolExecutor(
@@ -294,7 +352,14 @@ def fetch_historical_trading_presence_batch(
         for future in as_completed(futures):
             symbol = futures[future]
             try:
-                key, yes, no, digest, source_contract_id = future.result()
+                (
+                    key,
+                    yes,
+                    no,
+                    digest,
+                    source_contract_id,
+                    symbol_proofs,
+                ) = future.result()
             except Exception as exc:
                 failures.append((symbol, _failure_reason(exc)))
             else:
@@ -302,10 +367,12 @@ def fetch_historical_trading_presence_batch(
                 non_trading[key] = no
                 hashes[key] = digest
                 contracts[key] = source_contract_id
+                daily_proofs[key] = symbol_proofs
     return HistoricalTradingPresenceBatch(
         verified_trading_dates_by_symbol=trading,
         verified_non_trading_dates_by_symbol=non_trading,
         source_hashes_by_symbol=hashes,
+        daily_trading_proofs_by_symbol=daily_proofs,
         source_contract_ids_by_symbol=contracts,
         source_status="source_failed" if failures else "ready",
         requested_count=len(targets),

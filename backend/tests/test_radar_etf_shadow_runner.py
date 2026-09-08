@@ -13,6 +13,7 @@ from radar.contracts import (
     SourceBatch,
     SourceHealthResult,
     SourceStatus,
+    UnitVerificationStatus,
 )
 from radar.etf_repository import EtfRepository
 from radar.etf_shadow_runner import (
@@ -206,6 +207,34 @@ class EtfStage5ShadowRunnerTests(unittest.TestCase):
             self.health(),
         )
         self.assertEqual(repeated.persisted_feature_count, 0)
+
+    def test_verified_cny_turnover_is_preserved_as_verified_feature(self):
+        self.start_run()
+        verified_quote = self.quote().model_copy(update={
+            "turnover_amount_cny": 1_234_560_000.0,
+            "turnover_amount_unit_status": UnitVerificationStatus.VERIFIED,
+        })
+
+        self.runner().run_once(
+            "etf-run",
+            AS_OF,
+            self.quote_batch(items=[verified_quote]),
+            self.health(),
+        )
+
+        feature = self.etf_repository.get_feature_snapshot(
+            "etf-run",
+            "159915",
+        )
+        self.assertEqual(feature["turnoverAmount"], 1_234_560_000.0)
+        self.assertEqual(
+            feature["fieldStates"]["turnoverAmount"],
+            "verified",
+        )
+        self.assertNotIn(
+            "turnover_amount_unit_unverified",
+            feature["reasonCodes"],
+        )
 
     def test_stale_batch_records_failure_summary_without_feature_rows(self):
         self.start_run()

@@ -52,7 +52,10 @@ export default function IndustryInsightPage() {
   const fetchNews = useCallback(async (tabId: string, isSilent = false) => {
     try {
       const endpoint = `/latest?category=${encodeURIComponent(tabId)}&limit=100&offset=0`;
-      const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(`${API_BASE}/api/semiconductor-news${endpoint}`, {
+        cache: 'no-store',
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      });
       if (!res.ok) throw new Error('获取资讯失败');
       const payload = await res.json() as NewsFeedPayload;
       if (!Array.isArray(payload.data)) throw new Error('资讯接口格式错误');
@@ -72,7 +75,7 @@ export default function IndustryInsightPage() {
       setNewsList(payload.data);
     } catch (err: unknown) {
       setDataStatus('unavailable');
-      if (!isSilent) setError(err instanceof Error ? err.message : '资讯数据暂不可用');
+      setError(err instanceof Error ? err.message : '资讯数据暂不可用');
     } finally {
       if (!isSilent) setLoading(false);
     }
@@ -129,20 +132,29 @@ export default function IndustryInsightPage() {
             key={tab.id}
             className={`${styles.tab} ${activeTab === tab.id ? styles.activeTab : ''}`}
             onClick={() => handleTabChange(tab.id)}
+            aria-pressed={activeTab === tab.id}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
-
       {loading ? (
-        <div className={styles.loading}>雷达扫描中，请稍候...</div>
-      ) : dataStatus === 'unavailable' && newsList.length === 0 ? (
-        null
+        <div className={styles.loading} role="status" aria-live="polite">
+          正在读取公开资讯…
+        </div>
+      ) : dataStatus === 'unavailable' ? (
+        <div className={styles.error} role="alert" aria-live="assertive">
+          <strong>公开资讯暂不可用</strong>
+          <span>{error || '来源读取失败'}；未将空结果当作“暂无资讯”。</span>
+          <button type="button" onClick={() => void fetchNews(activeTab, false)}>
+            重新读取
+          </button>
+        </div>
       ) : newsList.length === 0 ? (
-        <div className={styles.empty}>当前分类下暂无权威资讯</div>
+        <div className={styles.empty} role="status" aria-live="polite">
+          来源可用；当前分类下暂无权威资讯
+        </div>
       ) : (
         <div className={styles.feed}>
           {newsList.map(news => (

@@ -99,6 +99,51 @@ def content(*pages, **changes):
 
 
 class LeaderBusinessDocumentFactTests(unittest.TestCase):
+    def test_explicit_production_sales_business_keeps_atomic_coal_object(self):
+        result = extract_official_business_facts(
+            plan_item(
+                industry_code="06",
+                industry_name="煤炭开采和洗选业",
+            ),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    9,
+                    "一、报告期内公司从事的业务情况\n"
+                    "公司主要业务为生产销售煤炭、焦炭产品，"
+                    "报告期内公司原煤产量5630万吨。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertIn("煤炭", result.business_terms)
+
+    def test_explicit_3d_printing_products_keep_shared_equipment_object(self):
+        result = extract_official_business_facts(
+            plan_item(
+                industry_code="34",
+                industry_name="通用设备制造业",
+            ),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    12,
+                    "一、报告期内公司所从事的主要业务\n"
+                    "1、主营业务\n"
+                    "公司主要产品为金属3D打印设备和高分子3D打印设备，"
+                    "并提供3D打印材料、工艺及服务。\n"
+                    "二、报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertIn("3D打印设备", result.business_terms)
+
     def test_explicit_main_business_section_builds_page_hashed_facts(self):
         result = extract_official_business_facts(
             plan_item(),
@@ -401,6 +446,46 @@ class LeaderBusinessDocumentFactTests(unittest.TestCase):
             result.business_terms,
             ("远洋渔业捕捞", "水产品加工销售"),
         )
+
+    def test_report_period_business_as_primary_industry_is_official_evidence(self):
+        result = extract_official_business_facts(
+            plan_item(industry_code="61", industry_name="住宿业"),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "(一)报告期内公司从事的业务情况\n"
+                    "报告期内公司业务以酒店服务业为主业，"
+                    "生活服务业为辅。\n"
+                    "报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("酒店服务业",))
+
+    def test_labeled_business_segments_inside_official_overview_are_extracted(self):
+        result = extract_official_business_facts(
+            plan_item(industry_code="61", industry_name="住宿业"),
+            selection(),
+            content(
+                (8, "证券代码000001"),
+                (
+                    20,
+                    "一、报告期内公司从事的主要业务\n"
+                    "(一)报告期内公司从事的业务情况\n"
+                    "酒店业：公司旗下拥有多个酒店品牌。\n"
+                    "生活服务业：公司拓展洗衣、家政和团餐服务。\n"
+                    "报告期内公司所处行业情况"
+                ),
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("酒店业", "生活服务业"))
 
     def test_explicit_primary_business_clause_extracts_listed_products(self):
         result = extract_official_business_facts(

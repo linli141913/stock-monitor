@@ -284,7 +284,7 @@ class ExchangeOfficialObservationTests(unittest.TestCase):
     ):
         attempts = 0
         payload = szse_payload()
-        payload["data"]["marketTime"] = "2026-08-18 11:30:11"
+        payload["data"]["marketTime"] = "2026-08-18 11:30:16"
         fetched_times = iter((
             FETCHED_AT,
             FETCHED_AT + timedelta(seconds=2.1),
@@ -311,8 +311,24 @@ class ExchangeOfficialObservationTests(unittest.TestCase):
         self.assertLessEqual(waits[0], 2.1)
         self.assertEqual(
             result.observations[0].source_time,
-            datetime(2026, 8, 18, 11, 30, 11, tzinfo=SHANGHAI_TZ),
+            datetime(2026, 8, 18, 11, 30, 16, tzinfo=SHANGHAI_TZ),
         )
+
+    def test_szse_ten_second_bucket_accepts_bounded_forward_rounding(self):
+        payload = szse_payload()
+        payload["data"]["marketTime"] = "2026-08-18 11:30:10"
+        waits = []
+
+        with patch("time.sleep", side_effect=waits.append):
+            result = collect_exchange_official_observations(
+                contexts=(context("000725", "szse"),),
+                trading_date=TRADING_DATE,
+                request_json=lambda _item: payload,
+                clock=lambda: FETCHED_AT,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(waits, [])
 
     def test_batch_keeps_failing_closed_when_future_time_is_implausible(self):
         attempts = 0
@@ -345,7 +361,7 @@ class ExchangeOfficialObservationTests(unittest.TestCase):
     def test_batch_keeps_failing_closed_when_bounded_retry_stays_future(self):
         attempts = 0
         payload = szse_payload()
-        payload["data"]["marketTime"] = "2026-08-18 11:30:11"
+        payload["data"]["marketTime"] = "2026-08-18 11:30:15"
         waits = []
 
         def fetch(_item):

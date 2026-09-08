@@ -308,8 +308,30 @@ class IndexIndustryExposureTests(unittest.TestCase):
             "industry_mapping_retrospective_unverified",
             result.reasons,
         )
-        self.assertIn("industry_mapping_not_formal", result.reasons)
         self.assertFalse(result.formal_ready)
+
+    def test_target_complete_current_observation_is_not_blocked_by_unrelated_gaps(self):
+        constituents = constituent_set([
+            {"stockCode": "000001", "stockName": "甲", "weight": 100.0},
+        ])
+        classification = classification_snapshot(
+            [industry_record("000001")],
+            gap_symbols=("999999",),
+            first_observed_at=AS_OF - timedelta(days=1),
+            history_status=IndustryHistoryStatus.RETROSPECTIVE_UNVERIFIED,
+            formal_usable=False,
+        )
+
+        result = calculate_index_industry_exposure(
+            constituents,
+            classification,
+            as_of=AS_OF,
+            computed_at=AS_OF,
+        )
+
+        self.assertTrue(result.formal_ready)
+        self.assertEqual(result.mapping_coverage, 1.0)
+        self.assertEqual(result.reasons, ())
 
 
 class IndexProductGroupTests(unittest.TestCase):

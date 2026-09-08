@@ -124,6 +124,10 @@ class LaunchdAssetTests(unittest.TestCase):
             "300",
         )
         self.assertEqual(
+            backend["EnvironmentVariables"]["RADAR_FORMAL_SHADOW_LEDGER_DIR"],
+            "/private/tmp/stage10-formal-shadow-ledger-v1",
+        )
+        self.assertEqual(
             backend["EnvironmentVariables"]["RADAR_SECTOR_SHADOW_ENABLED"],
             "false",
         )
@@ -388,6 +392,38 @@ class LaunchdAssetTests(unittest.TestCase):
             ngrok.index('cd "$PROJECT_ROOT"'),
             ngrok.index("pgrep -x ngrok"),
         )
+
+    def test_ngrok_runtime_truth_table_is_pure_and_lifecycle_probe_is_unchanged(self):
+        rows = {
+            (1, 1, 1): ("running", "identity_verified"),
+            (0, 0, 0): ("not_running", "no_runtime_signal"),
+        }
+        for launchd, pid, port in (
+            (0, 0, 1), (0, 1, 0), (0, 1, 1),
+            (1, 0, 0), (1, 0, 1), (1, 1, 0),
+        ):
+            rows[(launchd, pid, port)] = ("degraded", "identity_unverified")
+        for signals, expected in rows.items():
+            with self.subTest(signals=signals):
+                command = (
+                    f"source <(/usr/bin/sed '/^command=/,$d' {MANAGER}); "
+                    f"resolve_ngrok_runtime_status {signals[0]} {signals[1]} {signals[2]}"
+                )
+                result = subprocess.run(
+                    ["/bin/zsh", "-c", command],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(tuple(result.stdout.strip().split("|")), expected)
+
+        content = MANAGER.read_text(encoding="utf-8")
+        ngrok_body = content.split("ngrok_running()", 1)[1].split("\n}\n", 1)[0]
+        self.assertEqual(ngrok_body.strip().lstrip("{\n "), "/usr/bin/pgrep -x ngrok >/dev/null 2>&1")
+        status_body = content.split("status_services()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("ngrok_4040_listening", status_body)
+        self.assertIn("resolve_ngrok_runtime_status", status_body)
 
 
 if __name__ == "__main__":

@@ -97,6 +97,54 @@ def official_reference(**overrides):
 
 
 class TradingRuleCatalogTests(unittest.TestCase):
+    def test_bse_uses_versioned_thirty_percent_rules(self):
+        cases = (
+            (date(2021, 11, 15), "bse-trading-rule-2021"),
+            (date(2026, 7, 5), "bse-trading-rule-2021"),
+            (date(2026, 7, 6), "bse-trading-rule-2026"),
+        )
+        for trading_date, expected_version in cases:
+            with self.subTest(trading_date=trading_date):
+                resolved = resolve_trading_rule_catalog(
+                    exchange="bse",
+                    board="北交所A股",
+                    lifecycle_status=SecurityLifecycleStatus.ST,
+                    trading_date=trading_date,
+                    listed_trading_day_count=100,
+                    special_session=PriceLimitSpecialSession.NONE,
+                    previous_close=10.0,
+                )
+
+                self.assertEqual(resolved.rule_version, expected_version)
+                self.assertEqual(resolved.limit_rate, 0.30)
+                self.assertEqual(resolved.expected_upper_limit_price, 13.0)
+                self.assertEqual(resolved.expected_lower_limit_price, 7.0)
+                self.assertEqual(resolved.source_name, "北京证券交易所")
+
+    def test_bse_only_listing_first_day_is_unbounded(self):
+        first_day = resolve_trading_rule_catalog(
+            exchange="bse",
+            board="北交所",
+            lifecycle_status=SecurityLifecycleStatus.NORMAL,
+            trading_date=date(2026, 7, 27),
+            listed_trading_day_count=1,
+            special_session=PriceLimitSpecialSession.NONE,
+            previous_close=10.0,
+        )
+        second_day = resolve_trading_rule_catalog(
+            exchange="bse",
+            board="北交所",
+            lifecycle_status=SecurityLifecycleStatus.NORMAL,
+            trading_date=date(2026, 7, 28),
+            listed_trading_day_count=2,
+            special_session=PriceLimitSpecialSession.NONE,
+            previous_close=10.0,
+        )
+
+        self.assertEqual(first_day.price_limit_mode, PriceLimitMode.NO_LIMIT)
+        self.assertEqual(second_day.price_limit_mode, PriceLimitMode.BOUNDED)
+        self.assertEqual(second_day.limit_rate, 0.30)
+
     def test_main_board_risk_warning_switches_from_five_to_ten_percent(self):
         for exchange, board in (
             ("sse", "主板A股"),

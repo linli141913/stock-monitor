@@ -72,7 +72,7 @@ class LeaderEvidenceQualificationTests(unittest.TestCase):
             loaded.candidate_plan.candidate_set_id,
         )
         self.assertIn(
-            "radar-leader-business-deterministic-relation-v31",
+            "radar-leader-business-deterministic-relation-v35",
             result.candidate_plan.derivation_policy_id,
         )
         self.assertEqual(

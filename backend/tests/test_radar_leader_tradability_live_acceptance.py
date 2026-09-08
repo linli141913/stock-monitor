@@ -767,6 +767,67 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
             result.as_of,
         )
         prepared = captured["prepared"]
+        expanded_memberships = {
+            **prepared.membership_symbols_by_industry,
+            "02": ("000003", "000004"),
+        }
+        expanded_replay = replace(
+            prepared.sector_history_replay_query,
+            memberships_by_division={
+                **prepared.sector_history_replay_query.memberships_by_division,
+                "02": ("000003", "000004"),
+            },
+            series_by_symbol={
+                **prepared.sector_history_replay_query.series_by_symbol,
+                "000003": object(),
+                "000004": object(),
+            },
+            total_shares_by_symbol={
+                **prepared.sector_history_replay_query.total_shares_by_symbol,
+                "000003": 1.0,
+                "000004": 1.0,
+            },
+        )
+        expanded_prepared = replace(
+            prepared,
+            membership_symbols_by_industry=expanded_memberships,
+            sector_history_replay_query=expanded_replay,
+        )
+        expanded_rebuild_called = []
+
+        def rebuild_expanded(query):
+            expanded_rebuild_called.append(query)
+            return SectorHistoryBackfillResult(
+                status="ready",
+                reasons=(),
+                sector_analyses=tuple(
+                    replace(
+                        item,
+                        comparable_time=query.comparable_time,
+                    )
+                    for item in captured["source"].sector_historical_analyses
+                ),
+                market_samples=(),
+                history_evidence=replace(
+                    captured["source"].sector_history_evidence,
+                    as_of=query.as_of,
+                ),
+            )
+
+        phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+            expanded_prepared,
+            clock=lambda: captured["source"].completed_at,
+            sector_history_rebuilder=rebuild_expanded,
+        )(
+            captured["runtime"],
+            captured["provisionalAsOf"],
+        )
+        self.assertEqual(len(expanded_rebuild_called), 1)
+        self.assertIn(
+            "02",
+            expanded_rebuild_called[0].memberships_by_division,
+        )
+
         forged_query = replace(
             prepared.sector_history_replay_query,
             memberships_by_division={"01": ("000001", "000999")},
@@ -779,7 +840,8 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             ValueError,
-            "leader_phase6_prepared_binding_unverified",
+            "leader_phase6_prepared_binding_unverified:"
+            "sector_replay_member_symbol_scope_mismatch",
         ):
             phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
                 forged,
@@ -791,6 +853,152 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
                 captured["runtime"],
                 captured["provisionalAsOf"],
             )
+
+        expected_sector_memberships = phase6_prefreeze._sector_membership_scope(
+            {
+                key: tuple(value)
+                for key, value in captured["runtime"].source_context
+                .industry_constituent_symbols_by_code.items()
+            }
+        )
+        first_code = next(iter(expected_sector_memberships))
+        first_members = expected_sector_memberships[first_code]
+        wrong_code = "99" if first_code != "99" else "98"
+        wrong_scope_query = replace(
+            prepared.sector_history_replay_query,
+            memberships_by_division={wrong_code: first_members},
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "leader_phase6_prepared_binding_unverified:"
+            "sector_replay_industry_scope_mismatch",
+        ):
+            phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+                replace(
+                    prepared,
+                    sector_history_replay_query=wrong_scope_query,
+                ),
+                clock=lambda: captured["source"].completed_at,
+                sector_history_rebuilder=lambda _: self.fail(
+                    "forged scope reached rebuilder"
+                ),
+            )(
+                captured["runtime"],
+                captured["provisionalAsOf"],
+            )
+
+        reversed_memberships = dict(expected_sector_memberships)
+        reversed_memberships[first_code] = tuple(reversed(first_members))
+        wrong_order_query = replace(
+            prepared.sector_history_replay_query,
+            memberships_by_division=reversed_memberships,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "leader_phase6_prepared_binding_unverified:"
+            "sector_replay_member_order_mismatch",
+        ):
+            phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+                replace(
+                    prepared,
+                    sector_history_replay_query=wrong_order_query,
+                ),
+                clock=lambda: captured["source"].completed_at,
+                sector_history_rebuilder=lambda _: self.fail(
+                    "forged order reached rebuilder"
+                ),
+            )(
+                captured["runtime"],
+                captured["provisionalAsOf"],
+            )
+
+        prepared_memberships = dict(
+            prepared.membership_symbols_by_industry
+        )
+        first_prepared_code = next(iter(prepared_memberships))
+        first_prepared_members = prepared_memberships[first_prepared_code]
+        wrong_prepared_memberships = dict(prepared_memberships)
+        wrong_prepared_memberships[first_prepared_code] = (
+            *first_prepared_members[:-1],
+            "000999",
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "leader_phase6_prepared_binding_unverified:"
+            "industry_member_symbol_scope_mismatch",
+        ):
+            phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+                replace(
+                    prepared,
+                    membership_symbols_by_industry=(
+                        wrong_prepared_memberships
+                    ),
+                ),
+                clock=lambda: captured["source"].completed_at,
+            )(
+                captured["runtime"],
+                captured["provisionalAsOf"],
+            )
+
+        wrong_prepared_order = dict(prepared_memberships)
+        wrong_prepared_order[first_prepared_code] = tuple(
+            reversed(first_prepared_members)
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "leader_phase6_prepared_binding_unverified:"
+            "industry_member_order_mismatch",
+        ):
+            phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+                replace(
+                    prepared,
+                    membership_symbols_by_industry=wrong_prepared_order,
+                ),
+                clock=lambda: captured["source"].completed_at,
+            )(
+                captured["runtime"],
+                captured["provisionalAsOf"],
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "leader_phase6_prepared_binding_unverified:"
+            "sector_rebuild_status_not_ready:"
+            "sector_history_dates_incomplete",
+        ):
+            phase6_prefreeze.build_leader_phase6_prepared_prefreeze_loader(
+                prepared,
+                clock=lambda: captured["source"].completed_at,
+                sector_history_rebuilder=lambda query: replace(
+                    rebuild_expanded(query),
+                    status="not_ready",
+                    reasons=("sector_history_dates_incomplete",),
+                ),
+            )(
+                captured["runtime"],
+                captured["provisionalAsOf"],
+            )
+
+    def test_prepared_binding_mismatch_is_reported_as_unverifiable(self):
+        reason = (
+            "leader_phase6_prepared_binding_unverified:"
+            "candidate_history_series_missing"
+        )
+
+        def load(_runtime, _provisional_as_of):
+            raise ValueError(reason)
+
+        result = self.run_acceptance(phase6_prefreeze_loader=load)
+
+        self.assertEqual(
+            result.status,
+            LeaderTradabilityLiveAcceptanceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.reasons, (reason,))
+        self.assertEqual(
+            result.source_statuses["phase6Prefreeze"],
+            "source_unverified",
+        )
 
     def test_public_history_prepare_reuses_read_only_store_before_quote_freeze(self):
         prepare = getattr(
@@ -886,6 +1094,19 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
             runtime,
             EVIDENCE_COMPLETED_AT,
         )
+        calendar_document = self.calendar_document(runtime.as_of)
+        # 阶段10必须绑定上交所实际响应字节；这里故意使用
+        # GB18030，防止预冻结层又把 text 重编码为 UTF-8 后求哈希。
+        calendar_raw_content = calendar_document.text.encode("gb18030")
+        calendar_document = PublicCalendarDocument(
+            source_url=calendar_document.source_url,
+            document_id=calendar_document.document_id,
+            text=calendar_document.text,
+            source_time=calendar_document.source_time,
+            fetched_at=calendar_document.fetched_at,
+            raw_content=calendar_raw_content,
+            text_encoding="gb18030",
+        )
         source_history_series = dict(source.history.series_by_symbol)
         source_history_series[singleton_symbol] = replace(
             next(
@@ -944,7 +1165,7 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
                     security_master_batch=security_master_batch,
                     classification_snapshot=classification_snapshot,
                     share_quote_batch=share_quote_batch,
-                    calendar_document=self.calendar_document(runtime.as_of),
+                    calendar_document=calendar_document,
                     artifact_dir=Path(output_dir),
                     history_checkpoint_dir=(
                         Path(output_dir).parent
@@ -1015,6 +1236,17 @@ class LeaderTradabilityLiveAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             prepared.threshold_approval_record,
             source.threshold_approval_record,
+        )
+        self.assertTrue(
+            prepared.has_verified_calendar_document_raw_content
+        )
+        self.assertEqual(
+            prepared.calendar_document_raw_content,
+            calendar_raw_content,
+        )
+        self.assertEqual(
+            prepared.calendar_document_raw_content_sha256,
+            prepared.calendar_evidence.content_sha256,
         )
 
     def test_public_history_prepare_allows_complete_degraded_classification(self):

@@ -93,6 +93,29 @@ ngrok_running() {
   /usr/bin/pgrep -x ngrok >/dev/null 2>&1
 }
 
+ngrok_4040_listening() {
+  /usr/sbin/lsof -nP -iTCP:4040 -sTCP:LISTEN >/dev/null 2>&1
+}
+
+resolve_ngrok_runtime_status() {
+  local launchd_signal="$1"
+  local pid_signal="$2"
+  local port_signal="$3"
+  if [[ ! "$launchd_signal" =~ '^[01]$' ||
+        ! "$pid_signal" =~ '^[01]$' ||
+        ! "$port_signal" =~ '^[01]$' ]]; then
+    print -u2 -- "ngrok运行信号必须为0或1"
+    return 64
+  fi
+  if [[ "$launchd_signal$pid_signal$port_signal" == "111" ]]; then
+    print -- "running|identity_verified"
+  elif [[ "$launchd_signal$pid_signal$port_signal" == "000" ]]; then
+    print -- "not_running|no_runtime_signal"
+  else
+    print -- "degraded|identity_unverified"
+  fi
+}
+
 launchd_loaded() {
   /bin/launchctl print "$GUI_DOMAIN/$1" >/dev/null 2>&1
 }
@@ -375,12 +398,16 @@ reload_backend() {
 }
 
 status_services() {
+  local ngrok_launchd_signal=0
+  local ngrok_pid_signal=0
+  local ngrok_port_signal=0
   if launchd_loaded "$BACKEND_LABEL"; then
     print -- "FastAPI LaunchAgent：loaded"
   else
     print -- "FastAPI LaunchAgent：not_loaded"
   fi
   if launchd_loaded "$NGROK_LABEL"; then
+    ngrok_launchd_signal=1
     print -- "ngrok LaunchAgent：loaded"
   else
     print -- "ngrok LaunchAgent：not_loaded"
@@ -391,10 +418,21 @@ status_services() {
     print -- "后端8001端口：not_listening"
   fi
   if ngrok_running; then
+    ngrok_pid_signal=1
     print -- "ngrok进程：running"
   else
     print -- "ngrok进程：not_running"
   fi
+  if ngrok_4040_listening; then
+    ngrok_port_signal=1
+    print -- "ngrok 4040端口：listening"
+  else
+    print -- "ngrok 4040端口：not_listening"
+  fi
+  print -- "ngrok LaunchAgent信号：$ngrok_launchd_signal"
+  print -- "ngrok进程信号：$ngrok_pid_signal"
+  print -- "ngrok 4040信号：$ngrok_port_signal"
+  print -- "ngrok运行状态：$(resolve_ngrok_runtime_status "$ngrok_launchd_signal" "$ngrok_pid_signal" "$ngrok_port_signal")"
   if [[ -x "$BACKEND_RUNTIME_RUNNER" && -x "$NGROK_RUNTIME_RUNNER" ]]; then
     print -- "LaunchAgent运行脚本：installed"
   else

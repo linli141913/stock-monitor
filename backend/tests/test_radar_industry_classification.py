@@ -7,6 +7,7 @@ from radar.contracts import (
     IndustryClassificationCompleteness,
     IndustryHistoryStatus,
     IndustryIdentityStatus,
+    IndustryRecordProvenance,
     IndustryRecordStatus,
     SecurityMasterRecord,
     VerifiedSecurityAlias,
@@ -14,6 +15,7 @@ from radar.contracts import (
 from radar.sources.industry_classification import (
     FetchedResource,
     IndustryClassificationProviders,
+    OfficialIndustrySupplementRecord,
     fetch_industry_classification,
 )
 
@@ -72,15 +74,36 @@ def fixture_html(
     ).encode("utf-8")
 
 
-def master(symbol, name="平安银行", listing_date=date(1991, 4, 3)):
+def master(
+    symbol,
+    name="平安银行",
+    listing_date=date(1991, 4, 3),
+    *,
+    exchange=None,
+    source_industry=None,
+    source_report_date=None,
+):
     return SecurityMasterRecord(
         symbol=symbol,
         name=name,
-        exchange="szse" if symbol.startswith(("0", "3")) else "bse",
+        exchange=(
+            exchange
+            or ("szse" if symbol.startswith(("0", "3")) else "bse")
+        ),
         board="A股",
         listingDate=listing_date,
+        sourceIndustry=source_industry,
+        sourceReportDate=source_report_date,
         source="official_exchange_security_master",
         fetchedAt=FETCHED_AT,
+        sourceFields={
+            "所属行业": source_industry,
+            "报告日期": (
+                source_report_date.isoformat()
+                if source_report_date is not None
+                else None
+            ),
+        },
     )
 
 
@@ -92,6 +115,7 @@ def providers_for(
     document_final_url=DOCUMENT_URL,
     page_error=None,
     document_error=None,
+    supplement_loader=None,
 ):
     def fetch_page(_url, _timeout):
         if page_error:
@@ -113,6 +137,7 @@ def providers_for(
         fetch_page=fetch_page,
         fetch_document=fetch_document,
         extract_layout_pages=lambda _content: [fixture_layout(*rows)],
+        fetch_current_supplements=supplement_loader,
     )
 
 
@@ -371,6 +396,246 @@ class IndustryClassificationSourceTests(unittest.TestCase):
         self.assertIn(
             "listed_on_or_after_classification_start",
             result.current_master_gaps[0].issue_codes,
+        )
+
+    def test_bse_exact_category_is_crosswalked_with_auditable_provenance(self):
+        result = self.fetch(
+            providers_for(
+                source_record(),
+                source_record(
+                    symbol="000008",
+                    name="参照公司",
+                    category_code="C",
+                    category_name="制造业",
+                    subclass_code="CG",
+                    subclass_name="专用、通用及交通运输设备",
+                    division_code="35",
+                    division_name="专用设备制造业",
+                ),
+            ),
+            current_master=[
+                master("000001"),
+                master(
+                    "920001",
+                    "北交新股",
+                    date(2026, 7, 1),
+                    exchange="bse",
+                    source_industry="专用设备制造业",
+                    source_report_date=date(2026, 7, 20),
+                ),
+            ],
+            supplement_official_exchange_categories=True,
+        )
+
+        self.assertEqual(result.completeness.mapped_count, 2)
+        self.assertEqual(result.completeness.unconfirmed_count, 0)
+        self.assertEqual(result.completeness.supplemental_record_count, 1)
+        self.assertEqual(result.current_master_gaps, [])
+        supplement = next(
+            record
+            for record in result.records
+            if record.security_identity == "920001"
+        )
+        self.assertEqual(supplement.category_code, "C")
+        self.assertEqual(supplement.division_code, "35")
+        self.assertEqual(supplement.manufacturing_subclass_code, "CG")
+        self.assertEqual(
+            supplement.record_provenance,
+            IndustryRecordProvenance.BSE_EXACT_CATEGORY_CROSSWALK,
+        )
+        self.assertEqual(supplement.knowledge_effective_from, FETCHED_AT)
+        self.assertEqual(
+            supplement.evidence_url,
+            "https://www.bse.cn/nqxxController/nqxxCnzq.do",
+        )
+
+    def test_exchange_category_supplement_never_guesses_unknown_or_coarse_values(self):
+        result = self.fetch(
+            providers_for(source_record()),
+            current_master=[
+                master("000001"),
+                master(
+                    "920001",
+                    "未知北交股",
+                    date(2026, 8, 1),
+                    exchange="bse",
+                    source_industry="官方代码表不存在的行业",
+                ),
+                master(
+                    "001399",
+                    "深市新股",
+                    date(2026, 8, 2),
+                    exchange="szse",
+                    source_industry="C 制造业",
+                ),
+                master(
+                    "603999",
+                    "沪市新股",
+                    date(2026, 8, 3),
+                    exchange="sse",
+                    source_industry=None,
+                ),
+            ],
+            supplement_official_exchange_categories=True,
+        )
+
+        self.assertEqual(result.completeness.supplemental_record_count, 0)
+        self.assertEqual(result.completeness.mapped_count, 1)
+        self.assertEqual(result.completeness.unconfirmed_count, 3)
+        self.assertEqual(
+            {gap.symbol for gap in result.current_master_gaps},
+            {"920001", "001399", "603999"},
+        )
+
+    def test_cninfo_capco_record_supplements_sse_and_szse_exact_codes(self):
+        def load_supplements(symbols, _as_of):
+            self.assertEqual(set(symbols), {"001399", "603999"})
+            return (
+                OfficialIndustrySupplementRecord(
+                    symbol="001399",
+                    source_name="深市新股",
+                    category_code="C",
+                    category_name="制造业",
+                    division_code="26",
+                    division_name="化学原料和化学制品制造业",
+                    effective_on=date(2026, 7, 2),
+                    fetched_at=FETCHED_AT,
+                    evidence_url=(
+                        "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+                    ),
+                    source_fields={"F001V": "008001", "F003V": "C26"},
+                ),
+                OfficialIndustrySupplementRecord(
+                    symbol="603999",
+                    source_name="沪市新股",
+                    category_code="C",
+                    category_name="制造业",
+                    division_code="26",
+                    division_name="化学原料和化学制品制造业",
+                    effective_on=date(2026, 7, 3),
+                    fetched_at=FETCHED_AT,
+                    evidence_url=(
+                        "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+                    ),
+                    source_fields={"F001V": "008001", "F003V": "C26"},
+                ),
+            )
+
+        result = self.fetch(
+            providers_for(
+                source_record(),
+                source_record(
+                    symbol="000008",
+                    name="参照公司",
+                    category_code="C",
+                    category_name="制造业",
+                    subclass_code="CC",
+                    subclass_name="石油化工、化学制品",
+                    division_code="26",
+                    division_name="化学原料和化学制品制造业",
+                ),
+                supplement_loader=load_supplements,
+            ),
+            current_master=[
+                master("000001"),
+                master(
+                    "001399",
+                    "深市新股",
+                    date(2026, 7, 2),
+                    exchange="szse",
+                    source_industry="C 制造业",
+                ),
+                master(
+                    "603999",
+                    "沪市新股",
+                    date(2026, 7, 3),
+                    exchange="sse",
+                ),
+            ],
+            supplement_official_exchange_categories=True,
+        )
+
+        self.assertEqual(result.completeness.mapped_count, 3)
+        self.assertEqual(result.completeness.supplemental_record_count, 2)
+        self.assertEqual(result.current_master_gaps, [])
+        supplements = [
+            record for record in result.records
+            if record.record_provenance
+            == IndustryRecordProvenance.CNINFO_CAPCO_CURRENT_CROSSWALK
+        ]
+        self.assertEqual({record.security_identity for record in supplements}, {
+            "001399", "603999",
+        })
+        self.assertTrue(all(
+            record.manufacturing_subclass_code == "CC"
+            for record in supplements
+        ))
+
+    def test_cninfo_supplement_rejects_future_or_crosswalk_mismatch(self):
+        def load_supplements(_symbols, _as_of):
+            return (
+                OfficialIndustrySupplementRecord(
+                    symbol="001399",
+                    source_name="深市新股",
+                    category_code="C",
+                    category_name="制造业",
+                    division_code="26",
+                    division_name="不匹配的大类名称",
+                    effective_on=date(2026, 7, 2),
+                    fetched_at=FETCHED_AT,
+                    evidence_url=(
+                        "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+                    ),
+                    source_fields={"F001V": "008001", "F003V": "C26"},
+                ),
+                OfficialIndustrySupplementRecord(
+                    symbol="603999",
+                    source_name="沪市新股",
+                    category_code="C",
+                    category_name="制造业",
+                    division_code="26",
+                    division_name="化学原料和化学制品制造业",
+                    effective_on=AS_OF.date() + timedelta(days=1),
+                    fetched_at=FETCHED_AT,
+                    evidence_url=(
+                        "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+                    ),
+                    source_fields={"F001V": "008001", "F003V": "C26"},
+                ),
+            )
+
+        result = self.fetch(
+            providers_for(
+                source_record(),
+                source_record(
+                    symbol="000008",
+                    name="参照公司",
+                    category_code="C",
+                    category_name="制造业",
+                    subclass_code="CC",
+                    subclass_name="石油化工、化学制品",
+                    division_code="26",
+                    division_name="化学原料和化学制品制造业",
+                ),
+                supplement_loader=load_supplements,
+            ),
+            current_master=[
+                master("000001"),
+                master("001399", "深市新股", date(2026, 7, 2)),
+                master(
+                    "603999",
+                    "沪市新股",
+                    date(2026, 7, 3),
+                    exchange="sse",
+                ),
+            ],
+            supplement_official_exchange_categories=True,
+        )
+
+        self.assertEqual(result.completeness.supplemental_record_count, 0)
+        self.assertEqual(
+            {gap.symbol for gap in result.current_master_gaps},
+            {"001399", "603999"},
         )
 
     def test_source_failure_is_sanitized_and_does_not_create_fake_release(self):

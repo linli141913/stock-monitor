@@ -3,6 +3,11 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from radar.formal_readiness_contracts import (
+    RadarFormalReadiness,
+    RadarFormalShadowProgress,
+)
+
 
 RadarModuleState = Literal[
     "available",
@@ -393,8 +398,67 @@ class RadarLeaderItem(RadarApiModel):
     formal_usable: Literal[False] = Field(alias="formalUsable")
 
 
+class RadarLeaderObservationItem(RadarApiModel):
+    symbol: str
+    name: str
+    industry_code: str = Field(alias="industryCode")
+    industry_name: str = Field(alias="industryName")
+    within_industry_rank: int = Field(alias="withinIndustryRank", ge=1, le=5)
+    price: float = Field(gt=0)
+    change_percent: float = Field(alias="changePercent")
+    source_time: datetime = Field(alias="sourceTime")
+    quote_source_contract_id: str = Field(alias="quoteSourceContractId")
+    sector_source_contract_id: str = Field(alias="sectorSourceContractId")
+
+
+class RadarLeaderObservation(RadarApiModel):
+    status: RadarModuleState
+    quality: RadarModuleQuality
+    display_allowed: bool = Field(alias="displayAllowed")
+    radar_run_id: Optional[str] = Field(default=None, alias="radarRunId")
+    candidate_plan_id: Optional[str] = Field(
+        default=None,
+        alias="candidatePlanId",
+    )
+    as_of: Optional[datetime] = Field(default=None, alias="asOf")
+    published_at: Optional[datetime] = Field(default=None, alias="publishedAt")
+    scanned_count: int = Field(default=0, alias="scannedCount", ge=0)
+    mapped_count: int = Field(default=0, alias="mappedCount", ge=0)
+    candidate_count: int = Field(default=0, alias="candidateCount", ge=0)
+    coverage_scope: str = Field(alias="coverageScope")
+    human_approval_required: Literal[False] = Field(
+        default=False,
+        alias="humanApprovalRequired",
+    )
+    formal_usable: Literal[False] = Field(default=False, alias="formalUsable")
+    state_transition_allowed: Literal[False] = Field(
+        default=False,
+        alias="stateTransitionAllowed",
+    )
+    freshness: RadarFreshness
+    items: List[RadarLeaderObservationItem] = Field(default_factory=list)
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
 class RadarLeaderReviewQueue(RadarApiModel):
     status: Literal["not_ready", "ready", "failed"] = "not_ready"
+    purpose: Literal["official_announcement_scan"] = (
+        "official_announcement_scan"
+    )
+    human_approval_required: Literal[False] = Field(
+        default=False,
+        alias="humanApprovalRequired",
+    )
+    semantic_coverage_status: Literal["partial", "unavailable"] = Field(
+        default="unavailable",
+        alias="semanticCoverageStatus",
+    )
+    coverage_statement: str = Field(
+        default=(
+            "仅展示实际发现的官方公告；关键词发现不等于完整语义审查"
+        ),
+        alias="coverageStatement",
+    )
     review_batch_id: Optional[str] = Field(
         default=None,
         alias="reviewBatchId",
@@ -480,6 +544,36 @@ class RadarLeaderReviewDocument(RadarApiModel):
     )
 
 
+class RadarLeaderSourceSummaryItem(RadarApiModel):
+    domain: Literal["quote", "sector", "business", "announcement"]
+    status: Literal[
+        "available",
+        "partial",
+        "missing",
+        "stale",
+        "failed",
+        "unverified",
+    ]
+    scope: Literal[
+        "current_observation_candidates",
+        "current_public_tiers",
+    ]
+    source_contract_ids: List[str] = Field(
+        default_factory=list,
+        alias="sourceContractIds",
+    )
+    as_of: Optional[datetime] = Field(default=None, alias="asOf")
+    source_time: Optional[datetime] = Field(default=None, alias="sourceTime")
+    fetched_at: Optional[datetime] = Field(default=None, alias="fetchedAt")
+    covered_count: int = Field(default=0, alias="coveredCount", ge=0)
+    expected_count: Optional[int] = Field(
+        default=None,
+        alias="expectedCount",
+        ge=0,
+    )
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
 class RadarLeaderModule(RadarApiModel):
     state: RadarModuleState
     quality: RadarModuleQuality
@@ -494,7 +588,12 @@ class RadarLeaderModule(RadarApiModel):
     )
     freshness: RadarFreshness
     sources: List[RadarSourceStatus] = Field(default_factory=list)
+    source_summary: List[RadarLeaderSourceSummaryItem] = Field(
+        default_factory=list,
+        alias="sourceSummary",
+    )
     summary: RadarLeaderSummary
+    observation: RadarLeaderObservation
     review_queue: RadarLeaderReviewQueue = Field(
         default_factory=RadarLeaderReviewQueue,
         alias="reviewQueue",
@@ -677,6 +776,264 @@ class RadarSectorHistoryResponse(RadarApiModel):
     )
 
 
+class RadarReplayQualityResponse(RadarApiModel):
+    schema_version: Literal["radar-replay-quality-v1"] = Field(
+        default="radar-replay-quality-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    state: Literal["ready", "not_ready", "failed"]
+    quality: Literal["complete", "partial", "unavailable"]
+    engineering_state: Literal["complete", "not_ready", "failed"] = Field(
+        default="not_ready",
+        alias="engineeringState",
+    )
+    validation_state: Literal[
+        "validated",
+        "collecting",
+        "not_started",
+        "failed",
+    ] = Field(default="not_started", alias="validationState")
+    shadow_collection_allowed: bool = Field(
+        default=False,
+        alias="shadowCollectionAllowed",
+    )
+    stage9_quality_gate_passed: bool = Field(
+        default=False,
+        alias="stage9QualityGatePassed",
+    )
+    replay_run_id: Optional[str] = Field(default=None, alias="replayRunId")
+    created_at: Optional[datetime] = Field(default=None, alias="createdAt")
+    evidence_sha256: Optional[str] = Field(
+        default=None,
+        alias="evidenceSha256",
+    )
+    sample_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "development": 0,
+            "calibration": 0,
+            "holdout": 0,
+        },
+        alias="sampleCounts",
+    )
+    included_count: int = Field(default=0, alias="includedCount", ge=0)
+    excluded_count: int = Field(default=0, alias="excludedCount", ge=0)
+    scoped_exclusion_count: int = Field(
+        default=0,
+        alias="scopedExclusionCount",
+        ge=0,
+    )
+    scoped_exclusion_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        alias="scopedExclusionCounts",
+    )
+    missing_count: int = Field(default=0, alias="missingCount", ge=0)
+    unverifiable_count: int = Field(
+        default=0,
+        alias="unverifiableCount",
+        ge=0,
+    )
+    failed_count: int = Field(default=0, alias="failedCount", ge=0)
+    future_violation_count: int = Field(
+        default=0,
+        alias="futureViolationCount",
+        ge=0,
+    )
+    duplicate_state_violation_count: int = Field(
+        default=0,
+        alias="duplicateStateViolationCount",
+        ge=0,
+    )
+    multi_state_violation_count: int = Field(
+        default=0,
+        alias="multiStateViolationCount",
+        ge=0,
+    )
+    label_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "market": 0,
+            "sector": 0,
+            "etf": 0,
+            "leader": 0,
+        },
+        alias="labelCounts",
+    )
+    output_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "market": 0,
+            "sector": 0,
+            "etf": 0,
+            "leader": 0,
+        },
+        alias="outputCounts",
+    )
+    etf_readiness_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "formalAdmissionCount": 0,
+            "monitoringReadyCount": 0,
+            "monitoringMissingCount": 0,
+            "rankingPolicyReadyCount": 0,
+            "rankingPolicyMissingCount": 0,
+        },
+        alias="etfReadinessCounts",
+    )
+    comparable_label_count: int = Field(
+        default=0,
+        alias="comparableLabelCount",
+        ge=0,
+    )
+    incomparable_label_count: int = Field(
+        default=0,
+        alias="incomparableLabelCount",
+        ge=0,
+    )
+    disputed_label_count: int = Field(
+        default=0,
+        alias="disputedLabelCount",
+        ge=0,
+    )
+    unverifiable_label_count: int = Field(
+        default=0,
+        alias="unverifiableLabelCount",
+        ge=0,
+    )
+    unlabeled_output_target_count: int = Field(
+        default=0,
+        alias="unlabeledOutputTargetCount",
+        ge=0,
+    )
+    unlabeled_output_target_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "market": 0,
+            "sector": 0,
+            "etf": 0,
+            "leader": 0,
+        },
+        alias="unlabeledOutputTargetCounts",
+    )
+    partition_chronology_valid: bool = Field(
+        default=False,
+        alias="partitionChronologyValid",
+    )
+    missing_domains: List[str] = Field(
+        default_factory=list,
+        alias="missingDomains",
+    )
+    missing_partitions: List[str] = Field(
+        default_factory=list,
+        alias="missingPartitions",
+    )
+    missing_label_domains: List[str] = Field(
+        default_factory=list,
+        alias="missingLabelDomains",
+    )
+    missing_output_domains: List[str] = Field(
+        default_factory=list,
+        alias="missingOutputDomains",
+    )
+    unverifiable_output_domains: List[str] = Field(
+        default_factory=list,
+        alias="unverifiableOutputDomains",
+    )
+    failed_output_domains: List[str] = Field(
+        default_factory=list,
+        alias="failedOutputDomains",
+    )
+    ready_output_domains: List[str] = Field(
+        default_factory=list,
+        alias="readyOutputDomains",
+    )
+    missing_label_partitions: List[str] = Field(
+        default_factory=list,
+        alias="missingLabelPartitions",
+    )
+    reason_codes: List[str] = Field(
+        default_factory=list,
+        alias="reasonCodes",
+    )
+    metrics: Dict[str, Optional[Dict[str, float]]] = Field(
+        default_factory=dict,
+    )
+
+
+RadarEtfProductResearchState = Literal[
+    "product_ready_for_index_research",
+    "active_product_separate_track",
+    "out_of_scope_asset",
+    "product_evidence_incomplete",
+]
+
+
+class RadarReplayEtfResearchItem(RadarApiModel):
+    symbol: str = Field(pattern=r"^\d{6}$")
+    research_state: RadarEtfProductResearchState = Field(alias="researchState")
+    target_index_name: Optional[str] = Field(default=None, alias="targetIndexName")
+    monitoring_status: Optional[Literal["ready", "missing"]] = Field(
+        default=None,
+        alias="monitoringStatus",
+    )
+    ranking_status: Optional[Literal["ready", "missing"]] = Field(
+        default=None,
+        alias="rankingStatus",
+    )
+    monitoring_reasons: List[str] = Field(
+        default_factory=list,
+        alias="monitoringReasons",
+    )
+    ranking_reasons: List[str] = Field(
+        default_factory=list,
+        alias="rankingReasons",
+    )
+
+
+class RadarReplayEtfResearchSnapshot(RadarApiModel):
+    schema_version: Literal["radar-replay-etf-research-v1"] = Field(
+        default="radar-replay-etf-research-v1",
+        alias="schemaVersion",
+    )
+    replay_output_bundle_id: str = Field(alias="replayOutputBundleId")
+    sample_id: str = Field(alias="sampleId")
+    radar_run_id: str = Field(alias="radarRunId")
+    as_of: datetime = Field(alias="asOf")
+    created_at: datetime = Field(alias="createdAt")
+    source: str
+    source_time: Optional[datetime] = Field(default=None, alias="sourceTime")
+    fetched_at: datetime = Field(alias="fetchedAt")
+    output_snapshot_sha256: str = Field(alias="outputSnapshotSha256")
+    source_snapshot_sha256: str = Field(alias="sourceSnapshotSha256")
+    classification_mapping_version: str = Field(alias="classificationMappingVersion")
+    product_count: int = Field(alias="productCount", ge=0)
+    index_research_ready_count: int = Field(alias="indexResearchReadyCount", ge=0)
+    active_separate_track_count: int = Field(alias="activeSeparateTrackCount", ge=0)
+    out_of_scope_asset_count: int = Field(alias="outOfScopeAssetCount", ge=0)
+    evidence_incomplete_count: int = Field(alias="evidenceIncompleteCount", ge=0)
+    formal_admission_available: bool = Field(alias="formalAdmissionAvailable")
+    formal_admission_count: int = Field(default=0, alias="formalAdmissionCount", ge=0)
+    monitoring_ready_count: int = Field(default=0, alias="monitoringReadyCount", ge=0)
+    monitoring_missing_count: int = Field(default=0, alias="monitoringMissingCount", ge=0)
+    ranking_policy_ready_count: int = Field(default=0, alias="rankingPolicyReadyCount", ge=0)
+    ranking_policy_missing_count: int = Field(default=0, alias="rankingPolicyMissingCount", ge=0)
+    research_only: Literal[True] = Field(alias="researchOnly")
+    ranking_ready: Literal[False] = Field(alias="rankingReady")
+    formal_usable: Literal[False] = Field(alias="formalUsable")
+    state_transition_allowed: Literal[False] = Field(alias="stateTransitionAllowed")
+    items: List[RadarReplayEtfResearchItem] = Field(default_factory=list)
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
+class RadarReplayEtfResearchResponse(RadarApiModel):
+    schema_version: Literal["radar-replay-etf-research-v1"] = Field(
+        default="radar-replay-etf-research-v1",
+        alias="schemaVersion",
+    )
+    checked_at: datetime = Field(alias="checkedAt")
+    state: Literal["available", "not_ready", "failed"]
+    quality: Literal["complete", "partial", "unavailable"]
+    evidence_sha256: Optional[str] = Field(default=None, alias="evidenceSha256")
+    snapshot: Optional[RadarReplayEtfResearchSnapshot] = None
+    reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
+
+
 class RadarStockResponse(RadarApiModel):
     schema_version: Literal["radar-stock-v1"] = Field(
         default="radar-stock-v1",
@@ -687,6 +1044,7 @@ class RadarStockResponse(RadarApiModel):
     symbol: str
     status: Literal[
         "matched",
+        "observed",
         "not_listed",
         "no_snapshot",
         "stale",
@@ -696,6 +1054,10 @@ class RadarStockResponse(RadarApiModel):
     snapshot: Optional[RadarLeaderSnapshot] = None
     freshness: RadarFreshness
     leader: Optional[RadarLeaderItem] = None
+    observation_item: Optional[RadarLeaderObservationItem] = Field(
+        default=None,
+        alias="observationItem",
+    )
     reason_codes: List[str] = Field(default_factory=list, alias="reasonCodes")
 
 

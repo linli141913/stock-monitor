@@ -4,7 +4,7 @@ import hashlib
 from html.parser import HTMLParser
 from io import BytesIO
 import re
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
@@ -19,6 +19,7 @@ from radar.contracts import (
     IndustryClassificationSnapshot,
     IndustryHistoryStatus,
     IndustryIdentityStatus,
+    IndustryRecordProvenance,
     IndustryRecordStatus,
     RadarBatchMeta,
     SecurityMasterRecord,
@@ -30,7 +31,16 @@ from radar.contracts import (
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 SOURCE_NAME = "capco_industry_classification"
+SUPPLEMENTED_SOURCE_NAME = (
+    "capco_industry_classification_with_official_current_supplements"
+)
 SCHEME_VERSION = "capco-guideline-2023-shadow"
+BSE_SECURITY_MASTER_EVIDENCE_URL = (
+    "https://www.bse.cn/nqxxController/nqxxCnzq.do"
+)
+CNINFO_INDUSTRY_CHANGE_EVIDENCE_URL = (
+    "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+)
 ALLOWED_CAPCO_HOSTS = frozenset({
     "capco.org.cn",
     "www.capco.org.cn",
@@ -53,6 +63,26 @@ class IndustryClassificationProviders:
     fetch_page: Callable[[str, float], FetchedResource]
     fetch_document: Callable[[str, float], FetchedResource]
     extract_layout_pages: Callable[[bytes], Sequence[str]]
+    fetch_current_supplements: Optional[
+        Callable[
+            [Sequence[str], datetime],
+            Sequence["OfficialIndustrySupplementRecord"],
+        ]
+    ] = None
+
+
+@dataclass(frozen=True)
+class OfficialIndustrySupplementRecord:
+    symbol: str
+    source_name: str
+    category_code: str
+    category_name: str
+    division_code: str
+    division_name: str
+    effective_on: date
+    fetched_at: datetime
+    evidence_url: str
+    source_fields: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -139,10 +169,107 @@ def _default_providers() -> IndustryClassificationProviders:
             content=response.content,
         )
 
+    def fetch_current_supplements(
+        symbols: Sequence[str],
+        as_of: datetime,
+    ) -> Sequence[OfficialIndustrySupplementRecord]:
+        import py_mini_racer
+        from akshare.datasets import get_ths_js
+
+        js_runtime = py_mini_racer.MiniRacer()
+        with open(get_ths_js("cninfo.js"), encoding="utf-8") as handle:
+            js_runtime.eval(handle.read())
+        request_token = js_runtime.call("getResCode1")
+        headers = {
+            "Accept": "*/*",
+            "Accept-Enckey": request_token,
+            "Origin": "https://webapi.cninfo.com.cn",
+            "Referer": "https://webapi.cninfo.com.cn/",
+            "User-Agent": "Mozilla/5.0",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        start_date = "1990-01-01"
+        end_date = as_of.astimezone(SHANGHAI_TZ).date().isoformat()
+        fetched_records = []
+        for symbol in symbols:
+            response = session.post(
+                CNINFO_INDUSTRY_CHANGE_EVIDENCE_URL,
+                params={
+                    "scode": symbol,
+                    "sdate": start_date,
+                    "edate": end_date,
+                },
+                headers=headers,
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload.get("records")
+            if not isinstance(rows, list):
+                raise _IndustrySourceError(
+                    "cninfo_industry_contract_invalid",
+                    "巨潮行业归属接口缺少records列表",
+                )
+            eligible = []
+            for row in rows:
+                if not isinstance(row, dict) or row.get("F001V") != "008001":
+                    continue
+                row_symbol = str(row.get("SECCODE") or "").strip()
+                industry_code = str(row.get("F003V") or "").strip()
+                effective_text = str(row.get("VARYDATE") or "").strip()
+                try:
+                    effective_on = date.fromisoformat(effective_text[:10])
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    row_symbol != symbol
+                    or re.fullmatch(r"[A-T]\d{2}", industry_code) is None
+                    or effective_on > as_of.astimezone(SHANGHAI_TZ).date()
+                ):
+                    continue
+                source_name = str(row.get("SECNAME") or "").strip()
+                category_name = str(row.get("F004V") or "").strip()
+                division_name = str(row.get("F006V") or "").strip()
+                if not source_name or not category_name or not division_name:
+                    continue
+                eligible.append((effective_on, row, industry_code))
+            if not eligible:
+                continue
+            latest_date = max(item[0] for item in eligible)
+            latest = [item for item in eligible if item[0] == latest_date]
+            identities = {
+                (
+                    item[2],
+                    str(item[1].get("F004V") or "").strip(),
+                    str(item[1].get("F006V") or "").strip(),
+                )
+                for item in latest
+            }
+            if len(identities) != 1:
+                raise _IndustrySourceError(
+                    "cninfo_industry_latest_conflict",
+                    f"巨潮行业归属最新记录冲突：{symbol}",
+                )
+            _, row, industry_code = latest[0]
+            fetched_records.append(OfficialIndustrySupplementRecord(
+                symbol=symbol,
+                source_name=str(row["SECNAME"]).strip(),
+                category_code=industry_code[0],
+                category_name=str(row["F004V"]).strip(),
+                division_code=industry_code[1:],
+                division_name=str(row["F006V"]).strip(),
+                effective_on=latest_date,
+                fetched_at=_now(),
+                evidence_url=CNINFO_INDUSTRY_CHANGE_EVIDENCE_URL,
+                source_fields=dict(row),
+            ))
+        return tuple(fetched_records)
+
     return IndustryClassificationProviders(
         fetch_page=fetch,
         fetch_document=fetch,
         extract_layout_pages=_default_layout_extractor,
+        fetch_current_supplements=fetch_current_supplements,
     )
 
 
@@ -524,11 +651,14 @@ def fetch_industry_classification(
     known_document_hashes: Optional[Mapping[str, str]] = None,
     first_observed_at: Optional[datetime] = None,
     verify_official_archive: bool = False,
+    supplement_official_exchange_categories: bool = False,
     timeout_seconds: float = 15.0,
     clock: Callable[[], datetime] = _now,
 ) -> IndustryClassificationSnapshot:
     if type(verify_official_archive) is not bool:
         raise ValueError("verify_official_archive必须是布尔值")
+    if type(supplement_official_exchange_categories) is not bool:
+        raise ValueError("supplement_official_exchange_categories必须是布尔值")
     if not 0 < timeout_seconds <= 30:
         raise ValueError("timeout_seconds必须在0到30秒之间")
     _require_aware(as_of, "asOf")
@@ -662,6 +792,271 @@ def fetch_industry_classification(
                 },
             ))
 
+        supplemental_record_count = 0
+        supplemental_issues: List[SourceIssue] = []
+        if supplement_official_exchange_categories:
+            crosswalk_by_exact_division_name: Dict[
+                str,
+                set[Tuple[str, str, str, str, Optional[str], Optional[str]]],
+            ] = {}
+            for record in records:
+                key = record.division_name.strip()
+                crosswalk_by_exact_division_name.setdefault(key, set()).add((
+                    record.category_code,
+                    record.category_name,
+                    record.division_code,
+                    record.division_name,
+                    record.manufacturing_subclass_code,
+                    record.manufacturing_subclass_name,
+                ))
+
+            for security in current_by_symbol.values():
+                if security.symbol in mapped_identities:
+                    continue
+                # 目前只有北交所官方证券主档提供精确到大类的
+                # 所属行业。深交所的“C 制造业”仅是门类，上交所主档
+                # 不提供该字段，二者都不允许猜测或降精度补齐。
+                if security.exchange != "bse" or not security.source_industry:
+                    continue
+                if (
+                    security.source_report_date is not None
+                    and security.source_report_date
+                    > as_of.astimezone(SHANGHAI_TZ).date()
+                ):
+                    continue
+                exact_name = security.source_industry.strip()
+                candidates = crosswalk_by_exact_division_name.get(exact_name, set())
+                if len(candidates) != 1:
+                    continue
+                (
+                    category_code,
+                    category_name,
+                    division_code,
+                    division_name,
+                    subclass_code,
+                    subclass_name,
+                ) = next(iter(candidates))
+                knowledge_effective_from = security.fetched_at
+                records.append(IndustryClassificationRecord(
+                    releasePeriod=page_metadata.release_period,
+                    sourceSymbol=security.symbol,
+                    sourceName=security.name,
+                    securityIdentity=security.symbol,
+                    identityStatus=IndustryIdentityStatus.EXACT,
+                    categoryCode=category_code,
+                    categoryName=category_name,
+                    divisionCode=division_code,
+                    divisionName=division_name,
+                    manufacturingSubclassCode=subclass_code,
+                    manufacturingSubclassName=subclass_name,
+                    middleClassCode=None,
+                    middleClassName=None,
+                    recordStatus=IndustryRecordStatus.ACCEPTED,
+                    recordProvenance=(
+                        IndustryRecordProvenance.BSE_EXACT_CATEGORY_CROSSWALK
+                    ),
+                    knowledgeEffectiveFrom=knowledge_effective_from,
+                    evidenceUrl=BSE_SECURITY_MASTER_EVIDENCE_URL,
+                    issueCodes=(),
+                    sourceFields={
+                        "classificationProvenance": (
+                            IndustryRecordProvenance
+                            .BSE_EXACT_CATEGORY_CROSSWALK.value
+                        ),
+                        "knowledgeEffectiveFrom": (
+                            knowledge_effective_from.isoformat()
+                        ),
+                        "evidenceUrl": BSE_SECURITY_MASTER_EVIDENCE_URL,
+                        "securityMasterSource": security.source,
+                        "securityMasterFetchedAt": (
+                            security.fetched_at.isoformat()
+                        ),
+                        "securityMasterReportDate": (
+                            security.source_report_date.isoformat()
+                            if security.source_report_date is not None
+                            else None
+                        ),
+                        "securityMasterSourceFields": security.source_fields,
+                        "officialExactIndustryName": exact_name,
+                        "capcoCrosswalk": {
+                            "categoryCode": category_code,
+                            "categoryName": category_name,
+                            "divisionCode": division_code,
+                            "divisionName": division_name,
+                            "manufacturingSubclassCode": subclass_code,
+                            "manufacturingSubclassName": subclass_name,
+                        },
+                    },
+                ))
+                mapped_identities.add(security.symbol)
+                supplemental_record_count += 1
+
+            supplement_loader = active_providers.fetch_current_supplements
+            remaining_symbols = tuple(sorted(
+                security.symbol
+                for security in current_by_symbol.values()
+                if (
+                    security.symbol not in mapped_identities
+                    and security.exchange in {"sse", "szse"}
+                    and security.listing_date is not None
+                    and security.listing_date
+                    >= page_metadata.classification_start_date
+                )
+            ))
+            loaded_supplements: Sequence[
+                OfficialIndustrySupplementRecord
+            ] = ()
+            if supplement_loader is not None and remaining_symbols:
+                try:
+                    loaded_supplements = supplement_loader(
+                        remaining_symbols,
+                        as_of,
+                    )
+                except Exception as exc:
+                    supplemental_issues.append(SourceIssue(
+                        code="official_industry_supplement_failed",
+                        source="cninfo_capco_industry_current",
+                        message=(
+                            "巨潮官方行业归属补充请求失败："
+                            f"{type(exc).__name__}"
+                        ),
+                        symbols=list(remaining_symbols),
+                    ))
+                    loaded_supplements = ()
+
+            supplements_by_symbol: Dict[
+                str,
+                List[OfficialIndustrySupplementRecord],
+            ] = {}
+            for supplement in loaded_supplements:
+                if not isinstance(supplement, OfficialIndustrySupplementRecord):
+                    continue
+                supplements_by_symbol.setdefault(
+                    supplement.symbol,
+                    [],
+                ).append(supplement)
+
+            crosswalk_by_exact_code: Dict[
+                Tuple[str, str],
+                set[Tuple[str, str, Optional[str], Optional[str]]],
+            ] = {}
+            for record in records:
+                crosswalk_by_exact_code.setdefault(
+                    (record.category_code, record.division_code),
+                    set(),
+                ).add((
+                    record.category_name,
+                    record.division_name,
+                    record.manufacturing_subclass_code,
+                    record.manufacturing_subclass_name,
+                ))
+
+            rejected_supplement_symbols = []
+            for symbol in remaining_symbols:
+                candidates_for_symbol = supplements_by_symbol.get(symbol, [])
+                if len(candidates_for_symbol) != 1:
+                    if candidates_for_symbol:
+                        rejected_supplement_symbols.append(symbol)
+                    continue
+                supplement = candidates_for_symbol[0]
+                security = current_by_symbol[symbol]
+                try:
+                    _require_aware(supplement.fetched_at, "supplementFetchedAt")
+                    _validate_official_url(
+                        supplement.evidence_url,
+                        allowed_hosts=frozenset({"webapi.cninfo.com.cn"}),
+                    )
+                except (ValueError, _IndustrySourceError):
+                    rejected_supplement_symbols.append(symbol)
+                    continue
+                if (
+                    supplement.effective_on
+                    > as_of.astimezone(SHANGHAI_TZ).date()
+                    or supplement.symbol != security.symbol
+                ):
+                    rejected_supplement_symbols.append(symbol)
+                    continue
+                crosswalk_candidates = crosswalk_by_exact_code.get(
+                    (supplement.category_code, supplement.division_code),
+                    set(),
+                )
+                expected_identity = (
+                    supplement.category_name,
+                    supplement.division_name,
+                )
+                exact_crosswalk = [
+                    item
+                    for item in crosswalk_candidates
+                    if item[:2] == expected_identity
+                ]
+                if len(exact_crosswalk) != 1:
+                    rejected_supplement_symbols.append(symbol)
+                    continue
+                (
+                    _,
+                    _,
+                    subclass_code,
+                    subclass_name,
+                ) = exact_crosswalk[0]
+                records.append(IndustryClassificationRecord(
+                    releasePeriod=page_metadata.release_period,
+                    sourceSymbol=supplement.symbol,
+                    sourceName=supplement.source_name,
+                    securityIdentity=supplement.symbol,
+                    identityStatus=IndustryIdentityStatus.EXACT,
+                    categoryCode=supplement.category_code,
+                    categoryName=supplement.category_name,
+                    divisionCode=supplement.division_code,
+                    divisionName=supplement.division_name,
+                    manufacturingSubclassCode=subclass_code,
+                    manufacturingSubclassName=subclass_name,
+                    middleClassCode=None,
+                    middleClassName=None,
+                    recordStatus=IndustryRecordStatus.ACCEPTED,
+                    recordProvenance=(
+                        IndustryRecordProvenance
+                        .CNINFO_CAPCO_CURRENT_CROSSWALK
+                    ),
+                    knowledgeEffectiveFrom=supplement.fetched_at,
+                    evidenceUrl=supplement.evidence_url,
+                    issueCodes=(),
+                    sourceFields={
+                        "classificationProvenance": (
+                            IndustryRecordProvenance
+                            .CNINFO_CAPCO_CURRENT_CROSSWALK.value
+                        ),
+                        "knowledgeEffectiveFrom": (
+                            supplement.fetched_at.isoformat()
+                        ),
+                        "evidenceUrl": supplement.evidence_url,
+                        "effectiveOn": supplement.effective_on.isoformat(),
+                        "officialSourceFields": dict(
+                            supplement.source_fields
+                        ),
+                        "capcoCrosswalk": {
+                            "categoryCode": supplement.category_code,
+                            "categoryName": supplement.category_name,
+                            "divisionCode": supplement.division_code,
+                            "divisionName": supplement.division_name,
+                            "manufacturingSubclassCode": subclass_code,
+                            "manufacturingSubclassName": subclass_name,
+                        },
+                    },
+                ))
+                mapped_identities.add(supplement.symbol)
+                supplemental_record_count += 1
+
+            if rejected_supplement_symbols:
+                supplemental_issues.append(SourceIssue(
+                    code="official_industry_supplement_unverified",
+                    source="cninfo_capco_industry_current",
+                    message=(
+                        "巨潮官方行业归属记录与当期中上协"
+                        "代码表无法唯一精确交叉映射"
+                    ),
+                    symbols=sorted(set(rejected_supplement_symbols)),
+                ))
+
         current_master_gaps = []
         for record in current_by_symbol.values():
             if record.symbol in mapped_identities:
@@ -717,7 +1112,7 @@ def fetch_industry_classification(
             requiredFieldCoverage=field_coverage,
         )
 
-        issues = []
+        issues = list(supplemental_issues)
         if current_master_gaps:
             issues.append(SourceIssue(
                 code="current_master_mapping_incomplete",
@@ -752,6 +1147,7 @@ def fetch_industry_classification(
             mappedCount=mapped_count,
             unconfirmedCount=len(current_master_gaps),
             excludedSourceCount=excluded_source_count,
+            supplementalRecordCount=supplemental_record_count,
             mappingCoverage=mapping_coverage,
             requiredFieldCoverage=field_coverage,
             shadowUsable=True,
@@ -761,7 +1157,11 @@ def fetch_industry_classification(
         meta = RadarBatchMeta(
             radarRunId=radar_run_id,
             batchId=batch_id,
-            source=SOURCE_NAME,
+            source=(
+                SUPPLEMENTED_SOURCE_NAME
+                if supplemental_record_count
+                else SOURCE_NAME
+            ),
             asOf=as_of,
             sourceTime=None,
             fetchedAt=fetched_at,

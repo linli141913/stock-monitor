@@ -161,7 +161,7 @@ class LeaderBusinessDeterministicVerificationTests(unittest.TestCase):
         self.assertEqual(result.artifact.matched_terms, ("工业软件",))
         self.assertEqual(
             result.artifact.rule_version,
-            "radar-leader-business-deterministic-relation-v31",
+            "radar-leader-business-deterministic-relation-v35",
         )
         self.assertRegex(result.artifact.verification_id, r"^business-auto:[0-9a-f]{64}$")
         self.assertFalse(result.artifact.formal_usable)

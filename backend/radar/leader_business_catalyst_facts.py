@@ -34,7 +34,7 @@ GENERIC_TERMS = frozenset({
     "产品", "服务", "业务", "行业", "项目", "技术", "平台", "系统",
 })
 NEGATIVE_MARKERS = ("终止", "取消", "未中标", "不再履行")
-TERM_SPLIT_PATTERN = re.compile(r"、|以及|及|和")
+TERM_SPLIT_PATTERN = re.compile(r"、|以及|及|和|与")
 EARNINGS_DIRECTION_PATTERN = r"(?:增长|提升|增加|上升|下降|减少|承压|回落|扭亏)"
 EXPLICIT_METRIC_DIRECTION_PATTERN = (
     r"(?:增长|提升|增加|上升|下降|减少|承压|回落|扭亏|"
@@ -113,8 +113,12 @@ EARNINGS_HYPOTHETICAL_MARKERS = ("假设", "假定")
 STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES = (
     "原计划建设项目开工率不足",
 )
+STRICT_NON_PROSPECTIVE_CONTEXT_PHRASES = (
+    "不断挖掘3D打印多方位应用的可能性",
+)
 STRICT_CONFIRMED_ACTUAL_OUTCOME_PHRASES = (
     "整体收入未达预期",
+    "销量及售价不及预期",
     "不断提升",
 )
 GENERIC_OBJECT_PREFIXES = (
@@ -233,6 +237,26 @@ NAMED_PRODUCT_DELIVERY_PATTERN = re.compile(
     r"([一-鿿A-Za-z0-9]{2,20}?)产品交付量的同比(?:大幅)?增加"
     r"[，,]公司营业收入同比增长"
 )
+NAMED_HIGH_VALUE_PRODUCT_SHIPMENT_SHARE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])"
+    r"(?!(?:拟|计划|意向|预计))"
+    r"(锂电铜箔(?:、|及|和|与)电子电路铜箔)"
+    r"高附加值产品的出货占比均显著提升"
+)
+NAMED_PRODUCT_DEMAND_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])(?:报告期内[，,])?公司"
+    r"(新能源电源(?:、|及|和|与)其他电源)"
+    r"产品市场需求较好[，,]带动公司整体营业收入"
+    r"实现同比增长"
+)
+NAMED_INDUSTRY_SUBSEGMENT_REVENUE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])"
+    r"(?!公司|主营|主要|整体|相关|新|核心|行业|市场)"
+    r"([一-鿿A-Za-z0-9]{2,12}?业)"
+    r"[一-鿿A-Za-z0-9]{1,12}?板块收入(?:同比)?"
+    r"(?:显著|大幅|有较大幅度)?"
+    + EXPLICIT_METRIC_DIRECTION_PATTERN
+)
 NAMED_PRODUCT_OUTPUT_SHARE_PATTERN = re.compile(
     r"(?:^|[。!?！？；;]|业绩变动原因说明)"
     r"[^。!?！？；;]{0,180}?(?:该业务|该项业务)占公司营收比重已达"
@@ -311,6 +335,23 @@ CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN = re.compile(
     r"[，,]对公司(经纪)业务的交易金额和佣金收入也产生了"
     r"一定的负面影响"
 )
+CONFIRMED_3D_PRINTING_EQUIPMENT_SALES_GROWTH_PATTERN = re.compile(
+    r"(3D打印设备)销售量较上年同期增加"
+    r"(?=$|[，,。!?！？；;])"
+)
+CONFIRMED_PUBLICATION_BUSINESS_PRESSURE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])公司(出版)业务以大众图书出版为主[，,]"
+    r"受市场整体疲软、行业竞争加剧等因素影响[，,]"
+    r"对营收、利润形成较大冲击[，,]经营承压明显"
+)
+CONFIRMED_RUBBER_PRODUCT_SALES_PRESSURE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])公司(橡胶产品)销量及售价不及预期"
+)
+CONFIRMED_FILM_TELEVISION_REVENUE_PRESSURE_PATTERN = re.compile(
+    r"(?:^|[，,。.;；：:])由于(影视)业务的生产制作和发行周期"
+    r"导致公司收入确认存在一定的季节性波动等原因[，,]"
+    r"公司上半年\1业务确认收入较少"
+)
 STRICT_CONFIRMED_EARNINGS_PATTERNS = (
     CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
     CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
@@ -323,6 +364,11 @@ STRICT_CONFIRMED_EARNINGS_PATTERNS = (
     CONFIRMED_NAMED_PRODUCT_CAUSAL_REVENUE_PATTERN,
     CONFIRMED_REAL_ESTATE_SETTLEMENT_MARGIN_PATTERN,
     CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN,
+    CONFIRMED_3D_PRINTING_EQUIPMENT_SALES_GROWTH_PATTERN,
+    CONFIRMED_PUBLICATION_BUSINESS_PRESSURE_PATTERN,
+    CONFIRMED_RUBBER_PRODUCT_SALES_PRESSURE_PATTERN,
+    CONFIRMED_FILM_TELEVISION_REVENUE_PRESSURE_PATTERN,
+    NAMED_INDUSTRY_SUBSEGMENT_REVENUE_PATTERN,
 )
 NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN = re.compile(
     r"(?:^|[，,。.;；：:()（）])"
@@ -406,6 +452,9 @@ OBJECT_PATTERNS = {
         REASON_PREFIX_BUSINESS_METRIC_PATTERN,
         NAMED_PRODUCT_AVERAGE_PATTERN,
         NAMED_PRODUCT_DELIVERY_PATTERN,
+        NAMED_HIGH_VALUE_PRODUCT_SHIPMENT_SHARE_PATTERN,
+        NAMED_PRODUCT_DEMAND_REVENUE_PATTERN,
+        NAMED_INDUSTRY_SUBSEGMENT_REVENUE_PATTERN,
         NAMED_PRODUCT_OUTPUT_SHARE_PATTERN,
         CAUSAL_SOLD_PRODUCT_MARGIN_PATTERN,
         CAUSAL_NAMED_SALES_BUSINESS_MARGIN_PATTERN,
@@ -418,6 +467,10 @@ OBJECT_PATTERNS = {
         CONFIRMED_NAMED_PRODUCT_CAUSAL_REVENUE_PATTERN,
         CONFIRMED_REAL_ESTATE_SETTLEMENT_MARGIN_PATTERN,
         CONFIRMED_BROKERAGE_TRANSACTION_IMPACT_PATTERN,
+        CONFIRMED_3D_PRINTING_EQUIPMENT_SALES_GROWTH_PATTERN,
+        CONFIRMED_PUBLICATION_BUSINESS_PRESSURE_PATTERN,
+        CONFIRMED_RUBBER_PRODUCT_SALES_PRESSURE_PATTERN,
+        CONFIRMED_FILM_TELEVISION_REVENUE_PRESSURE_PATTERN,
         NAMED_FOREIGN_BUSINESS_TURNAROUND_PATTERN,
         NAMED_ANNUAL_BUSINESS_GROWTH_PATTERN,
         NAMED_BUSINESS_SEGMENT_REVENUE_PATTERN,
@@ -795,7 +848,10 @@ def _has_unconfirmed_strict_earnings_context(
     )
     followup = value[sentence_end:min(followup_end, sentence_end + 64)]
     prospective_prefix = prefix
-    for phrase in STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES:
+    for phrase in (
+        *STRICT_CONFIRMED_HISTORICAL_PLAN_PHRASES,
+        *STRICT_NON_PROSPECTIVE_CONTEXT_PHRASES,
+    ):
         prospective_prefix = prospective_prefix.replace(phrase, "")
     return bool(
         any(marker in prefix for marker in EARNINGS_HYPOTHETICAL_MARKERS)

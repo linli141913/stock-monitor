@@ -55,6 +55,9 @@ BUSINESS_NUMBERED_HEADING_PATTERN = re.compile(
     r"([^\n:：。；;]{2,30})\s*[:：]?"
     r"(?=\s*(?:\n|公司|本公司|采购|生产|销售|经营|通过|报告期))"
 )
+BUSINESS_LABELED_SEGMENT_PATTERN = re.compile(
+    r"(?:^|\n)\s*([^\n：:]{2,20}?业)\s*[:：]\s*公司"
+)
 EXISTING_NAMED_BUSINESS_PATTERN = re.compile(
     r"基于现有"
     r"(?!相关|其他|公司|主要|主营|整体|新|核心|业务)"
@@ -62,6 +65,9 @@ EXISTING_NAMED_BUSINESS_PATTERN = re.compile(
 )
 EXPLICIT_MAIN_BUSINESS_PATTERNS = (
     re.compile(r"公司主要从事\s*([^，,。\n]{2,160})"),
+    re.compile(
+        r"报告期内公司业务以\s*([^，,。\n]{2,80}?)\s*为主业"
+    ),
     re.compile(
         r"公司(?:构建起)?以\s*([^。\n]{2,180}?)\s*为(?:核心)?主业"
     ),
@@ -85,6 +91,10 @@ COMPANY_PRODUCT_OUTPUT_PATTERN = re.compile(
 )
 ATOMIC_METALS_ACTIVITY_PATTERN = re.compile(
     r"(有色金属|贵金属)(?:的)?(?:采选|冶炼|加工)"
+)
+ATOMIC_3D_PRINTING_EQUIPMENT_PATTERN = re.compile(r"(3D\s*打印设备)")
+EXPLICIT_PRODUCTION_SALES_OBJECT_PATTERN = re.compile(
+    r"(?:公司)?主要业务为\s*生产销售\s*([^\n、，。]{2,20})"
 )
 COMPANY_EXPLICIT_BUSINESS_LIST_PATTERN = re.compile(
     r"报告期内[,，]\s*公司(?:从事的)?主要业务(?:包括|为)\s*"
@@ -374,6 +384,7 @@ def extract_official_business_facts(
             BUSINESS_SUBHEADING_PATTERN,
             BUSINESS_NUMBERED_HEADING_PATTERN,
             EXISTING_NAMED_BUSINESS_PATTERN,
+            BUSINESS_LABELED_SEGMENT_PATTERN,
         ):
             for match in pattern.finditer(page_text):
                 term = _clean_term(
@@ -487,6 +498,25 @@ def extract_official_business_facts(
                 ))
             if term not in terms:
                 terms.append(term)
+        for pattern in (
+            ATOMIC_3D_PRINTING_EQUIPMENT_PATTERN,
+            EXPLICIT_PRODUCTION_SALES_OBJECT_PATTERN,
+        ):
+            for match in pattern.finditer(page_text):
+                term = _clean_term(match.group(1), plan_item.industry_name)
+                if term is None:
+                    continue
+                fragment = _normalize(match.group(0))
+                digest = hashlib.sha256(fragment.encode("utf-8")).hexdigest()
+                if digest not in seen_fragments:
+                    seen_fragments.add(digest)
+                    fragments.append(OfficialBusinessEvidenceFragment(
+                        page_number=page.page_number,
+                        fragment_sha256=digest,
+                        text=fragment,
+                    ))
+                if term not in terms:
+                    terms.append(term)
         if ends_overview:
             inside_business_overview = False
     for page in content.pages:

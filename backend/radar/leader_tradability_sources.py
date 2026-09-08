@@ -38,6 +38,7 @@ LEADER_TRADABILITY_SOURCE_VERSION = (
     "radar-leader-tradability-source-v1"
 )
 PRICE_TICK = Decimal("0.01")
+MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS = 10
 CATALOG_START_DATE = date(2023, 4, 10)
 CURRENT_RULE_START_DATE = date(2026, 7, 6)
 UTC = timezone.utc
@@ -154,6 +155,34 @@ class LeaderTradabilitySourceResolution:
 
 
 _CATALOG: Tuple[TradingRuleCatalogEntry, ...] = (
+    TradingRuleCatalogEntry(
+        exchange="bse",
+        board_group="main",
+        rule_version="bse-trading-rule-2021",
+        published_on=date(2021, 11, 2),
+        effective_from=date(2021, 11, 15),
+        effective_until=date(2026, 7, 5),
+        normal_limit_rate=0.30,
+        risk_warning_limit_rate=0.30,
+        source_contract_id="bse-trading-rule-2021",
+        source_name="北京证券交易所",
+        source_url="https://www.bse.cn/jygl_list/200010919.html",
+        document_id="北证公告〔2021〕15号",
+    ),
+    TradingRuleCatalogEntry(
+        exchange="bse",
+        board_group="main",
+        rule_version="bse-trading-rule-2026",
+        published_on=date(2026, 4, 24),
+        effective_from=CURRENT_RULE_START_DATE,
+        effective_until=None,
+        normal_limit_rate=0.30,
+        risk_warning_limit_rate=0.30,
+        source_contract_id="bse-trading-rule-2026",
+        source_name="北京证券交易所",
+        source_url="https://www.bse.cn/jygl_list/200028217.html",
+        document_id="北证公告〔2026〕17号",
+    ),
     TradingRuleCatalogEntry(
         exchange="sse",
         board_group="main",
@@ -306,6 +335,10 @@ def _board_group(exchange: str, board: str) -> str:
         ("sse", "科创板"): "star",
         ("szse", "主板"): "main",
         ("szse", "创业板"): "chinext",
+        ("bse", "北交所"): "main",
+        ("bse", "北证A股"): "main",
+        ("bse", "北交所A股"): "main",
+        ("bse", "主板"): "main",
     }
     try:
         return groups[(normalized_exchange, normalized_board)]
@@ -448,8 +481,13 @@ def resolve_trading_rule_catalog(
         group,
         trading_date,
     )
+    initial_listing_no_limit = (
+        listed_trading_day_count == 1
+        if normalized_exchange == "bse"
+        else listed_trading_day_count <= 5
+    )
     no_limit = (
-        listed_trading_day_count <= 5
+        initial_listing_no_limit
         or special_session
         in {
             PriceLimitSpecialSession.RELISTING_FIRST_DAY,
@@ -694,7 +732,7 @@ def build_leader_tradability_source_input(
             references=base_reference,
         )
     source_age = (as_of_utc - source_time).total_seconds()
-    if source_age < -MAXIMUM_FUTURE_SKEW_SECONDS:
+    if source_age < -MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS:
         return _resolution(
             status=ResearchFeatureStatus.SOURCE_UNVERIFIED,
             reason="official_reference_from_future",
@@ -707,7 +745,9 @@ def build_leader_tradability_source_input(
             references=base_reference,
         )
     if (
-        fetched_at + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        fetched_at + timedelta(
+            seconds=MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS
+        )
         < source_time
     ):
         return _resolution(

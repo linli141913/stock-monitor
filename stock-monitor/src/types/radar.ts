@@ -273,8 +273,58 @@ export interface RadarLeaderItem {
   formalUsable: false;
 }
 
+export interface RadarLeaderObservationItem {
+  symbol: string;
+  name: string;
+  industryCode: string;
+  industryName: string;
+  withinIndustryRank: number;
+  price: number;
+  changePercent: number;
+  sourceTime: string;
+  quoteSourceContractId: string;
+  sectorSourceContractId: string;
+}
+
+export interface RadarLeaderObservation {
+  status: RadarModuleState;
+  quality: RadarModuleQuality;
+  displayAllowed: boolean;
+  radarRunId: string | null;
+  candidatePlanId: string | null;
+  asOf: string | null;
+  publishedAt: string | null;
+  scannedCount: number;
+  mappedCount: number;
+  candidateCount: number;
+  coverageScope: string;
+  humanApprovalRequired: false;
+  formalUsable: false;
+  stateTransitionAllowed: false;
+  freshness: RadarFreshness;
+  items: RadarLeaderObservationItem[];
+  reasonCodes: string[];
+}
+
+export interface RadarLeaderSourceSummaryItem {
+  domain: 'quote' | 'sector' | 'business' | 'announcement';
+  status: 'available' | 'partial' | 'missing' | 'stale' | 'failed' | 'unverified';
+  scope: 'current_observation_candidates' | 'current_public_tiers';
+  sourceContractIds: string[];
+  asOf: string | null;
+  sourceTime: string | null;
+  fetchedAt: string | null;
+  coveredCount: number;
+  expectedCount: number | null;
+  reasonCodes: string[];
+}
+
 export interface RadarLeaderReviewQueue {
   status: 'not_ready' | 'ready' | 'failed';
+  purpose: 'official_announcement_scan';
+  humanApprovalRequired: false;
+  semanticCoverageStatus: 'partial' | 'unavailable';
+  coverageStatement: string;
   reviewBatchId: string | null;
   candidatePlanId: string | null;
   asOf: string | null;
@@ -426,7 +476,9 @@ export interface RadarLeaderModule {
   lastSuccess: RadarLeaderSnapshot | null;
   freshness: RadarFreshness;
   sources: RadarSourceStatus[];
+  sourceSummary: RadarLeaderSourceSummaryItem[];
   summary: RadarLeaderSummary;
+  observation: RadarLeaderObservation;
   reviewQueue?: RadarLeaderReviewQueue;
   preliminary: RadarLeaderItem[];
   candidates: RadarLeaderItem[];
@@ -525,14 +577,230 @@ export interface RadarSectorHistoryResponse {
   reasonCodes: string[];
 }
 
+export interface RadarReplayQualityResponse {
+  schemaVersion: 'radar-replay-quality-v1';
+  checkedAt: string;
+  state: 'ready' | 'not_ready' | 'failed';
+  quality: 'complete' | 'partial' | 'unavailable';
+  engineeringState: 'complete' | 'not_ready' | 'failed';
+  validationState: 'validated' | 'collecting' | 'not_started' | 'failed';
+  shadowCollectionAllowed: boolean;
+  stage9QualityGatePassed: boolean;
+  replayRunId: string | null;
+  createdAt: string | null;
+  evidenceSha256: string | null;
+  sampleCounts: {
+    development: number;
+    calibration: number;
+    holdout: number;
+  };
+  includedCount: number;
+  excludedCount: number;
+  scopedExclusionCount: number;
+  scopedExclusionCounts: Record<string, number>;
+  missingCount: number;
+  unverifiableCount: number;
+  failedCount: number;
+  futureViolationCount: number;
+  duplicateStateViolationCount: number;
+  multiStateViolationCount: number;
+  labelCounts: {
+    market: number;
+    sector: number;
+    etf: number;
+    leader: number;
+  };
+  outputCounts: {
+    market: number;
+    sector: number;
+    etf: number;
+    leader: number;
+  };
+  etfReadinessCounts?: {
+    formalAdmissionCount: number;
+    monitoringReadyCount: number;
+    monitoringMissingCount: number;
+    rankingPolicyReadyCount: number;
+    rankingPolicyMissingCount: number;
+  };
+  comparableLabelCount: number;
+  incomparableLabelCount: number;
+  disputedLabelCount: number;
+  unverifiableLabelCount: number;
+  unlabeledOutputTargetCount: number;
+  unlabeledOutputTargetCounts: {
+    market: number;
+    sector: number;
+    etf: number;
+    leader: number;
+  };
+  partitionChronologyValid: boolean;
+  missingDomains: string[];
+  missingPartitions: Array<'development' | 'calibration' | 'holdout'>;
+  missingLabelDomains: Array<'market' | 'sector' | 'etf' | 'leader'>;
+  missingOutputDomains: Array<'market' | 'sector' | 'etf' | 'leader'>;
+  unverifiableOutputDomains: Array<'market' | 'sector' | 'etf' | 'leader'>;
+  failedOutputDomains: Array<'market' | 'sector' | 'etf' | 'leader'>;
+  readyOutputDomains: Array<'market' | 'sector' | 'etf' | 'leader'>;
+  missingLabelPartitions: Array<'development' | 'calibration' | 'holdout'>;
+  reasonCodes: string[];
+  metrics: Record<
+    'market' | 'sector' | 'etf' | 'leader',
+    Record<string, number> | null
+  >;
+}
+
+export type RadarEtfProductResearchState =
+  | 'product_ready_for_index_research'
+  | 'active_product_separate_track'
+  | 'out_of_scope_asset'
+  | 'product_evidence_incomplete';
+
+export interface RadarReplayEtfResearchItem {
+  symbol: string;
+  researchState: RadarEtfProductResearchState;
+  targetIndexName: string | null;
+  monitoringStatus: 'ready' | 'missing' | null;
+  rankingStatus: 'ready' | 'missing' | null;
+  monitoringReasons: string[];
+  rankingReasons: string[];
+}
+
+export interface RadarReplayEtfResearchSnapshot {
+  schemaVersion: 'radar-replay-etf-research-v1';
+  replayOutputBundleId: string;
+  sampleId: string;
+  radarRunId: string;
+  asOf: string;
+  createdAt: string;
+  source: string;
+  sourceTime: string | null;
+  fetchedAt: string;
+  outputSnapshotSha256: string;
+  sourceSnapshotSha256: string;
+  classificationMappingVersion: string;
+  productCount: number;
+  indexResearchReadyCount: number;
+  activeSeparateTrackCount: number;
+  outOfScopeAssetCount: number;
+  evidenceIncompleteCount: number;
+  formalAdmissionAvailable: boolean;
+  formalAdmissionCount: number;
+  monitoringReadyCount: number;
+  monitoringMissingCount: number;
+  rankingPolicyReadyCount: number;
+  rankingPolicyMissingCount: number;
+  researchOnly: true;
+  rankingReady: false;
+  formalUsable: false;
+  stateTransitionAllowed: false;
+  items: RadarReplayEtfResearchItem[];
+  reasonCodes: string[];
+}
+
+export interface RadarReplayEtfResearchResponse {
+  schemaVersion: 'radar-replay-etf-research-v1';
+  checkedAt: string;
+  state: 'available' | 'not_ready' | 'failed';
+  quality: 'complete' | 'partial' | 'unavailable';
+  evidenceSha256: string | null;
+  snapshot: RadarReplayEtfResearchSnapshot | null;
+  reasonCodes: string[];
+}
+
+export type RadarFormalReadinessState =
+  | 'collecting'
+  | 'not_ready'
+  | 'ready_to_enable'
+  | 'failed'
+  | 'formal_enabled';
+
+export type RadarFormalGateReadiness =
+  | 'collecting'
+  | 'not_ready'
+  | 'ready'
+  | 'failed';
+
+export interface RadarFormalReadinessGate {
+  gate: string;
+  state: RadarFormalGateReadiness;
+  required: boolean;
+  reasonCodes: string[];
+}
+
+export interface RadarFormalReadinessEvidence {
+  evidenceType: string;
+  contractVersion: string;
+  contentSha256: string;
+  subjectId: string;
+  generatedAt: string;
+  sourceTime: string;
+  fetchedAt: string;
+}
+
+export interface RadarFormalFreshnessPolicy {
+  policyVersion: 'radar-formal-freshness-policy-v1';
+  reportMaxAgeSeconds: number;
+  evidenceMaxAgeSeconds: number;
+  operationalChecksMaxAgeSeconds: number;
+}
+
+export interface RadarFormalReadinessModule {
+  module: 'trendRotation' | 'etfObservation' | 'leaderObservation';
+  state: RadarFormalReadinessState;
+  requested: boolean;
+  configuredEnabled: boolean;
+  formalEnabled: boolean;
+  observedTradingDays: number;
+  requiredTradingDays: number;
+  lastObservedTradingDate: string | null;
+  gates: RadarFormalReadinessGate[];
+  reasonCodes: string[];
+}
+
+export interface RadarFormalReadinessResponse {
+  contractVersion: 'radar-formal-readiness-v1';
+  checkedAt: string;
+  freshnessPolicy: RadarFormalFreshnessPolicy | null;
+  state: RadarFormalReadinessState;
+  anyFormalEnabled: boolean;
+  allModulesFormalEnabled: boolean;
+  stage9ReplayRunId: string | null;
+  stage9QualitySha256: string | null;
+  stage9QualityState: RadarFormalGateReadiness;
+  modules: RadarFormalReadinessModule[];
+  evidence: RadarFormalReadinessEvidence[];
+  reasonCodes: string[];
+}
+
+export type RadarFormalShadowProgressState = 'available' | 'missing' | 'failed';
+
+export interface RadarFormalShadowProgressModule {
+  module: RadarFormalReadinessModule['module'];
+  observedTradingDays: number;
+  requiredTradingDays: number;
+  latestReadyStreak: number;
+  latestReadyTradingDate: string | null;
+}
+
+export interface RadarFormalShadowProgressResponse {
+  contractVersion: 'radar-formal-shadow-progress-v1';
+  checkedAt: string;
+  state: RadarFormalShadowProgressState;
+  modules: RadarFormalShadowProgressModule[];
+  ledgerSha256: string | null;
+  reasonCodes: string[];
+}
+
 export interface RadarStockResponse {
   schemaVersion: 'radar-stock-v1';
   checkedAt: string;
   mode: 'shadow' | 'disabled';
   symbol: string;
-  status: 'matched' | 'not_listed' | 'no_snapshot' | 'stale' | 'failed' | 'not_enabled';
+  status: 'matched' | 'observed' | 'not_listed' | 'no_snapshot' | 'stale' | 'failed' | 'not_enabled';
   snapshot: RadarLeaderSnapshot | null;
   freshness: RadarFreshness;
   leader: RadarLeaderItem | null;
+  observationItem: RadarLeaderObservationItem | null;
   reasonCodes: string[];
 }

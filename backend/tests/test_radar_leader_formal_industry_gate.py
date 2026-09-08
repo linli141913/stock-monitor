@@ -23,6 +23,7 @@ from radar.leader_runtime_candidate_plan import (
 from tests import test_radar_leader_evidence_candidate_plan as scope_helpers
 from tests import test_radar_leader_formal_research_batch as formal_helpers
 from tests import test_radar_leader_phase6_state_decision_review as review_helpers
+from tests import test_radar_sector_rule_readiness as sector_readiness_helpers
 
 
 try:
@@ -122,6 +123,138 @@ class LeaderFormalIndustryGateTests(unittest.TestCase):
             == ("leader_formal_industry_gate_policy_unapproved",)
             for item in result.items
         ))
+        self.assertFalse(result.formal_gate_ready)
+        self.assertFalse(result.state_transition_allowed)
+
+    def test_policy_audit_exposes_documented_requirements_and_missing_fields(
+        self,
+    ):
+        result = gate_module.build_leader_formal_industry_gate_evidence(
+            self.parent_plan,
+            candidate_plan=self.child_plan,
+            industry_scope=self.industry_scope,
+            single_pass=self.single_pass,
+        )
+
+        audit = result.policy_audit
+        self.assertEqual(audit.status.value, "unapproved")
+        self.assertEqual(
+            audit.qualitative_requirements,
+            (
+                "industry_state_active",
+                "not_single_stock_advance",
+                "industry_turnover_qualified",
+                "diffusion_persistence_or_reflux",
+                "catalyst_source_reliable",
+                "data_complete",
+            ),
+        )
+        self.assertEqual(
+            audit.requirement_source_references,
+            (
+                "docs/股票监测助手V5.0升级规划书.md::7.4评分计算合同",
+                "docs/股票监测助手V5.0升级规划书.md::9.5硬门槛/行业门槛",
+                "docs/股票监测助手V5.0升级规划书.md::9.8状态机正式合同",
+            ),
+        )
+        self.assertEqual(
+            audit.required_policy_fields,
+            (
+                "metric_fields_and_units",
+                "primary_and_fallback_sources",
+                "source_time_and_max_latency",
+                "statistics_window",
+                "minimum_sample_size",
+                "normalization_formula_and_bounds",
+                "single_stock_concentration_threshold",
+                "industry_turnover_threshold",
+                "diffusion_persistence_reflux_rule",
+                "catalyst_source_admission_rule",
+                "minimum_data_completeness",
+                "missing_stale_conflict_policy",
+                "degraded_calculation_policy",
+                "entry_hold_exit_thresholds",
+                "approval_identity_and_time",
+            ),
+        )
+        self.assertIsNone(audit.observed_approval_contract_id)
+        self.assertIsNone(audit.observed_approval_id)
+        self.assertEqual(
+            audit.reasons,
+            ("leader_formal_industry_gate_policy_unapproved",),
+        )
+        self.assertFalse(audit.approved)
+        evidence = result.to_evidence()["policyAudit"]
+        self.assertEqual(evidence["status"], "unapproved")
+        self.assertEqual(evidence["requiredPolicyFields"], list(
+            audit.required_policy_fields
+        ))
+        self.assertEqual(evidence["requirementSourceReferences"], list(
+            audit.requirement_source_references
+        ))
+        self.assertNotIn("thresholdValues", evidence)
+
+    def test_sector_state_threshold_approval_cannot_approve_leader_gate(
+        self,
+    ):
+        sector_approval = sector_readiness_helpers.threshold_approval()
+
+        result = gate_module.build_leader_formal_industry_gate_evidence(
+            self.parent_plan,
+            candidate_plan=self.child_plan,
+            industry_scope=self.industry_scope,
+            single_pass=self.single_pass,
+            policy_approval=sector_approval,
+        )
+
+        self.assertEqual(result.status.value, "ready")
+        self.assertEqual(result.evidence_ready_count, 2)
+        self.assertEqual(
+            result.policy_audit.observed_approval_contract_id,
+            "radar-sector-threshold-approval-v1",
+        )
+        self.assertEqual(
+            result.policy_audit.observed_approval_id,
+            sector_approval.approval_id,
+        )
+        self.assertEqual(
+            result.policy_audit.reasons,
+            (
+                "leader_formal_industry_gate_sector_state_approval_"
+                "not_applicable",
+                "leader_formal_industry_gate_policy_unapproved",
+            ),
+        )
+        self.assertTrue(all(
+            item.reasons
+            == ("leader_formal_industry_gate_policy_unapproved",)
+            for item in result.items
+        ))
+        self.assertFalse(result.formal_gate_ready)
+        self.assertFalse(result.state_transition_allowed)
+
+    def test_unverified_policy_input_fails_closed(self):
+        result = gate_module.build_leader_formal_industry_gate_evidence(
+            self.parent_plan,
+            candidate_plan=self.child_plan,
+            industry_scope=self.industry_scope,
+            single_pass=self.single_pass,
+            policy_approval=SimpleNamespace(
+                contract_id="radar-leader-formal-industry-gate-policy-v1",
+                approval_id="forged-approval",
+            ),
+        )
+
+        self.assertEqual(result.status.value, "blocked")
+        self.assertEqual(
+            result.reasons,
+            ("leader_formal_industry_gate_policy_input_unverified",),
+        )
+        self.assertEqual(
+            result.policy_audit.status.value,
+            "source_unverified",
+        )
+        self.assertFalse(result.policy_audit.approved)
         self.assertFalse(result.formal_gate_ready)
         self.assertFalse(result.state_transition_allowed)
 

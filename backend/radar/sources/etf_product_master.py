@@ -21,7 +21,7 @@ from radar.contracts import (
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 ETF_PRODUCT_CLASSIFICATION_MAPPING_VERSION = (
-    "radar-etf-product-classification-v1"
+    "radar-etf-product-classification-v2"
 )
 SSE_QUERY_URL = "https://query.sse.com.cn/commonQuery.do"
 SZSE_PRODUCT_URL = "https://fund.szse.cn/api/report/ShowReport"
@@ -212,8 +212,31 @@ def _szse_asset_class(
     return EtfAssetClass.UNKNOWN
 
 
+def _management_style(
+    product_type: ListedFundProductType,
+    *,
+    official_names: Tuple[Optional[str], ...],
+    target_index_name: Optional[str] = None,
+) -> EtfManagementStyle:
+    """Use only exchange-defined structured semantics.
+
+    Since 2026-06-17 both exchanges require an active ETF's exchange short
+    name to contain ``主动``.  For SSE products, a non-empty official
+    ``INDEX_NAME`` is the exchange's explicit target-index field, not a name
+    heuristic.  An ordinary SZSE ETF without either proof remains unknown.
+    """
+    if product_type != ListedFundProductType.ETF:
+        return EtfManagementStyle.UNKNOWN
+    if any("主动" in name for name in official_names if name):
+        return EtfManagementStyle.ACTIVE
+    if target_index_name is not None:
+        return EtfManagementStyle.PASSIVE_INDEX
+    return EtfManagementStyle.UNKNOWN
+
+
 def _classification_reasons(
     product_type: ListedFundProductType,
+    management_style: EtfManagementStyle,
     asset_class: EtfAssetClass,
     *,
     asset_scope_reason: Optional[str] = None,
@@ -224,7 +247,8 @@ def _classification_reasons(
     elif product_type != ListedFundProductType.ETF:
         reasons.append("non_etf_product")
     else:
-        reasons.append("management_style_unverified")
+        if management_style == EtfManagementStyle.UNKNOWN:
+            reasons.append("management_style_unverified")
         if asset_scope_reason is not None:
             reasons.append(asset_scope_reason)
         elif asset_class == EtfAssetClass.UNKNOWN:
@@ -246,16 +270,24 @@ def _sse_record(
         if product_type == ListedFundProductType.ETF
         else EtfAssetClass.UNKNOWN
     )
+    official_name = _optional_text(row.get("FUND_ABBR"))
+    expanded_name = _optional_text(row.get("FUND_EXPANSION_ABBR"))
+    target_index_name = _optional_text(row.get("INDEX_NAME"))
+    management_style = _management_style(
+        product_type,
+        official_names=(official_name, expanded_name),
+        target_index_name=target_index_name,
+    )
     return EtfProductMasterRecord(
         symbol=str(row.get("FUND_CODE") or "").strip().zfill(6),
-        officialName=_optional_text(row.get("FUND_ABBR")) or "",
+        officialName=official_name or "",
         exchange="sse",
         productType=product_type,
-        managementStyle=EtfManagementStyle.UNKNOWN,
+        managementStyle=management_style,
         assetClass=asset_class,
         sourceCategoryCode=category_code,
         sourceCategoryName=category_name,
-        targetIndexName=_optional_text(row.get("INDEX_NAME")),
+        targetIndexName=target_index_name,
         listingDate=_optional_date(row.get("LISTING_DATE")),
         manager=_optional_text(row.get("COMPANY_NAME")),
         classificationMappingVersion=(
@@ -263,6 +295,7 @@ def _sse_record(
         ),
         classificationReasons=_classification_reasons(
             product_type,
+            management_style,
             asset_class,
             asset_scope_reason=(
                 "cross_border_asset_unverified"
@@ -284,12 +317,17 @@ def _szse_record(
     investment_type = _optional_text(row.get("投资类别"))
     product_type = _szse_product_type(category_name)
     asset_class = _szse_asset_class(product_type, investment_type)
+    official_name = _optional_text(row.get("基金简称"))
+    management_style = _management_style(
+        product_type,
+        official_names=(official_name,),
+    )
     return EtfProductMasterRecord(
         symbol=str(row.get("基金代码") or "").strip().zfill(6),
-        officialName=_optional_text(row.get("基金简称")) or "",
+        officialName=official_name or "",
         exchange="szse",
         productType=product_type,
-        managementStyle=EtfManagementStyle.UNKNOWN,
+        managementStyle=management_style,
         assetClass=asset_class,
         sourceCategoryName=category_name,
         sourceInvestmentType=investment_type,
@@ -300,6 +338,7 @@ def _szse_record(
         ),
         classificationReasons=_classification_reasons(
             product_type,
+            management_style,
             asset_class,
             asset_scope_reason=(
                 "equity_region_unverified"
@@ -359,6 +398,38 @@ def _field_coverage(items):
             else 0.0
         ),
     }
+
+
+def fetch_sse_etf_product_record(
+    symbol: str,
+    *,
+    product_fetcher: Callable[[], pd.DataFrame] = _fetch_sse_products,
+    category_fetcher: Callable[[], pd.DataFrame] = _fetch_sse_categories,
+    clock: Callable[[], datetime] = _now,
+) -> EtfProductMasterRecord:
+    """Fetch one SSE ETF without making the SZSE full-list request."""
+    if not isinstance(symbol, str) or not symbol.isdigit() or len(symbol) != 6:
+        raise ValueError("sse_etf_symbol_invalid")
+    products = product_fetcher()
+    categories_frame = category_fetcher()
+    matching = products.loc[
+        products["FUND_CODE"].astype(str).str.strip().str.zfill(6) == symbol
+    ]
+    if matching.empty:
+        raise ValueError("sse_etf_product_not_found")
+    if len(matching) != 1:
+        raise ValueError("sse_etf_product_ambiguous")
+    categories = {
+        str(row.get("CATEGORY_CODE") or "").strip(): category_name
+        for _, row in categories_frame.iterrows()
+        if str(row.get("CATEGORY_CODE") or "").strip()
+        and (category_name := _optional_text(row.get("CATEGORY_NAME")))
+        is not None
+    }
+    record = _sse_record(matching.iloc[0], categories, clock())
+    if record.product_type != ListedFundProductType.ETF:
+        raise ValueError("sse_product_not_etf")
+    return record
 
 
 def fetch_etf_product_master(

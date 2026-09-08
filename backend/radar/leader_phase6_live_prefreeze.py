@@ -79,6 +79,7 @@ from radar.contracts import (
     UnitVerificationStatus,
 )
 from radar.sources.leader_tradability_public_live_poc import (
+    MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES,
     PublicCalendarDocument,
 )
 
@@ -196,6 +197,11 @@ class LeaderPhase6PreparedHistoricalInputs:
     contract_id: str = (
         "radar-leader-phase6-prepared-historical-inputs-v1"
     )
+    calendar_document_raw_content: Optional[bytes] = field(
+        default=None,
+        repr=False,
+    )
+    calendar_document_raw_content_sha256: Optional[str] = None
 
     def __post_init__(self) -> None:
         if (
@@ -282,6 +288,29 @@ class LeaderPhase6PreparedHistoricalInputs:
             or not _aware(self.sector_history_source_as_of)
             or not _aware(self.prepared_at)
             or self.sector_history_source_as_of > self.prepared_at
+            or (
+                self.calendar_document_raw_content is None
+                and self.calendar_document_raw_content_sha256 is not None
+            )
+            or (
+                self.calendar_document_raw_content is not None
+                and (
+                    type(self.calendar_document_raw_content) is not bytes
+                    or not self.calendar_document_raw_content
+                    or len(self.calendar_document_raw_content)
+                    > MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES
+                    or not isinstance(
+                        self.calendar_document_raw_content_sha256,
+                        str,
+                    )
+                    or self.calendar_document_raw_content_sha256
+                    != "sha256:" + hashlib.sha256(
+                        self.calendar_document_raw_content
+                    ).hexdigest()
+                    or self.calendar_evidence.content_sha256
+                    != self.calendar_document_raw_content_sha256
+                )
+            )
         ):
             raise ValueError(
                 "leader_phase6_prepared_historical_inputs_unverified"
@@ -304,8 +333,18 @@ class LeaderPhase6PreparedHistoricalInputs:
                 self.sector_historical_analyses
             ),
             "sectorComparableTime": self.sector_comparable_time.isoformat(),
+            "calendarDocumentRawContentAvailable": (
+                self.has_verified_calendar_document_raw_content
+            ),
+            "calendarDocumentRawContentSha256": (
+                self.calendar_document_raw_content_sha256
+            ),
             "preparedAt": self.prepared_at.isoformat(),
         }
+
+    @property
+    def has_verified_calendar_document_raw_content(self) -> bool:
+        return self.calendar_document_raw_content is not None
 
 
 def _aware(value: Any) -> bool:
@@ -441,6 +480,11 @@ def build_leader_phase6_prepared_prefreeze_loader(
     ):
         raise ValueError("leader_phase6_prepared_loader_unverified")
 
+    def binding_error(reason: str) -> None:
+        raise ValueError(
+            "leader_phase6_prepared_binding_unverified:" + reason
+        )
+
     def load(
         runtime: LeaderLiveCandidateRuntimeInputs,
         provisional_as_of: datetime,
@@ -449,28 +493,65 @@ def build_leader_phase6_prepared_prefreeze_loader(
             type(runtime) is not LeaderLiveCandidateRuntimeInputs
             or not _aware(provisional_as_of)
         ):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
+            binding_error("runtime_or_provisional_time_invalid")
         completed_at = clock()
         current_memberships = {
             key: tuple(value)
             for key, value in runtime.source_context
             .industry_constituent_symbols_by_code.items()
         }
-        if any((
-            not _aware(completed_at),
-            completed_at < provisional_as_of,
-            completed_at < prepared.prepared_at,
-            prepared.radar_run_id != runtime.candidate_plan.radar_run_id,
-            prepared.classification_document_sha256
-            != runtime.industry_release.document_sha256,
-            any(
-                prepared.membership_symbols_by_industry.get(code) != symbols
-                for code, symbols in current_memberships.items()
+        prepared_memberships = {
+            key: tuple(value)
+            for key, value in prepared.membership_symbols_by_industry.items()
+        }
+        if not set(current_memberships).issubset(prepared_memberships):
+            binding_error("industry_scope_mismatch")
+        if any(
+            set(prepared_memberships[code])
+            != set(current_memberships[code])
+            for code in current_memberships
+        ):
+            binding_error("industry_member_symbol_scope_mismatch")
+        if any(
+            prepared_memberships[code] != current_memberships[code]
+            for code in current_memberships
+        ):
+            binding_error("industry_member_order_mismatch")
+        binding_checks = (
+            ("completed_time_invalid", not _aware(completed_at)),
+            (
+                "completed_before_provisional",
+                _aware(completed_at) and completed_at < provisional_as_of,
             ),
-            prepared.calendar_evidence.fetched_at > completed_at,
-            prepared.threshold_approval_evidence.approved_at > completed_at,
-        )):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
+            (
+                "completed_before_prepared",
+                _aware(completed_at) and completed_at < prepared.prepared_at,
+            ),
+            (
+                "radar_run_mismatch",
+                prepared.radar_run_id
+                != runtime.candidate_plan.radar_run_id,
+            ),
+            (
+                "classification_document_mismatch",
+                prepared.classification_document_sha256
+                != runtime.industry_release.document_sha256,
+            ),
+            (
+                "calendar_fetched_after_completed",
+                _aware(completed_at)
+                and prepared.calendar_evidence.fetched_at > completed_at,
+            ),
+            (
+                "approval_after_completed",
+                _aware(completed_at)
+                and prepared.threshold_approval_evidence.approved_at
+                > completed_at,
+            ),
+        )
+        for reason, failed in binding_checks:
+            if failed:
+                binding_error(reason)
         plan = runtime.candidate_plan
         industries = tuple(dict.fromkeys(
             item.industry_code for item in plan.items
@@ -492,7 +573,7 @@ def build_leader_phase6_prepared_prefreeze_loader(
                 None,
             )
             if not symbols or candidate not in symbols:
-                raise ValueError("leader_phase6_prepared_binding_unverified")
+                binding_error("candidate_membership_scope_mismatch")
             memberships[code] = build_point_in_time_industry_membership(
                 release=runtime.industry_release,
                 industry_code=code,
@@ -507,26 +588,41 @@ def build_leader_phase6_prepared_prefreeze_loader(
             _board_index(item.symbol) for item in plan.items
         )
         if not expected_series.issubset(set(prepared.series_by_symbol)):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
-        sector_memberships = _sector_membership_scope(current_memberships)
+            binding_error("candidate_history_series_missing")
+        # 运行上下文按候选行业收窄；行业状态重放必须继续使用预冻结的
+        # 全市场行业范围，不能要求二者行业键完全相等，也不能把历史范围
+        # 事后收窄成候选行业。
+        sector_memberships = _sector_membership_scope(prepared_memberships)
         replay = prepared.sector_history_replay_query
+        replay_sector_memberships = {
+            code: tuple(symbols)
+            for code, symbols in replay.memberships_by_division.items()
+        }
         expected_sector_symbols = {
             symbol
             for symbols in sector_memberships.values()
             for symbol in symbols
         }
-        if (
-            dict(replay.memberships_by_division) != sector_memberships
-            or set(replay.series_by_symbol) != expected_sector_symbols
-            or set(replay.total_shares_by_symbol)
-            != expected_sector_symbols
-            or getattr(
-                replay.classification_release,
-                "document_sha256",
-                None,
-            ) != prepared.classification_document_sha256
+        if set(replay_sector_memberships) != set(sector_memberships):
+            binding_error("sector_replay_industry_scope_mismatch")
+        if any(
+            set(replay_sector_memberships[code])
+            != set(sector_memberships[code])
+            for code in sector_memberships
         ):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
+            binding_error("sector_replay_member_symbol_scope_mismatch")
+        if replay_sector_memberships != sector_memberships:
+            binding_error("sector_replay_member_order_mismatch")
+        if set(replay.series_by_symbol) != expected_sector_symbols:
+            binding_error("sector_replay_series_scope_mismatch")
+        if set(replay.total_shares_by_symbol) != expected_sector_symbols:
+            binding_error("sector_replay_share_scope_mismatch")
+        if getattr(
+            replay.classification_release,
+            "document_sha256",
+            None,
+        ) != prepared.classification_document_sha256:
+            binding_error("sector_replay_classification_mismatch")
         history = LeaderHistoryProductionFrozenBatch(
             expected_trade_dates=prepared.expected_trade_dates,
             memberships_by_industry=memberships,
@@ -537,7 +633,7 @@ def build_leader_phase6_prepared_prefreeze_loader(
             fetched_at > completed_at
             for fetched_at in _history_fetched_times(history)
         ):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
+            binding_error("history_fetched_after_completed")
         comparable_time = resolve_sector_comparable_time(
             runtime.sector_feature_batch.source_time
         )
@@ -556,25 +652,38 @@ def build_leader_phase6_prepared_prefreeze_loader(
             getattr(row, "division_code", None): row
             for row in getattr(sector_history, "rows", ())
         }
-        if (
-            type(rebuilt) is not SectorHistoryBackfillResult
-            or rebuilt.status != "ready"
-            or rebuilt.reasons
-            or type(sector_history) is not SectorHistoryCoverageEvidence
-            or sector_history.radar_run_id != plan.radar_run_id
-            or sector_history.as_of != completed_at
-            or sector_history.classification_document_sha256
-            != runtime.industry_release.document_sha256
-            or not isinstance(analyses, tuple)
-            or not analyses
-            or any(
-                type(item) is not SectorHistoricalAnalysis
-                or item.comparable_time != comparable_time
-                for item in analyses
+        if type(rebuilt) is not SectorHistoryBackfillResult:
+            binding_error("sector_rebuild_contract_mismatch")
+        if rebuilt.status != "ready" or rebuilt.reasons:
+            detail = ",".join(
+                reason for reason in rebuilt.reasons
+                if isinstance(reason, str) and reason
             )
-            or any(code not in rows_by_code for code in industries)
+            binding_error(
+                "sector_rebuild_status_not_ready"
+                + (f":{detail}" if detail else "")
+            )
+        if type(sector_history) is not SectorHistoryCoverageEvidence:
+            binding_error("sector_rebuild_evidence_contract_mismatch")
+        if sector_history.radar_run_id != plan.radar_run_id:
+            binding_error("sector_rebuild_radar_run_mismatch")
+        if sector_history.as_of != completed_at:
+            binding_error("sector_rebuild_as_of_mismatch")
+        if (
+            sector_history.classification_document_sha256
+            != runtime.industry_release.document_sha256
         ):
-            raise ValueError("leader_phase6_prepared_binding_unverified")
+            binding_error("sector_rebuild_classification_mismatch")
+        if not isinstance(analyses, tuple) or not analyses:
+            binding_error("sector_rebuild_analyses_missing")
+        if any(
+            type(item) is not SectorHistoricalAnalysis
+            or item.comparable_time != comparable_time
+            for item in analyses
+        ):
+            binding_error("sector_rebuild_comparable_time_mismatch")
+        if any(code not in rows_by_code for code in industries):
+            binding_error("sector_rebuild_candidate_industry_missing")
         return LeaderPhase6PlanPrefreezeEvidence(
             history=history,
             sector_history_evidence=sector_history,
@@ -904,11 +1013,7 @@ def prepare_leader_phase6_public_historical_inputs(
         document_id=calendar_document.document_id,
         source_time=calendar_document.source_time,
         fetched_at=calendar_document.fetched_at,
-        content_sha256=(
-            "sha256:" + hashlib.sha256(
-                calendar_document.text.encode("utf-8")
-            ).hexdigest()
-        ),
+        content_sha256=calendar_document.content_sha256,
     )
     return LeaderPhase6PreparedHistoricalInputs(
         radar_run_id=radar_run_id,
@@ -927,6 +1032,10 @@ def prepare_leader_phase6_public_historical_inputs(
         threshold_approval_evidence=approval.evidence,
         threshold_approval_record=approval.record,
         prepared_at=completed_at,
+        calendar_document_raw_content=calendar_document.raw_content,
+        calendar_document_raw_content_sha256=(
+            calendar_document.raw_content_sha256
+        ),
     )
 
 

@@ -14,6 +14,7 @@ from radar.sources.etf_product_master import (
     ETF_PRODUCT_CLASSIFICATION_MAPPING_VERSION,
     EtfProductMasterProviders,
     fetch_etf_product_master,
+    fetch_sse_etf_product_record,
 )
 
 
@@ -187,7 +188,7 @@ class EtfProductMasterSourceTests(unittest.TestCase):
         self.assertEqual(domestic.asset_class, EtfAssetClass.DOMESTIC_EQUITY)
         self.assertEqual(
             domestic.management_style,
-            EtfManagementStyle.UNKNOWN,
+            EtfManagementStyle.PASSIVE_INDEX,
         )
         self.assertEqual(domestic.source_category_code, "F112")
         self.assertEqual(
@@ -199,12 +200,11 @@ class EtfProductMasterSourceTests(unittest.TestCase):
             domestic.classification_mapping_version,
             ETF_PRODUCT_CLASSIFICATION_MAPPING_VERSION,
         )
-        self.assertIn(
+        self.assertNotIn(
             "management_style_unverified",
             domestic.classification_reasons,
         )
         self.assertNotIn("fund_size", type(domestic).model_fields)
-
         self.assertEqual(
             by_symbol["513100"].asset_class,
             EtfAssetClass.CROSS_BORDER_EQUITY,
@@ -226,7 +226,37 @@ class EtfProductMasterSourceTests(unittest.TestCase):
             ListedFundProductType.REIT,
         )
 
-    def test_szse_equity_scope_and_active_name_remain_unverified(self):
+    def test_single_sse_product_fetcher_preserves_official_target_index(self):
+        record = fetch_sse_etf_product_record(
+            "510300",
+            product_fetcher=sse_products,
+            category_fetcher=sse_categories,
+            clock=lambda: FETCHED_AT,
+        )
+
+        self.assertEqual(record.symbol, "510300")
+        self.assertEqual(record.target_index_name, "沪深300指数")
+        self.assertEqual(record.exchange, "sse")
+        self.assertEqual(record.fetched_at, FETCHED_AT)
+
+    def test_single_sse_product_fetcher_rejects_missing_and_duplicate(self):
+        with self.assertRaisesRegex(ValueError, "sse_etf_product_not_found"):
+            fetch_sse_etf_product_record(
+                "588999",
+                product_fetcher=sse_products,
+                category_fetcher=sse_categories,
+                clock=lambda: FETCHED_AT,
+            )
+        duplicate = pd.concat([sse_products(), sse_products().iloc[[0]]])
+        with self.assertRaisesRegex(ValueError, "sse_etf_product_ambiguous"):
+            fetch_sse_etf_product_record(
+                "510300",
+                product_fetcher=lambda: duplicate,
+                category_fetcher=sse_categories,
+                clock=lambda: FETCHED_AT,
+            )
+
+    def test_szse_equity_scope_stays_unknown_but_official_active_name_is_used(self):
         batch = self.fetch()
         by_symbol = {item.symbol: item for item in batch.items}
 
@@ -241,13 +271,12 @@ class EtfProductMasterSourceTests(unittest.TestCase):
         active_name = by_symbol["159999"]
         self.assertEqual(
             active_name.management_style,
-            EtfManagementStyle.UNKNOWN,
+            EtfManagementStyle.ACTIVE,
         )
-        self.assertIn(
+        self.assertNotIn(
             "management_style_unverified",
             active_name.classification_reasons,
         )
-
         self.assertEqual(
             by_symbol["159816"].asset_class,
             EtfAssetClass.BOND,
@@ -259,6 +288,46 @@ class EtfProductMasterSourceTests(unittest.TestCase):
         self.assertEqual(
             by_symbol["180001"].product_type,
             ListedFundProductType.REIT,
+        )
+
+    def test_sse_active_name_takes_precedence_over_missing_target_index(self):
+        products = sse_products()
+        products.loc[len(products)] = {
+            "FUND_CODE": "561999",
+            "FUND_ABBR": "创新主动ETF",
+            "CATEGORY": "F112",
+            "INDEX_NAME": "-",
+            "LISTING_DATE": "2026-07-01",
+            "COMPANY_NAME": "测试基金公司",
+            "SCALE": "2.00",
+        }
+        batch = self.fetch(EtfProductMasterProviders(
+            sse_products=lambda: products,
+            sse_categories=sse_categories,
+            szse_products=lambda: pd.DataFrame(),
+        ))
+
+        record = {item.symbol: item for item in batch.items}["561999"]
+        self.assertEqual(record.management_style, EtfManagementStyle.ACTIVE)
+        self.assertNotIn(
+            "management_style_unverified",
+            record.classification_reasons,
+        )
+
+    def test_sse_etf_without_active_name_or_target_index_stays_unknown(self):
+        products = sse_products()
+        products.loc[0, "INDEX_NAME"] = "-"
+        batch = self.fetch(EtfProductMasterProviders(
+            sse_products=lambda: products,
+            sse_categories=sse_categories,
+            szse_products=lambda: pd.DataFrame(),
+        ))
+
+        record = {item.symbol: item for item in batch.items}["510300"]
+        self.assertEqual(record.management_style, EtfManagementStyle.UNKNOWN)
+        self.assertIn(
+            "management_style_unverified",
+            record.classification_reasons,
         )
 
     def test_unknown_exchange_category_is_preserved_and_not_guessed(self):

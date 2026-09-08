@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface WatchlistItem {
   stockCode: string;
@@ -17,6 +17,8 @@ const API_BASE = '/api/backend';
 
 export function useWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [mutationError, setMutationError] = useState('');
+  const mutationInFlight = useRef(false);
 
   // 初始化时从 localStorage 读取，然后从后端同步
   useEffect(() => {
@@ -103,46 +105,72 @@ export function useWatchlist() {
   }, []);
 
   // 写入 localStorage 并同步到后台
-  const persist = (list: WatchlistItem[]): Promise<Response | null> => {
+  const persist = useCallback(async (list: WatchlistItem[]): Promise<boolean> => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      // 同步到后台 API
-      return fetch(`${API_BASE}/api/watchlist`, {
+      const response = await fetch(`${API_BASE}/api/watchlist`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify({ items: list })
-      }).catch(err => {
-        console.error("同步后台失败", err);
-        return null;
       });
-    } catch {
-      return Promise.resolve(null);
+      if (!response.ok) {
+        throw new Error(`后端返回 ${response.status}`);
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      return true;
+    } catch (error) {
+      console.error("同步后台失败", error);
+      setMutationError('监测列表保存失败，本次未更改');
+      return false;
     }
-  };
+  }, []);
 
-  const addToWatchlist = useCallback((stockCode: string, stockName: string): Promise<Response | null> => {
-    if (watchlist.find(i => i.stockCode === stockCode)) return Promise.resolve(null);
+  const addToWatchlist = useCallback(async (stockCode: string, stockName: string): Promise<boolean> => {
+    if (watchlist.find(i => i.stockCode === stockCode)) return true;
     if (watchlist.length >= 10) {
-      alert("监控列表最多只能添加 10 只股票哦！");
-      return Promise.resolve(null);
+      setMutationError('监测列表最多只能添加 10 只股票');
+      return false;
     }
+    if (mutationInFlight.current) return false;
     const next = [...watchlist, { stockCode, stockName, addedAt: new Date().toISOString() }];
-    setWatchlist(next);
-    return persist(next);
-  }, [watchlist]);
+    mutationInFlight.current = true;
+    setMutationError('');
+    try {
+      const persisted = await persist(next);
+      if (!persisted) return false;
+      setWatchlist(next);
+      return true;
+    } finally {
+      mutationInFlight.current = false;
+    }
+  }, [persist, watchlist]);
 
-  const removeFromWatchlist = useCallback((stockCode: string): Promise<Response | null> => {
+  const removeFromWatchlist = useCallback(async (stockCode: string): Promise<boolean> => {
+    if (mutationInFlight.current) return false;
     const next = watchlist.filter(i => i.stockCode !== stockCode);
-    setWatchlist(next);
-    return persist(next);
-  }, [watchlist]);
+    mutationInFlight.current = true;
+    setMutationError('');
+    try {
+      const persisted = await persist(next);
+      if (!persisted) return false;
+      setWatchlist(next);
+      return true;
+    } finally {
+      mutationInFlight.current = false;
+    }
+  }, [persist, watchlist]);
 
   const isInWatchlist = useCallback((stockCode: string) => {
     return watchlist.some(i => i.stockCode === stockCode);
   }, [watchlist]);
 
-  return { watchlist, addToWatchlist, removeFromWatchlist, isInWatchlist };
+  return {
+    watchlist,
+    addToWatchlist,
+    removeFromWatchlist,
+    isInWatchlist,
+    mutationError,
+  };
 }

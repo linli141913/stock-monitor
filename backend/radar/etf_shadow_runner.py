@@ -18,6 +18,7 @@ from radar.contracts import (
     SourceBatch,
     SourceHealthResult,
     SourceStatus,
+    UnitVerificationStatus,
 )
 from radar.etf_repository import EtfRepository
 from radar.etf_stage5_policy import DEFAULT_ETF_RULE_POLICY
@@ -229,6 +230,11 @@ class EtfStage5ShadowRunner:
         quote: QuoteSnapshot,
     ) -> dict:
         missing_fields = quote.missing_fields()
+        turnover_verified = (
+            quote.turnover_amount_unit_status
+            == UnitVerificationStatus.VERIFIED
+            and quote.turnover_amount_cny is not None
+        )
         return {
             "symbol": quote.symbol,
             "asOf": as_of,
@@ -237,7 +243,11 @@ class EtfStage5ShadowRunner:
             "price": quote.price,
             "changePercent": quote.change_percent,
             "turnoverVolume": None,
-            "turnoverAmount": quote.turnover_amount_source,
+            "turnoverAmount": (
+                quote.turnover_amount_cny
+                if turnover_verified
+                else quote.turnover_amount_source
+            ),
             "bid1": None,
             "ask1": None,
             "spreadBps": None,
@@ -247,8 +257,12 @@ class EtfStage5ShadowRunner:
                 "price": _field_state(quote.price),
                 "changePercent": _field_state(quote.change_percent),
                 "turnoverAmount": _field_state(
-                    quote.turnover_amount_source,
-                    verified=False,
+                    (
+                        quote.turnover_amount_cny
+                        if turnover_verified
+                        else quote.turnover_amount_source
+                    ),
+                    verified=turnover_verified,
                 ),
                 "bid1": "source_unverified",
                 "ask1": "source_unverified",
@@ -262,7 +276,11 @@ class EtfStage5ShadowRunner:
                     f"quote_field_missing:{field_name}"
                     for field_name in missing_fields
                 ),
-                "turnover_amount_unit_unverified",
+                *(
+                    ()
+                    if turnover_verified
+                    else ("turnover_amount_unit_unverified",)
+                ),
                 "etf_product_evidence_not_ready",
                 "etf_rule_not_frozen",
                 *DEFAULT_ETF_RULE_POLICY.disabled_reasons,

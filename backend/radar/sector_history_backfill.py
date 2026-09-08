@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import math
@@ -37,6 +38,12 @@ SINA_MINUTE_URL = (
     "CN_MarketDataService.getKLineData"
 )
 SINA_MINUTE_CONTRACT_ID = "sina-a-share-5m-history-v1"
+TENCENT_DAILY_PROOF_URL = (
+    "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
+)
+TENCENT_DAILY_PROOF_CONTRACT_ID = (
+    "tencent-qfq-daily-trading-presence-v1"
+)
 SECTOR_HISTORY_BACKFILL_CONTRACT_ID = "radar-sector-history-backfill-v1"
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
 MINIMUM_HISTORY_DATE_COUNT = 21
@@ -75,6 +82,7 @@ class HistoricalMinuteBar:
     occurred_at: datetime
     close: float
     turnover_amount_cny: float
+    volume_shares: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not _aware(self.occurred_at):
@@ -86,6 +94,15 @@ class HistoricalMinuteBar:
             or float(self.turnover_amount_cny) < 0
         ):
             raise ValueError("historical_minute_turnover_invalid")
+        if (
+            self.volume_shares is not None
+            and (
+                isinstance(self.volume_shares, bool)
+                or not isinstance(self.volume_shares, int)
+                or self.volume_shares < 0
+            )
+        ):
+            raise ValueError("historical_minute_volume_invalid")
 
 
 @dataclass(frozen=True)
@@ -114,6 +131,34 @@ class HistoricalMinuteSeries:
             or len({row.occurred_at for row in self.bars}) != len(self.bars)
         ):
             raise ValueError("historical_minute_series_invalid")
+
+
+@dataclass(frozen=True)
+class HistoricalDailyTradingProof:
+    trade_date: date
+    close: Decimal
+    volume_shares: int
+    source_contract_id: str
+    source_url: str
+    fetched_at: datetime
+    content_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.trade_date) is not date
+            or not isinstance(self.close, Decimal)
+            or not self.close.is_finite()
+            or self.close <= 0
+            or isinstance(self.volume_shares, bool)
+            or not isinstance(self.volume_shares, int)
+            or self.volume_shares < 0
+            or self.source_contract_id != TENCENT_DAILY_PROOF_CONTRACT_ID
+            or self.source_url != TENCENT_DAILY_PROOF_URL
+            or not _aware(self.fetched_at)
+            or not self.content_sha256.startswith("sha256:")
+            or len(self.content_sha256) != 71
+        ):
+            raise ValueError("historical_daily_trading_proof_invalid")
 
 
 @dataclass(frozen=True)
@@ -213,6 +258,9 @@ class SectorHistoryBackfillQuery:
     verified_non_trading_dates_by_symbol: Mapping[
         str, Tuple[date, ...]
     ] = field(default_factory=dict, repr=False)
+    daily_trading_proofs_by_symbol: Mapping[
+        str, Tuple[HistoricalDailyTradingProof, ...]
+    ] = field(default_factory=dict, repr=False)
     rule_version: str = SECTOR_RULE_VERSION
 
 
@@ -297,7 +345,7 @@ def parse_eastmoney_minute_payload(
             ).replace(tzinfo=SHANGHAI_TZ)
             close = float(values[2])
             amount = float(values[6])
-        except (TypeError, ValueError):
+        except (InvalidOperation, TypeError, ValueError):
             continue
         if occurred_at.date() not in expected:
             continue
@@ -341,7 +389,11 @@ def parse_sina_minute_payload(
             ).replace(tzinfo=SHANGHAI_TZ)
             close = float(row.get("close"))
             amount = float(row.get("amount"))
-        except (TypeError, ValueError):
+            raw_volume = Decimal(str(row.get("volume")))
+            if raw_volume != raw_volume.to_integral_value():
+                raise ValueError("sina_minute_volume_invalid")
+            volume_shares = int(raw_volume)
+        except (InvalidOperation, TypeError, ValueError):
             continue
         if occurred_at.date() not in expected:
             continue
@@ -349,6 +401,7 @@ def parse_sina_minute_payload(
             occurred_at=occurred_at,
             close=close,
             turnover_amount_cny=amount,
+            volume_shares=volume_shares,
         ))
     bars.sort(key=lambda item: item.occurred_at)
     return HistoricalMinuteSeries(
@@ -583,6 +636,29 @@ def build_sector_history_backfill(
         for symbol in expected_symbols
     ):
         return _empty_result("sector_history_trading_presence_conflict")
+    if not isinstance(query.daily_trading_proofs_by_symbol, Mapping):
+        return _empty_result("sector_history_daily_proof_unverified")
+    for symbol, proofs in query.daily_trading_proofs_by_symbol.items():
+        if (
+            symbol not in expected_symbols
+            or not isinstance(proofs, tuple)
+            or any(
+                type(proof) is not HistoricalDailyTradingProof
+                for proof in proofs
+            )
+            or len({proof.trade_date for proof in proofs}) != len(proofs)
+            or any(
+                proof.trade_date not in expected_date_set
+                or proof.trade_date not in set(
+                    query.verified_trading_dates_by_symbol.get(symbol, ())
+                )
+                or proof.fetched_at > query.as_of + timedelta(
+                    seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+                )
+                for proof in proofs
+            )
+        ):
+            return _empty_result("sector_history_daily_proof_unverified")
 
     daily_by_symbol = {}
     for symbol in sorted(expected_symbols):
@@ -609,6 +685,10 @@ def build_sector_history_backfill(
         verified_non_trading = set(
             query.verified_non_trading_dates_by_symbol.get(symbol, ())
         )
+        daily_proofs = {
+            proof.trade_date: proof
+            for proof in query.daily_trading_proofs_by_symbol.get(symbol, ())
+        }
         for trade_day in dates:
             bars = sorted(grouped[trade_day], key=lambda row: row.occurred_at)
             if not bars and trade_day in verified_non_trading:
@@ -616,7 +696,11 @@ def build_sector_history_backfill(
                 continue
             if not bars:
                 return _empty_result(
-                    "sector_history_member_dates_incomplete"
+                    "sector_history_member_dates_incomplete",
+                    (
+                        "sector_history_member_date_missing:"
+                        f"{symbol}:{trade_day.isoformat()}"
+                    ),
                 )
             bar_times = tuple(
                 row.occurred_at.timetz().replace(tzinfo=None)
@@ -634,9 +718,36 @@ def build_sector_history_backfill(
                 and query.comparable_time in bar_times
                 and bar_times[-1] >= time(15, 0)
             )
-            if not complete_intraday and trade_day not in verified_trading:
+            internal_zero_trade_verified = bool(
+                not complete_intraday
+                and comparable
+                and bar_times[0] <= time(9, 35)
+                and bar_times[-1] >= time(15, 0)
+                and trade_day in verified_trading
+            )
+            proof = daily_proofs.get(trade_day)
+            sparse_intraday_verified = bool(
+                not complete_intraday
+                and not internal_zero_trade_verified
+                and trade_day in verified_trading
+                and series.source_contract_id == SINA_MINUTE_CONTRACT_ID
+                and proof is not None
+                and all(row.volume_shares is not None for row in bars)
+                and sum(row.volume_shares or 0 for row in bars)
+                == proof.volume_shares
+                and Decimal(str(bars[-1].close)) == proof.close
+            )
+            if (
+                not complete_intraday
+                and not internal_zero_trade_verified
+                and not sparse_intraday_verified
+            ):
                 return _empty_result(
-                    "sector_history_member_dates_incomplete"
+                    "sector_history_member_dates_incomplete",
+                    (
+                        "sector_history_member_intraday_unverified:"
+                        f"{symbol}:{trade_day.isoformat()}"
+                    ),
                 )
             daily[trade_day] = (
                 bars[-1].close,

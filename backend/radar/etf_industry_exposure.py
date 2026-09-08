@@ -12,7 +12,6 @@ from radar.contracts import (
     IndexProductGroup,
     IndexProductGroupCollection,
     IndustryClassificationSnapshot,
-    IndustryHistoryStatus,
     IndustryIdentityStatus,
     IndustryRecordStatus,
     SourceStatus,
@@ -88,19 +87,18 @@ def calculate_index_industry_exposure(
     reasons: List[str] = []
     if not constituents.formal_ready:
         reasons.append("constituent_version_not_formal")
-    if (
-        release.history_status == IndustryHistoryStatus.RETROSPECTIVE_UNVERIFIED
-        or release.knowledge_effective_from > as_of
-    ):
+    # A release first discovered after its publication cannot be used to
+    # backfill an earlier replay.  Once it has actually been observed, the
+    # official document may support a current forward calculation.  The
+    # target constituent mapping below is audited independently, so unrelated
+    # full-market master gaps do not invalidate a 100%-mapped index basket.
+    if release.knowledge_effective_from > as_of:
         reasons.append("industry_mapping_retrospective_unverified")
     if (
         release.knowledge_effective_to is not None
         and release.knowledge_effective_to <= as_of
     ):
         reasons.append("industry_mapping_historical_expired")
-    if not classification.completeness.formal_usable:
-        reasons.append("industry_mapping_not_formal")
-
     records_by_identity = defaultdict(list)
     for record in classification.records:
         if (

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
+import time
 from typing import Any, Callable, Mapping, Optional, Sequence, TextIO
 
+from radar.contracts import MarketFeatureSnapshot
 from radar.leader_evidence_candidate_plan import (
     LeaderEvidenceCandidateAcceptanceResult,
     LeaderEvidenceCandidateAcceptanceStatus,
@@ -41,9 +46,22 @@ from radar.leader_tradability_live_acceptance import (
     LeaderTradabilityLiveAcceptanceResult,
     LeaderTradabilityLiveAcceptanceStatus,
 )
+from radar.market_research_state import produce_market_research_state
+from radar.formal_shadow_input_bundle import (
+    PrivateTmpNoFollowFileLock,
+    Stage6FormalShadowInputBundleInputs,
+    Stage6FormalShadowInputBundlePublication,
+    build_stage6_formal_shadow_input_context,
+    publish_stage6_formal_shadow_input_bundles,
+)
 from radar.sources.leader_tradability_public_live_poc import SHANGHAI_TZ
 from run_leader_phase6_live_prefreeze_acceptance import (
     _run_live as run_live_prefreeze,
+)
+
+
+MARKET_FEATURE_SNAPSHOT_EVIDENCE_CONTRACT_ID = (
+    "radar-market-feature-snapshot-evidence-v1"
 )
 
 
@@ -61,6 +79,9 @@ _SAFE_PREFREEZE_FAILURE_REASONS = frozenset({
     "leader_phase6_public_prepare_security_master_unverified",
     "leader_phase6_public_prepare_approval_unverified",
     "leader_phase6_public_prepare_memberships_unverified",
+    "leader_phase6_formal_shadow_lock_contended",
+    "leader_phase6_formal_shadow_context_unverified",
+    "leader_phase6_formal_shadow_clock_unverified",
 })
 
 
@@ -72,6 +93,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default="/private/tmp")
     parser.add_argument("--initialize-sector-state", action="store_true")
     parser.add_argument("--previous-sector-state")
+    parser.add_argument("--formal-shadow-input-root")
     return parser
 
 
@@ -125,21 +147,303 @@ def _private_tmp_state_path(value: Optional[str]) -> Optional[Path]:
     return resolved
 
 
-def _write_new_json(path: Path, payload: Any) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o600)
+@dataclass(frozen=True)
+class _PrivateTmpFileIdentity:
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+
+
+def _file_identity(metadata: os.stat_result) -> _PrivateTmpFileIdentity:
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ValueError("leader_phase6_formal_shadow_context_unverified")
+    return _PrivateTmpFileIdentity(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        size=metadata.st_size,
+        modified_ns=metadata.st_mtime_ns,
+        changed_ns=metadata.st_ctime_ns,
+    )
+
+
+def _open_private_tmp_parent(path: Path) -> tuple[int, str]:
+    """逐段用 ``O_NOFOLLOW`` 打开父目录，拒绝任何祖先链接或替换。"""
+
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if (
+        not isinstance(path, Path)
+        or not path.is_absolute()
+        or not isinstance(nofollow, int)
+        or not isinstance(directory_flag, int)
+    ):
+        raise ValueError("leader_phase6_formal_shadow_context_unverified")
     try:
+        relative = path.relative_to(Path("/private/tmp"))
+    except ValueError as exc:
+        raise ValueError(
+            "leader_phase6_formal_shadow_context_unverified"
+        ) from exc
+    parts = relative.parts
+    if (
+        not parts
+        or parts[-1] in {"", ".", ".."}
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise ValueError("leader_phase6_formal_shadow_context_unverified")
+
+    flags = os.O_RDONLY | directory_flag | nofollow
+    current = None
+    try:
+        current = os.open("/private/tmp", flags)
+        for component in parts[:-1]:
+            child = os.open(component, flags, dir_fd=current)
+            try:
+                opened = os.fstat(child)
+                entry = os.stat(
+                    component,
+                    dir_fd=current,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISDIR(opened.st_mode)
+                    or not stat.S_ISDIR(entry.st_mode)
+                    or (opened.st_dev, opened.st_ino)
+                    != (entry.st_dev, entry.st_ino)
+                ):
+                    raise ValueError(
+                        "leader_phase6_formal_shadow_context_unverified"
+                    )
+            except BaseException:
+                os.close(child)
+                raise
+            os.close(current)
+            current = child
+        return current, parts[-1]
+    except ValueError:
+        if current is not None:
+            os.close(current)
+        raise
+    except (OSError, TypeError) as exc:
+        if current is not None:
+            os.close(current)
+        raise ValueError(
+            "leader_phase6_formal_shadow_context_unverified"
+        ) from exc
+
+
+def _capture_private_tmp_regular_file_identity(
+    path: Path,
+) -> _PrivateTmpFileIdentity:
+    """首次验证并固定现有临时普通文件的不可变身份。"""
+
+    parent_fd = None
+    descriptor = None
+    try:
+        parent_fd, name = _open_private_tmp_parent(path)
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        identity = _file_identity(os.fstat(descriptor))
+        if _file_identity(os.stat(
+            name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        )) != identity:
+            raise ValueError("leader_phase6_formal_shadow_context_unverified")
+        return identity
+    except ValueError:
+        raise
+    except (OSError, TypeError) as exc:
+        raise ValueError(
+            "leader_phase6_formal_shadow_context_unverified"
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
+def _write_new_json(path: Path, payload: Any) -> _PrivateTmpFileIdentity:
+    """安全新建 JSON 并返回写完、同步后的文件身份。"""
+
+    parent_fd = None
+    descriptor = None
+    created = False
+    created_inode = None
+    try:
+        parent_fd, name = _open_private_tmp_parent(path)
+        descriptor = os.open(
+            name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        created = True
+        created_metadata = os.fstat(descriptor)
+        created_inode = (created_metadata.st_dev, created_metadata.st_ino)
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor = None
             json.dump(payload, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
-    except Exception:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
+            stream.flush()
+            os.fsync(stream.fileno())
+            identity = _file_identity(os.fstat(stream.fileno()))
+            entry_identity = _file_identity(os.stat(
+                name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            ))
+            if entry_identity != identity:
+                raise ValueError(
+                    "leader_phase6_formal_shadow_context_unverified"
+                )
+        os.fsync(parent_fd)
+        return identity
+    except BaseException:
+        if created and parent_fd is not None and created_inode is not None:
+            try:
+                current = os.stat(
+                    name,
+                    dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+                if (current.st_dev, current.st_ino) == created_inode:
+                    os.unlink(name, dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+            except OSError:
+                pass
         raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
+def _read_private_tmp_regular_bytes(
+    path: Path,
+    *,
+    expected_identity: _PrivateTmpFileIdentity,
+) -> bytes:
+    """用固定身份读取临时工件，并验证读取前后及目录项均未变化。"""
+
+    if type(expected_identity) is not _PrivateTmpFileIdentity:
+        raise ValueError("leader_phase6_formal_shadow_context_unverified")
+    parent_fd = None
+    descriptor = None
+    try:
+        parent_fd, name = _open_private_tmp_parent(path)
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        before = _file_identity(os.fstat(descriptor))
+        entry_before = _file_identity(os.stat(
+            name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        ))
+        if before != expected_identity or entry_before != expected_identity:
+            raise ValueError("leader_phase6_formal_shadow_context_unverified")
+        chunks = []
+        remaining = 16 * 1024 * 1024
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ValueError("leader_phase6_formal_shadow_context_unverified")
+        after = _file_identity(os.fstat(descriptor))
+        entry_after = _file_identity(os.stat(
+            name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        ))
+        if after != before or entry_after != before:
+            raise ValueError("leader_phase6_formal_shadow_context_unverified")
+        return b"".join(chunks)
+    except ValueError:
+        raise
+    except (OSError, TypeError) as exc:
+        raise ValueError(
+            "leader_phase6_formal_shadow_context_unverified"
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
+def _canonical_sha256(value: Mapping[str, object]) -> str:
+    return hashlib.sha256(json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def _market_research_evidence_bundle(
+    tradability: Any,
+) -> tuple[Mapping[str, object], Optional[Mapping[str, object]]]:
+    """从已冻结的同轮市场特征生成阶段9研究输出。"""
+
+    runtime = getattr(tradability, "runtime_inputs", None)
+    raw_snapshot = getattr(runtime, "market_snapshot", None)
+    try:
+        snapshot = MarketFeatureSnapshot.model_validate(dict(raw_snapshot))
+    except (TypeError, ValueError):
+        return ({
+            "contractId": "radar-market-research-state-v1",
+            "status": "blocked",
+            "radarRunId": getattr(tradability, "radar_run_id", None),
+            "asOf": (
+                tradability.as_of.isoformat()
+                if getattr(tradability, "as_of", None) is not None else None
+            ),
+            "state": None,
+            "metrics": None,
+            "reasons": ["market_feature_contract_unverified"],
+            "snapshotSha256": None,
+            "ruleVersion": "radar-market-research-rule-v1",
+            "researchUsable": False,
+            "formalUsable": False,
+        }, None)
+    snapshot_payload = snapshot.model_dump(mode="json", by_alias=True)
+    snapshot_evidence = {
+        "contractId": MARKET_FEATURE_SNAPSHOT_EVIDENCE_CONTRACT_ID,
+        "snapshotSha256": _canonical_sha256(snapshot_payload),
+        "snapshot": snapshot_payload,
+    }
+    if (
+        snapshot.radar_run_id != getattr(tradability, "radar_run_id", None)
+        or snapshot.as_of != getattr(tradability, "as_of", None)
+    ):
+        return ({
+            **produce_market_research_state(snapshot).to_evidence(),
+            "status": "blocked",
+            "state": None,
+            "metrics": None,
+            "reasons": ["market_feature_identity_unverified"],
+            "snapshotSha256": None,
+            "researchUsable": False,
+        }, snapshot_evidence)
+    return (
+        produce_market_research_state(snapshot).to_evidence(),
+        snapshot_evidence,
+    )
 
 
 def _run_live(
@@ -337,6 +641,14 @@ def run_cli(
         lambda: datetime.now(SHANGHAI_TZ)
     ),
     live_runner: Callable[..., Any] = _run_live,
+    monotonic_clock: Callable[[], float] = time.monotonic,
+    lock_factory: Callable[[Path], Any] = PrivateTmpNoFollowFileLock,
+    formal_shadow_input_context: Optional[
+        Stage6FormalShadowInputBundleInputs
+    ] = None,
+    formal_shadow_input_publisher: Callable[..., Stage6FormalShadowInputBundlePublication] = (
+        publish_stage6_formal_shadow_input_bundles
+    ),
 ) -> int:
     arguments = _parser().parse_args(argv)
     if not arguments.confirm_live_five_source:
@@ -356,6 +668,24 @@ def run_cli(
             "reason": (
                 "leader_phase6_live_five_source_output_path_unverified"
             ),
+            "fiveSourceReadyForReview": False,
+        }, stdout)
+        return 3
+    try:
+        formal_shadow_input_root = (
+            _private_tmp_dir(arguments.formal_shadow_input_root)
+            if arguments.formal_shadow_input_root is not None
+            else None
+        )
+        if (
+            formal_shadow_input_root is not None
+            and formal_shadow_input_context is not None
+        ):
+            raise ValueError
+    except (OSError, ValueError):
+        _print({
+            "status": "error",
+            "reason": "leader_phase6_formal_shadow_context_unverified",
             "fiveSourceReadyForReview": False,
         }, stdout)
         return 3
@@ -383,6 +713,13 @@ def run_cli(
             "fiveSourceReadyForReview": False,
         }, stdout)
         return 3
+    formal_shadow_input_publication: Optional[
+        Stage6FormalShadowInputBundlePublication
+    ] = None
+    formal_shadow_lock = None
+    formal_shadow_lock_acquired = False
+    formal_shadow_publish_status = "not_requested"
+    formal_shadow_publish_reason = None
     try:
         started_at = now_provider()
         if (
@@ -391,6 +728,38 @@ def run_cli(
             or started_at.utcoffset() is None
         ):
             raise ValueError("leader_phase6_live_five_source_clock_unverified")
+        duration_started_at = None
+        formal_shadow_requested = (
+            formal_shadow_input_context is not None
+            or formal_shadow_input_root is not None
+        )
+        if formal_shadow_requested:
+            if type(formal_shadow_input_context) is not Stage6FormalShadowInputBundleInputs:
+                if formal_shadow_input_context is not None:
+                    raise ValueError("leader_phase6_formal_shadow_context_unverified")
+            formal_shadow_lock = lock_factory(
+                output_dir / ".leader-phase6-formal-shadow-input.lock"
+            )
+            try:
+                formal_shadow_lock_acquired = (
+                    formal_shadow_lock.acquire(blocking=False) is True
+                )
+            except Exception:
+                formal_shadow_publish_status = "not_published"
+                formal_shadow_publish_reason = (
+                    "leader_phase6_formal_shadow_lock_unverified"
+                )
+            if formal_shadow_lock_acquired:
+                duration_started_at = monotonic_clock()
+                if not isinstance(duration_started_at, (int, float)) or isinstance(
+                    duration_started_at, bool
+                ):
+                    raise ValueError("leader_phase6_formal_shadow_clock_unverified")
+            elif formal_shadow_publish_reason is None:
+                formal_shadow_publish_status = "contended"
+                formal_shadow_publish_reason = (
+                    "leader_phase6_formal_shadow_lock_contended"
+                )
         (
             prepared,
             tradability,
@@ -403,6 +772,7 @@ def run_cli(
             initialize_sector_state=arguments.initialize_sector_state,
             previous_sector_state_path=previous_sector_state_path,
         )
+        sector_state_identity = None
         if type(collection) is not LeaderPhase6LiveSourceCollectionResult:
             raise ValueError(
                 "leader_phase6_live_five_source_result_unverified"
@@ -423,17 +793,16 @@ def run_cli(
                 raise ValueError(
                     "leader_phase6_evidence_sector_state_result_unverified"
                 )
-            sector_state_path = sector_state_path.resolve(strict=True)
             try:
-                sector_state_path.relative_to(Path("/private/tmp"))
-            except ValueError as exc:
+                sector_state_identity = (
+                    _capture_private_tmp_regular_file_identity(
+                        sector_state_path
+                    )
+                )
+            except (OSError, ValueError) as exc:
                 raise ValueError(
                     "leader_phase6_evidence_sector_state_result_unverified"
                 ) from exc
-            if not sector_state_path.is_file():
-                raise ValueError(
-                    "leader_phase6_evidence_sector_state_result_unverified"
-                )
             if (
                 type(selection)
                 is not LeaderEvidenceCandidateAcceptanceResult
@@ -513,9 +882,17 @@ def run_cli(
             f"stage6-live-five-source-"
             f"{started_at:%Y%m%dT%H%M%S%f}.json"
         )
-        _write_new_json(artifact, {
+        (
+            market_research_state,
+            market_feature_snapshot_evidence,
+        ) = _market_research_evidence_bundle(tradability)
+        artifact_identity = _write_new_json(artifact, {
             "prepared": prepared.to_evidence(),
             "tradability": tradability.to_evidence(),
+            "marketResearchState": market_research_state,
+            "marketFeatureSnapshotEvidence": (
+                market_feature_snapshot_evidence
+            ),
             "evidenceCandidateSelection": (
                 selection.to_evidence() if selection is not None else None
             ),
@@ -549,6 +926,69 @@ def run_cli(
                 "stateTransitionAllowed": False,
             },
         })
+        if formal_shadow_requested and formal_shadow_lock_acquired:
+            observed_at = now_provider()
+            if (
+                not isinstance(observed_at, datetime)
+                or observed_at.tzinfo is None
+                or observed_at.utcoffset() is None
+            ):
+                raise ValueError("leader_phase6_formal_shadow_clock_unverified")
+            ended_at = monotonic_clock()
+            if (
+                not isinstance(ended_at, (int, float))
+                or isinstance(ended_at, bool)
+                or ended_at < duration_started_at
+            ):
+                raise ValueError("leader_phase6_formal_shadow_clock_unverified")
+            duration_ms = int((ended_at - duration_started_at) * 1000)
+            try:
+                effective_context = formal_shadow_input_context or (
+                    build_stage6_formal_shadow_input_context(
+                        output_root=formal_shadow_input_root,
+                        prepared=prepared,
+                    )
+                )
+                source_artifact_json_bytes = _read_private_tmp_regular_bytes(
+                    artifact,
+                    expected_identity=artifact_identity,
+                )
+                sector_snapshot_json_bytes = _read_private_tmp_regular_bytes(
+                    sector_state_path,
+                    expected_identity=sector_state_identity,
+                )
+                formal_shadow_input_publication = formal_shadow_input_publisher(
+                    output_root=effective_context.output_root,
+                    source_artifact_json_bytes=source_artifact_json_bytes,
+                    sector_snapshot_json_bytes=sector_snapshot_json_bytes,
+                    collection_policy_json_bytes=(
+                        effective_context.collection_policy_json_bytes
+                    ),
+                    calendar_envelope_json_bytes=(
+                        effective_context.calendar_envelope_json_bytes
+                    ),
+                    calendar_document_bytes=(
+                        effective_context.calendar_document_bytes
+                    ),
+                    observed_at=observed_at,
+                    duration_ms=duration_ms,
+                    lock_acquired=True,
+                )
+                if type(formal_shadow_input_publication) is not Stage6FormalShadowInputBundlePublication:
+                    raise ValueError(
+                        "leader_phase6_formal_shadow_context_unverified"
+                    )
+                formal_shadow_publish_status = (
+                    "published"
+                    if formal_shadow_input_publication.input_dirs
+                    else "not_published"
+                )
+            except Exception as exc:
+                formal_shadow_input_publication = None
+                formal_shadow_publish_status = "not_published"
+                formal_shadow_publish_reason = str(exc) or (
+                    "leader_phase6_formal_shadow_context_unverified"
+                )
     except Exception as exc:
         safe_reason = str(exc)
         if safe_reason not in _SAFE_PREFREEZE_FAILURE_REASONS:
@@ -559,6 +999,12 @@ def run_cli(
             "fiveSourceReadyForReview": False,
         }, stdout)
         return 3
+    finally:
+        if formal_shadow_lock is not None and formal_shadow_lock_acquired:
+            try:
+                formal_shadow_lock.release()
+            except Exception:
+                pass
     ready = (
         collection.status
         is LeaderPhase6LiveSourceReadinessStatus.READY_FOR_REVIEW
@@ -618,6 +1064,20 @@ def run_cli(
             "initialized"
             if arguments.initialize_sector_state
             else "continued"
+        ),
+        "marketResearchState": market_research_state,
+        "marketFeatureSnapshotEvidenceSha256": (
+            market_feature_snapshot_evidence["snapshotSha256"]
+            if market_feature_snapshot_evidence is not None else None
+        ),
+        "formalShadowInputPublishStatus": formal_shadow_publish_status,
+        "formalShadowInputPublishReason": formal_shadow_publish_reason,
+        "formalShadowInputDirs": (
+            {
+                module: str(path)
+                for module, path in formal_shadow_input_publication.input_dirs.items()
+            }
+            if formal_shadow_input_publication is not None else {}
         ),
         "fiveSourceReadyForReview": ready,
         "reasons": list(collection.reasons),

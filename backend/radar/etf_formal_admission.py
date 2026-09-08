@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from radar.contracts import (
     EtfAssetClass,
@@ -19,6 +21,7 @@ from radar.contracts import (
     EtfMetricState,
     EtfProductMasterRecord,
     EtfRankingInputAudit,
+    EvidenceTemporalBasis,
     EvidenceVersionKind,
     IndexConstituentSetEvidence,
     IndexEvidenceStatus,
@@ -36,6 +39,9 @@ from radar.etf_stage5_policy import (
 ETF_FORMAL_ADMISSION_CONTRACT_ID = (
     "radar-etf-formal-admission-evidence-v1"
 )
+ETF_FORMAL_ADMISSION_BUNDLE_CONTRACT_ID = (
+    "radar-etf-formal-admission-bundle-v1"
+)
 ETF_LIFECYCLE_EVIDENCE_CONTRACT_ID = (
     "radar-etf-lifecycle-evidence-v1"
 )
@@ -45,8 +51,25 @@ ETF_INDUSTRY_SCOPE_EVIDENCE_CONTRACT_ID = (
 ETF_INDUSTRY_EXPOSURE_CALCULATION_VERSION = (
     "radar-etf-industry-exposure-v1"
 )
+ETF_LIFECYCLE_CURRENT_MASTER_SOURCE_VERSION = (
+    "radar-etf-current-official-master-lifecycle-v1"
+)
+ETF_SCOPE_CSINDEX_CLASSIFICATION_VERSION = (
+    "csindex-official-index-classification-v1"
+)
 MINIMUM_CONSTITUENT_WEIGHT_TOTAL = 99.5
 MAXIMUM_CONSTITUENT_WEIGHT_TOTAL = 100.5
+ETF_FORMAL_ADMISSION_ITEM_KEYS = (
+    "product_identity",
+    "product_lifecycle",
+    "industry_scope",
+    "index_relation",
+    "index_methodology",
+    "index_constituents",
+    "industry_exposure",
+    "ranking_inputs",
+    "rule_policy",
+)
 
 
 class EtfFormalAdmissionStatus(str, Enum):
@@ -160,6 +183,123 @@ class EtfIndustryScopeEvidence:
         _require_aware(self.fetched_at, "ETF行业范围抓取时间")
 
 
+def _canonical_sha256(value: Any) -> str:
+    content = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+
+
+def build_etf_lifecycle_evidence_from_current_master(
+    *,
+    product: EtfProductMasterRecord,
+    as_of: datetime,
+) -> EtfLifecycleEvidence:
+    """Treat exact presence in a current official list as forward evidence.
+
+    It proves that the product was listed at the observation time only.  It
+    never infers termination from a later absence and never backfills dates
+    before the official observation.
+    """
+    _require_aware(as_of, "ETF生命周期asOf")
+    source_urls = {
+        "sse_official_fund_list": (
+            "https://query.sse.com.cn/commonQuery.do?"
+            "sqlId=COMMON_JJZWZ_JJLB_L"
+        ),
+        "szse_official_fund_list": (
+            "https://fund.szse.cn/api/report/ShowReport?"
+            "CATALOGID=1000_lf&TABKEY=tab1"
+        ),
+    }
+    expected_exchange = {
+        "sse_official_fund_list": "sse",
+        "szse_official_fund_list": "szse",
+    }
+    if (
+        product.source not in source_urls
+        or product.exchange != expected_exchange[product.source]
+        or product.product_type != ListedFundProductType.ETF
+        or product.listing_date is None
+        or product.listing_date > as_of.date()
+        or product.fetched_at > as_of
+        or not product.source_fields
+    ):
+        raise ValueError("etf_current_master_lifecycle_unverified")
+    evidence_projection = {
+        "sourceVersion": ETF_LIFECYCLE_CURRENT_MASTER_SOURCE_VERSION,
+        "symbol": product.symbol,
+        "exchange": product.exchange,
+        "listingDate": product.listing_date.isoformat(),
+        "fetchedAt": product.fetched_at.isoformat(),
+        "sourceFields": product.source_fields,
+    }
+    return EtfLifecycleEvidence(
+        symbol=product.symbol,
+        as_of=as_of,
+        status=EtfLifecycleStatus.ACTIVE,
+        listing_date=product.listing_date,
+        termination_effective_at=None,
+        source_url=source_urls[product.source],
+        source_sha256=_canonical_sha256(evidence_projection),
+        fetched_at=product.fetched_at,
+    )
+
+
+def build_etf_industry_scope_evidence(
+    *,
+    symbol: str,
+    index_resolution: Any,
+    as_of: datetime,
+) -> EtfIndustryScopeEvidence:
+    """Build scope only from the exact official CSIndex search row."""
+    _require_symbol(symbol)
+    _require_aware(as_of, "ETF行业范围asOf")
+    classification_map = {
+        "行业": EtfIndustryScopeKind.INDUSTRY,
+        "主题": EtfIndustryScopeKind.THEME,
+        "规模": EtfIndustryScopeKind.BROAD_BASED,
+    }
+    classification = getattr(
+        index_resolution,
+        "index_classification",
+        None,
+    )
+    scope_kind = classification_map.get(classification)
+    if (
+        getattr(index_resolution, "provider", None) != "csindex"
+        or getattr(index_resolution, "identity_resolved", False) is not True
+        or getattr(index_resolution, "status", None)
+        != IndexEvidenceStatus.VERIFIED
+        or not getattr(index_resolution, "index_code", None)
+        or scope_kind is None
+        or getattr(index_resolution, "fetched_at", as_of) > as_of
+    ):
+        raise ValueError("etf_industry_scope_classification_unverified")
+    source_sha256 = getattr(
+        index_resolution,
+        "search_content_sha256",
+        "",
+    )
+    _require_sha256(source_sha256)
+    return EtfIndustryScopeEvidence(
+        symbol=symbol,
+        as_of=as_of,
+        index_provider="csindex",
+        index_code=index_resolution.index_code,
+        scope_kind=scope_kind,
+        classification_version=ETF_SCOPE_CSINDEX_CLASSIFICATION_VERSION,
+        source_url=index_resolution.search_evidence_url,
+        source_sha256=source_sha256,
+        fetched_at=index_resolution.fetched_at,
+    )
+
+
 @dataclass(frozen=True)
 class EtfFormalAdmissionItem:
     key: str
@@ -180,6 +320,8 @@ class EtfFormalAdmissionEvidence:
     as_of: datetime
     rule_version: str
     status: EtfFormalAdmissionStatus
+    monitoring_status: EtfFormalAdmissionStatus
+    ranking_status: EtfFormalAdmissionStatus
     items: Tuple[EtfFormalAdmissionItem, ...]
     reasons: Tuple[str, ...] = field(default_factory=tuple)
     contract_id: str = ETF_FORMAL_ADMISSION_CONTRACT_ID
@@ -197,9 +339,207 @@ class EtfFormalAdmissionEvidence:
             "asOf": self.as_of.isoformat(),
             "ruleVersion": self.rule_version,
             "status": self.status.value,
+            "monitoringStatus": self.monitoring_status.value,
+            "rankingStatus": self.ranking_status.value,
             "reasons": list(self.reasons),
             "items": [item.to_evidence() for item in self.items],
         }
+
+
+def _validate_formal_admission(
+    value: EtfFormalAdmissionEvidence,
+) -> None:
+    if type(value) is not EtfFormalAdmissionEvidence:
+        raise ValueError("etf_formal_admission_bundle_unverified")
+    _require_symbol(value.symbol)
+    _require_aware(value.as_of, "ETF正式准入asOf")
+    _require_nonempty(value.rule_version, "ETF正式准入规则版本")
+    if (
+        value.contract_id != ETF_FORMAL_ADMISSION_CONTRACT_ID
+        or tuple(item.key for item in value.items)
+        != ETF_FORMAL_ADMISSION_ITEM_KEYS
+        or any(
+            type(item) is not EtfFormalAdmissionItem
+            or item.status
+            != (
+                EtfFormalAdmissionStatus.MISSING
+                if item.reasons
+                else EtfFormalAdmissionStatus.READY
+            )
+            for item in value.items
+        )
+    ):
+        raise ValueError("etf_formal_admission_bundle_unverified")
+    source_items = value.items[:-1]
+    monitoring_status = (
+        EtfFormalAdmissionStatus.MISSING
+        if any(item.reasons for item in source_items)
+        else EtfFormalAdmissionStatus.READY
+    )
+    ranking_status = value.items[-1].status
+    flattened_reasons = _dedupe(tuple(
+        reason
+        for item in value.items
+        for reason in item.reasons
+    ))
+    overall_status = (
+        EtfFormalAdmissionStatus.MISSING
+        if flattened_reasons
+        else EtfFormalAdmissionStatus.READY
+    )
+    if any((
+        value.monitoring_status != monitoring_status,
+        value.ranking_status != ranking_status,
+        value.status != overall_status,
+        value.reasons != flattened_reasons,
+    )):
+        raise ValueError("etf_formal_admission_bundle_unverified")
+
+
+@dataclass(frozen=True)
+class EtfFormalAdmissionBundle:
+    sample_id: str
+    radar_run_id: str
+    as_of: datetime
+    admissions: Tuple[EtfFormalAdmissionEvidence, ...]
+    snapshot_sha256: str
+    contract_id: str = ETF_FORMAL_ADMISSION_BUNDLE_CONTRACT_ID
+
+    def to_evidence(self) -> Dict[str, Any]:
+        return {
+            "contractId": self.contract_id,
+            "sampleId": self.sample_id,
+            "radarRunId": self.radar_run_id,
+            "asOf": self.as_of.isoformat(),
+            "admissions": [
+                item.to_evidence() for item in self.admissions
+            ],
+            "snapshotSha256": self.snapshot_sha256,
+        }
+
+
+def build_etf_formal_admission_bundle(
+    *,
+    sample_id: str,
+    radar_run_id: str,
+    as_of: datetime,
+    admissions: Sequence[EtfFormalAdmissionEvidence],
+) -> EtfFormalAdmissionBundle:
+    _require_nonempty(sample_id, "ETF正式准入样本ID")
+    _require_nonempty(radar_run_id, "ETF正式准入运行ID")
+    _require_aware(as_of, "ETF正式准入证据包asOf")
+    normalized = tuple(sorted(admissions, key=lambda item: item.symbol))
+    if (
+        not normalized
+        or len({item.symbol for item in normalized}) != len(normalized)
+    ):
+        raise ValueError("etf_formal_admission_bundle_unverified")
+    for admission in normalized:
+        _validate_formal_admission(admission)
+        if admission.as_of != as_of:
+            raise ValueError(
+                "etf_formal_admission_bundle_identity_mismatch"
+            )
+    semantic = {
+        "contractId": ETF_FORMAL_ADMISSION_BUNDLE_CONTRACT_ID,
+        "sampleId": sample_id.strip(),
+        "radarRunId": radar_run_id.strip(),
+        "asOf": as_of.isoformat(),
+        "admissions": [item.to_evidence() for item in normalized],
+    }
+    return EtfFormalAdmissionBundle(
+        sample_id=sample_id.strip(),
+        radar_run_id=radar_run_id.strip(),
+        as_of=as_of,
+        admissions=normalized,
+        snapshot_sha256=_canonical_sha256(semantic),
+    )
+
+
+def load_etf_formal_admission_bundle(
+    raw: Mapping[str, Any],
+) -> EtfFormalAdmissionBundle:
+    try:
+        if set(raw) != {
+            "contractId",
+            "sampleId",
+            "radarRunId",
+            "asOf",
+            "admissions",
+            "snapshotSha256",
+        }:
+            raise ValueError
+        if raw["contractId"] != ETF_FORMAL_ADMISSION_BUNDLE_CONTRACT_ID:
+            raise ValueError
+        as_of = datetime.fromisoformat(raw["asOf"])
+        admissions_raw = raw["admissions"]
+        if not isinstance(admissions_raw, list):
+            raise ValueError
+        admissions = []
+        for item in admissions_raw:
+            if not isinstance(item, Mapping) or set(item) != {
+                "contractId",
+                "symbol",
+                "asOf",
+                "ruleVersion",
+                "status",
+                "monitoringStatus",
+                "rankingStatus",
+                "reasons",
+                "items",
+            }:
+                raise ValueError
+            items_raw = item["items"]
+            if not isinstance(items_raw, list):
+                raise ValueError
+            evidence_items = tuple(
+                EtfFormalAdmissionItem(
+                    key=evidence_item["key"],
+                    status=EtfFormalAdmissionStatus(
+                        evidence_item["status"]
+                    ),
+                    reasons=tuple(evidence_item["reasons"]),
+                )
+                for evidence_item in items_raw
+                if isinstance(evidence_item, Mapping)
+                and set(evidence_item) == {"key", "status", "reasons"}
+                and isinstance(evidence_item["reasons"], list)
+                and all(
+                    isinstance(reason, str) and reason
+                    for reason in evidence_item["reasons"]
+                )
+            )
+            if len(evidence_items) != len(items_raw):
+                raise ValueError
+            admission = EtfFormalAdmissionEvidence(
+                symbol=item["symbol"],
+                as_of=datetime.fromisoformat(item["asOf"]),
+                rule_version=item["ruleVersion"],
+                status=EtfFormalAdmissionStatus(item["status"]),
+                monitoring_status=EtfFormalAdmissionStatus(
+                    item["monitoringStatus"]
+                ),
+                ranking_status=EtfFormalAdmissionStatus(
+                    item["rankingStatus"]
+                ),
+                items=evidence_items,
+                reasons=tuple(item["reasons"]),
+                contract_id=item["contractId"],
+            )
+            admissions.append(admission)
+        rebuilt = build_etf_formal_admission_bundle(
+            sample_id=raw["sampleId"],
+            radar_run_id=raw["radarRunId"],
+            as_of=as_of,
+            admissions=admissions,
+        )
+        if rebuilt.snapshot_sha256 != raw["snapshotSha256"]:
+            raise ValueError
+        return rebuilt
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "etf_formal_admission_bundle_unverified"
+        ) from exc
 
 
 def _item(
@@ -232,6 +572,36 @@ def _effective_at(
         effective_from is not None,
         published_at is not None and published_at <= as_of,
         effective_from is not None and effective_from <= as_of,
+        effective_to is None or effective_to > as_of,
+        first_observed_at <= as_of,
+        fetched_at <= as_of,
+    ))
+
+
+def _version_evidence_current_at(
+    *,
+    temporal_basis: EvidenceTemporalBasis,
+    as_of: datetime,
+    published_at: Optional[datetime],
+    effective_from: Optional[datetime],
+    effective_to: Optional[datetime],
+    first_observed_at: datetime,
+    fetched_at: datetime,
+) -> bool:
+    if temporal_basis == EvidenceTemporalBasis.EXACT_EFFECTIVE_INTERVAL:
+        return _effective_at(
+            as_of=as_of,
+            published_at=published_at,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            first_observed_at=first_observed_at,
+            fetched_at=fetched_at,
+        )
+    return all((
+        temporal_basis
+        == EvidenceTemporalBasis.CURRENT_OFFICIAL_OBSERVATION,
+        published_at is None or published_at <= as_of,
+        effective_from is None or effective_from <= as_of,
         effective_to is None or effective_to > as_of,
         first_observed_at <= as_of,
         fetched_at <= as_of,
@@ -463,7 +833,8 @@ def provide_etf_formal_admission_evidence(
         not methodology_evidence.selection_rule,
         not methodology_evidence.weighting_method,
         not methodology_evidence.rebalance_frequency,
-        not _effective_at(
+        not _version_evidence_current_at(
+            temporal_basis=methodology_evidence.temporal_basis,
             as_of=as_of,
             published_at=methodology_evidence.published_at,
             effective_from=methodology_evidence.effective_from,
@@ -538,7 +909,8 @@ def provide_etf_formal_admission_evidence(
                 constituent_evidence.source_date is None
                 or constituent_evidence.source_date > as_of.date()
             ),
-            not _effective_at(
+            not _version_evidence_current_at(
+                temporal_basis=constituent_evidence.temporal_basis,
                 as_of=as_of,
                 published_at=constituent_evidence.announced_at,
                 effective_from=constituent_evidence.effective_from,
@@ -620,13 +992,7 @@ def provide_etf_formal_admission_evidence(
             ranking_reasons.append("etf_ranking_input_not_verified")
     ranking_item = _item("ranking_inputs", ranking_reasons)
 
-    policy_reasons = []
-    if not policy.ranking_enabled:
-        policy_reasons.append("etf_rule_not_frozen")
-        policy_reasons.extend(policy.disabled_reasons)
-    policy_item = _item("rule_policy", policy_reasons)
-
-    items = (
+    source_items = (
         product_item,
         lifecycle_item,
         scope_item,
@@ -635,8 +1001,32 @@ def provide_etf_formal_admission_evidence(
         constituent_item,
         exposure_item,
         ranking_item,
-        policy_item,
     )
+    monitoring_reasons = _dedupe(tuple(
+        reason
+        for item in source_items
+        for reason in item.reasons
+    ))
+    monitoring_status = (
+        EtfFormalAdmissionStatus.MISSING
+        if monitoring_reasons
+        else EtfFormalAdmissionStatus.READY
+    )
+
+    policy_reasons = []
+    if not policy.ranking_enabled:
+        policy_reasons.append("etf_rule_not_frozen")
+        policy_reasons.extend(
+            reason
+            for reason in policy.disabled_reasons
+            if not (
+                reason == "formal_source_inputs_incomplete"
+                and monitoring_status == EtfFormalAdmissionStatus.READY
+            )
+        )
+    policy_item = _item("rule_policy", policy_reasons)
+
+    items = source_items + (policy_item,)
     reasons = _dedupe(tuple(
         reason
         for item in items
@@ -651,6 +1041,8 @@ def provide_etf_formal_admission_evidence(
             if reasons
             else EtfFormalAdmissionStatus.READY
         ),
+        monitoring_status=monitoring_status,
+        ranking_status=policy_item.status,
         items=items,
         reasons=reasons,
     )

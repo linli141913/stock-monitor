@@ -17,6 +17,7 @@ from radar.contracts import (
     IndustryClassificationGap,
     IndustryClassificationSnapshot,
     IndustryIdentityStatus,
+    IndustryRecordProvenance,
     IndustryRecordStatus,
     QuoteSnapshot,
     RadarBatchMeta,
@@ -524,6 +525,11 @@ class SectorShadowRunner:
         reasons.append("formal_use_not_approved")
         master_count = len(master_records)
         mapped_count = len(mapped_records)
+        supplemental_record_count = sum(
+            record.record_provenance
+            != IndustryRecordProvenance.CAPCO_RELEASE
+            for record in records
+        )
         return IndustryClassificationSnapshot(
             meta=RadarBatchMeta(
                 radarRunId=radar_run_id,
@@ -543,12 +549,13 @@ class SectorShadowRunner:
             records=list(records),
             currentMasterGaps=gaps,
             completeness=IndustryClassificationCompleteness(
-                sourceRecordCount=len(records),
-                uniqueSourceSymbolCount=len({r.source_symbol for r in records}),
+                sourceRecordCount=release.source_record_count,
+                uniqueSourceSymbolCount=release.unique_source_symbol_count,
                 currentMasterCount=master_count,
                 mappedCount=mapped_count,
                 unconfirmedCount=len(gaps),
                 excludedSourceCount=excluded_source_count,
+                supplementalRecordCount=supplemental_record_count,
                 mappingCoverage=(mapped_count / master_count),
                 requiredFieldCoverage=release.required_field_coverage,
                 shadowUsable=True,

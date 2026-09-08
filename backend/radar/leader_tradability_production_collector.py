@@ -30,6 +30,7 @@ from radar.leader_tradability_runtime_bridge import (
 from radar.sources.leader_tradability_public_poc import (
     PublicCompositeTradabilityQuery,
     PublicSecurityContext,
+    PublicSourceKind,
     PublicTradabilityObservation,
     PublicTradingCalendarEvidence,
 )
@@ -42,6 +43,7 @@ LEADER_TRADABILITY_PRODUCTION_SOURCE_CONTRACT_ID = (
     "radar-leader-tradability-production-source-v1"
 )
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
+MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS = 10
 
 
 @dataclass(frozen=True, repr=False)
@@ -111,9 +113,11 @@ def _aware(value: Any) -> bool:
 def _fetch_precedes_source(
     fetched_at: datetime,
     source_time: datetime,
+    *,
+    maximum_skew_seconds: int = MAXIMUM_FUTURE_SKEW_SECONDS,
 ) -> bool:
     return fetched_at + timedelta(
-        seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+        seconds=maximum_skew_seconds
     ) < source_time
 
 
@@ -190,6 +194,12 @@ def _bundle_times(bundle: Any) -> Optional[Tuple[datetime, datetime]]:
             or _fetch_precedes_source(
                 observation.fetched_at,
                 observation.source_time,
+                maximum_skew_seconds=(
+                    MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS
+                    if observation.source_kind
+                    == PublicSourceKind.EXCHANGE_OFFICIAL
+                    else MAXIMUM_FUTURE_SKEW_SECONDS
+                ),
             )
         ):
             return None
@@ -317,9 +327,15 @@ def collect_leader_tradability_production_source(
     source_time, embedded_fetched_at = times
     if (
         frozen.fetched_at < embedded_fetched_at
-        or _fetch_precedes_source(frozen.fetched_at, source_time)
+        or _fetch_precedes_source(
+            frozen.fetched_at,
+            source_time,
+            maximum_skew_seconds=(
+                MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS
+            ),
+        )
         or source_time > context.as_of + timedelta(
-            seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            seconds=MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS
         )
         or frozen.fetched_at > context.as_of + timedelta(
             seconds=MAXIMUM_FUTURE_SKEW_SECONDS

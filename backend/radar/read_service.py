@@ -16,11 +16,14 @@ from radar.api_contracts import (
     RadarLastSuccess,
     RadarLeaderItem,
     RadarLeaderModule,
+    RadarLeaderObservation,
+    RadarLeaderObservationItem,
     RadarLeaderReviewQueue,
     RadarLeaderReviewDocument,
     RadarLeaderReviewQueueResponse,
     RadarLeaderReviewDocumentResponse,
     RadarLeaderSnapshot,
+    RadarLeaderSourceSummaryItem,
     RadarLeaderSummary,
     RadarLeadersResponse,
     RadarStockResponse,
@@ -40,8 +43,13 @@ from radar.leader_board import (
     build_leader_board_projection,
 )
 from radar.leader_repository import LeaderRepository
+from radar.leader_observation_store import (
+    LEADER_OBSERVATION_COVERAGE_SCOPE,
+    LeaderObservationStoreReadResult,
+)
 from radar.leader_risk_review_repository import LeaderRiskReviewRepository
 from radar.repository import RadarRepository
+from radar.sources.leader_risk_official import CNINFO_SOURCE_CONTRACT_ID
 
 
 MARKET_RUN_PREFIX = "radar-shadow-market-features-"
@@ -63,6 +71,7 @@ class RadarReadService:
         etf_repository: Optional[EtfRepository] = None,
         leader_repository: Optional[LeaderRepository] = None,
         risk_review_repository: Optional[LeaderRiskReviewRepository] = None,
+        leader_observation_loader: Optional[Callable] = None,
     ):
         self.repository = repository
         self.settings = settings
@@ -71,6 +80,7 @@ class RadarReadService:
         self.etf_repository = etf_repository
         self.leader_repository = leader_repository
         self.risk_review_repository = risk_review_repository
+        self.leader_observation_loader = leader_observation_loader
 
     def _market_session(self, now: datetime) -> RadarMarketSession:
         status, calendar_day = self.market_status_provider("cn", now)
@@ -708,10 +718,28 @@ class RadarReadService:
         *,
         state: str,
         reason_codes: Sequence[str],
+        observation: Optional[RadarLeaderObservation] = None,
     ) -> RadarLeaderModule:
         stale_after_seconds = (
             self.settings.stock_scan_interval_seconds * 2 + 30
         )
+        selected_observation = (
+            observation
+            or RadarLeaderObservation(
+                status=state,
+                quality="unavailable",
+                displayAllowed=False,
+                coverageScope=LEADER_OBSERVATION_COVERAGE_SCOPE,
+                freshness=RadarFreshness(
+                    ageSeconds=None,
+                    staleAfterSeconds=stale_after_seconds,
+                    isStale=False,
+                    reasonCodes=list(reason_codes),
+                ),
+                reasonCodes=list(reason_codes),
+            )
+        )
+        review_queue = self._leader_review_queue()
         return RadarLeaderModule(
             state=state,
             quality="unavailable",
@@ -725,12 +753,170 @@ class RadarReadService:
                 reasonCodes=list(reason_codes),
             ),
             sources=[],
+            sourceSummary=self._leader_source_summary(
+                selected_observation,
+                review_queue=review_queue,
+            ),
             summary=self._empty_leader_summary(reason_codes),
-            reviewQueue=self._leader_review_queue(),
+            observation=selected_observation,
+            reviewQueue=review_queue,
             preliminary=[],
             candidates=[],
             confirmed=[],
             reasonCodes=list(reason_codes),
+        )
+
+
+    @staticmethod
+    def _leader_source_summary(
+        observation: RadarLeaderObservation,
+        *,
+        review_queue: RadarLeaderReviewQueue,
+        board_entries: Sequence[LeaderBoardEntry] = (),
+        board_as_of: Optional[datetime] = None,
+        board_fetched_at: Optional[datetime] = None,
+    ) -> Sequence[RadarLeaderSourceSummaryItem]:
+        observation_available = observation.status in {
+            "available", "stale",
+        } and bool(observation.items)
+        observation_status = (
+            "stale"
+            if observation.status == "stale" and observation.items
+            else ("available" if observation_available else "missing")
+        )
+        quote_contracts = sorted({
+            item.quote_source_contract_id
+            for item in observation.items
+            if item.quote_source_contract_id
+        })
+        sector_contracts = sorted({
+            item.sector_source_contract_id
+            for item in observation.items
+            if item.sector_source_contract_id
+        })
+        observation_reason = (
+            []
+            if observation_available
+            else ["leader_observation_source_contracts_missing"]
+        )
+
+        business_contracts = set()
+        business_ready_count = 0
+        business_unverified = False
+        for entry in board_entries:
+            research = entry.evidence.get("researchFeatures")
+            business = (
+                research.get("businessCatalyst")
+                if isinstance(research, dict)
+                else None
+            )
+            if not isinstance(business, dict):
+                continue
+            references = business.get("references")
+            reference_contracts = {
+                reference.get("sourceContractId")
+                for reference in references or ()
+                if isinstance(reference, dict)
+                and isinstance(reference.get("sourceContractId"), str)
+                and reference.get("sourceContractId")
+            }
+            if business.get("status") == "ready" and reference_contracts:
+                business_ready_count += 1
+                business_contracts.update(reference_contracts)
+            elif business.get("status") in {"source_unverified", "failed"}:
+                business_unverified = True
+        if board_entries and business_ready_count == len(board_entries):
+            business_status = "available"
+            business_reasons = []
+        elif business_ready_count:
+            business_status = "partial"
+            business_reasons = ["leader_business_source_summary_partial"]
+        elif business_unverified:
+            business_status = "unverified"
+            business_reasons = ["leader_business_source_summary_unverified"]
+        else:
+            business_status = "missing"
+            business_reasons = ["leader_business_source_summary_missing"]
+
+        announcement_status = "missing"
+        announcement_reasons = ["leader_announcement_source_summary_missing"]
+        announcement_contracts = []
+        announcement_covered_count = 0
+        if review_queue.status == "failed":
+            announcement_status = "failed"
+            announcement_reasons = list(review_queue.reason_codes)
+        elif review_queue.status == "ready":
+            if (
+                observation.candidate_plan_id is None
+                or review_queue.candidate_plan_id
+                != observation.candidate_plan_id
+            ):
+                announcement_status = "unverified"
+                announcement_reasons = [
+                    "leader_announcement_candidate_plan_mismatch",
+                ]
+            else:
+                announcement_status = "available"
+                announcement_reasons = list(review_queue.reason_codes)
+                announcement_contracts = [CNINFO_SOURCE_CONTRACT_ID]
+                announcement_covered_count = review_queue.candidate_count
+
+        return (
+            RadarLeaderSourceSummaryItem(
+                domain="quote",
+                status=observation_status,
+                scope="current_observation_candidates",
+                sourceContractIds=quote_contracts,
+                asOf=observation.as_of,
+                sourceTime=min(
+                    (item.source_time for item in observation.items),
+                    default=None,
+                ),
+                fetchedAt=observation.published_at,
+                coveredCount=(len(observation.items) if quote_contracts else 0),
+                expectedCount=observation.candidate_count,
+                reasonCodes=observation_reason,
+            ),
+            RadarLeaderSourceSummaryItem(
+                domain="sector",
+                status=observation_status,
+                scope="current_observation_candidates",
+                sourceContractIds=sector_contracts,
+                asOf=observation.as_of,
+                sourceTime=None,
+                fetchedAt=observation.published_at,
+                coveredCount=(len(observation.items) if sector_contracts else 0),
+                expectedCount=observation.candidate_count,
+                reasonCodes=observation_reason,
+            ),
+            RadarLeaderSourceSummaryItem(
+                domain="business",
+                status=business_status,
+                scope="current_public_tiers",
+                sourceContractIds=sorted(business_contracts),
+                asOf=board_as_of,
+                sourceTime=None,
+                fetchedAt=board_fetched_at,
+                coveredCount=business_ready_count,
+                expectedCount=(len(board_entries) if board_entries else None),
+                reasonCodes=business_reasons,
+            ),
+            RadarLeaderSourceSummaryItem(
+                domain="announcement",
+                status=announcement_status,
+                scope="current_observation_candidates",
+                sourceContractIds=announcement_contracts,
+                asOf=review_queue.as_of,
+                sourceTime=None,
+                fetchedAt=review_queue.as_of,
+                coveredCount=announcement_covered_count,
+                expectedCount=(
+                    review_queue.candidate_count
+                    if review_queue.status == "ready"
+                    else None
+                ),
+                reasonCodes=announcement_reasons,
+            ),
         )
 
     def _leader_review_queue(self) -> RadarLeaderReviewQueue:
@@ -770,11 +956,10 @@ class RadarReadService:
                 status="failed",
                 reasonCodes=["d2_review_completeness_unverified"],
             )
-        reason_codes = ["d2_review_queue_ready"]
-        if int(summary.get("reviewVersionCount", 0)) < 2:
-            reason_codes.append("d8_review_versions_missing")
+        reason_codes = ["official_risk_scan_ready"]
         return RadarLeaderReviewQueue(
             status="ready",
+            semanticCoverageStatus="partial",
             reviewBatchId=summary["reviewBatchId"],
             candidatePlanId=summary["candidatePlanId"],
             asOf=summary["asOf"],
@@ -813,45 +998,270 @@ class RadarReadService:
             formalUsable=False,
         )
 
+    def _leader_observation(
+        self,
+        *,
+        now: datetime,
+        is_trading: bool,
+    ) -> RadarLeaderObservation:
+        stale_after_seconds = (
+            self.settings.stock_scan_interval_seconds * 2 + 30
+        )
+        if (
+            not self.settings.enabled
+            or not self.settings.shadow_mode
+            or not self.settings.leader_stage6_enabled
+        ):
+            return RadarLeaderObservation(
+                status="not_enabled",
+                quality="unavailable",
+                displayAllowed=False,
+                coverageScope=LEADER_OBSERVATION_COVERAGE_SCOPE,
+                freshness=RadarFreshness(
+                    ageSeconds=None,
+                    staleAfterSeconds=stale_after_seconds,
+                    isStale=False,
+                    reasonCodes=["stage_not_enabled"],
+                ),
+                reasonCodes=["stage_not_enabled"],
+            )
+        if self.leader_observation_loader is None:
+            result = LeaderObservationStoreReadResult(
+                status="not_ready",
+                reasons=("leader_observation_snapshot_missing",),
+            )
+        else:
+            try:
+                result = self.leader_observation_loader()
+            except Exception:
+                result = LeaderObservationStoreReadResult(
+                    status="failed",
+                    reasons=("leader_observation_read_failed",),
+                )
+        if (
+            not isinstance(result, LeaderObservationStoreReadResult)
+            or result.status != "available"
+            or result.snapshot is None
+        ):
+            status = (
+                "failed"
+                if getattr(result, "status", None) == "failed"
+                else "not_ready"
+            )
+            reasons = list(getattr(result, "reasons", ()) or (
+                "leader_observation_snapshot_missing",
+            ))
+            return RadarLeaderObservation(
+                status=status,
+                quality="unavailable",
+                displayAllowed=False,
+                coverageScope=LEADER_OBSERVATION_COVERAGE_SCOPE,
+                freshness=RadarFreshness(
+                    ageSeconds=None,
+                    staleAfterSeconds=stale_after_seconds,
+                    isStale=False,
+                    reasonCodes=reasons,
+                ),
+                reasonCodes=reasons,
+            )
+        snapshot = result.snapshot
+        if (snapshot.as_of - now).total_seconds() > 5:
+            reasons = ["leader_observation_from_future"]
+            return RadarLeaderObservation(
+                status="failed",
+                quality="unavailable",
+                displayAllowed=False,
+                coverageScope=LEADER_OBSERVATION_COVERAGE_SCOPE,
+                freshness=RadarFreshness(
+                    ageSeconds=None,
+                    staleAfterSeconds=stale_after_seconds,
+                    isStale=False,
+                    reasonCodes=reasons,
+                ),
+                reasonCodes=reasons,
+            )
+        freshness = self._freshness(
+            last_success=RadarLastSuccess(
+                radarRunId=snapshot.radar_run_id,
+                asOf=snapshot.as_of,
+                sourceTime=max(
+                    (item.source_time for item in snapshot.items),
+                    default=None,
+                ),
+                fetchedAt=snapshot.published_at,
+            ),
+            now=now,
+            scan_interval_seconds=self.settings.stock_scan_interval_seconds,
+            is_trading=is_trading,
+        )
+        status = "stale" if freshness.is_stale else (
+            "available" if snapshot.items else "empty"
+        )
+        reasons = ["leader_observation_only"]
+        if freshness.is_stale:
+            reasons.append("leader_observation_stale")
+        return RadarLeaderObservation(
+            status=status,
+            quality="partial",
+            displayAllowed=status in {"available", "stale"},
+            radarRunId=snapshot.radar_run_id,
+            candidatePlanId=snapshot.candidate_plan_id,
+            asOf=snapshot.as_of,
+            publishedAt=snapshot.published_at,
+            scannedCount=snapshot.scanned_count,
+            mappedCount=snapshot.mapped_count,
+            candidateCount=snapshot.candidate_count,
+            coverageScope=snapshot.coverage_scope,
+            freshness=freshness,
+            items=[RadarLeaderObservationItem(
+                symbol=item.symbol,
+                name=item.name,
+                industryCode=item.industry_code,
+                industryName=item.industry_name,
+                withinIndustryRank=item.within_industry_rank,
+                price=item.price,
+                changePercent=item.change_percent,
+                sourceTime=item.source_time,
+                quoteSourceContractId=item.quote_source_contract_id,
+                sectorSourceContractId=item.sector_source_contract_id,
+            ) for item in snapshot.items],
+            reasonCodes=reasons,
+        )
+
+    def _observation_only_leader_module(
+        self,
+        observation: RadarLeaderObservation,
+        *,
+        extra_reasons: Sequence[str] = (),
+    ) -> RadarLeaderModule:
+        reasons = list(dict.fromkeys((
+            *observation.reason_codes,
+            *extra_reasons,
+        )))
+        coverage = (
+            observation.mapped_count / observation.scanned_count
+            if observation.scanned_count
+            else 0.0
+        )
+        review_queue = self._leader_review_queue()
+        return RadarLeaderModule(
+            state=observation.status,
+            quality=observation.quality,
+            usingLastSuccess=observation.status == "stale",
+            lastAttempt=None,
+            lastSuccess=None,
+            freshness=observation.freshness,
+            sources=[],
+            sourceSummary=self._leader_source_summary(
+                observation,
+                review_queue=review_queue,
+            ),
+            summary=RadarLeaderSummary(
+                eligibleCount=observation.candidate_count,
+                preliminaryCount=0,
+                candidateCount=0,
+                confirmedCount=0,
+                removedCount=0,
+                overflowCounts={
+                    "preliminary": 0,
+                    "candidate": 0,
+                    "confirmed": 0,
+                },
+                coverage=coverage,
+                formalUsableCount=0,
+                ruleVersion=None,
+                reasonCodes=reasons,
+            ),
+            observation=observation,
+            reviewQueue=review_queue,
+            preliminary=[],
+            candidates=[],
+            confirmed=[],
+            reasonCodes=reasons,
+        )
+
+    def _leader_failure_or_observation(
+        self,
+        observation: RadarLeaderObservation,
+        *,
+        state: str,
+        reason_code: str,
+    ) -> RadarLeaderModule:
+        if observation.status in {"available", "empty", "stale"}:
+            return self._observation_only_leader_module(
+                observation,
+                extra_reasons=[reason_code],
+            )
+        return self._empty_leader_module(
+            state=state,
+            reason_codes=[reason_code],
+            observation=observation,
+        )
+
     def _leader_module(
         self,
         *,
         now: datetime,
         is_trading: bool,
     ) -> RadarLeaderModule:
+        observation = self._leader_observation(
+            now=now,
+            is_trading=is_trading,
+        )
         if not self.settings.leader_stage6_enabled:
             return self._empty_leader_module(
                 state="not_enabled",
                 reason_codes=["stage_not_enabled"],
+                observation=observation,
             )
         if not self.settings.enabled or not self.settings.shadow_mode:
             return self._empty_leader_module(
                 state="not_enabled",
                 reason_codes=["radar_not_enabled"],
+                observation=observation,
             )
         if self.leader_repository is None:
+            if observation.status in {"available", "empty", "stale", "failed"}:
+                return self._observation_only_leader_module(
+                    observation,
+                    extra_reasons=["stage6_storage_not_ready"],
+                )
             return self._empty_leader_module(
                 state="not_ready",
                 reason_codes=["stage6_storage_not_ready"],
+                observation=observation,
             )
         try:
             snapshot = self.leader_repository.get_latest_candidate_snapshot()
         except Exception:
+            if observation.status in {"available", "empty", "stale"}:
+                return self._observation_only_leader_module(
+                    observation,
+                    extra_reasons=["stage6_read_failed"],
+                )
             return self._empty_leader_module(
                 state="failed",
                 reason_codes=["stage6_read_failed"],
+                observation=observation,
             )
         if snapshot is None:
+            if observation.status in {"available", "empty", "stale", "failed"}:
+                return self._observation_only_leader_module(
+                    observation,
+                    extra_reasons=["candidate_snapshot_missing"],
+                )
             return self._empty_leader_module(
                 state="not_ready",
                 reason_codes=["candidate_snapshot_missing"],
+                observation=observation,
             )
         try:
             board = build_leader_board_projection(snapshot)
         except Exception:
-            return self._empty_leader_module(
+            return self._leader_failure_or_observation(
+                observation,
                 state="failed",
-                reason_codes=["stage6_snapshot_invalid"],
+                reason_code="stage6_snapshot_invalid",
             )
         board_entries = (
             *board.preliminary,
@@ -862,9 +1272,10 @@ class RadarReadService:
             entry.formal_usable
             for entry in board_entries
         ):
-            return self._empty_leader_module(
+            return self._leader_failure_or_observation(
+                observation,
                 state="not_ready",
-                reason_codes=["stage6_formal_state_forbidden"],
+                reason_code="stage6_formal_state_forbidden",
             )
         created_at = snapshot.get("createdAt")
         if (
@@ -872,19 +1283,22 @@ class RadarReadService:
             or created_at.tzinfo is None
             or created_at.utcoffset() is None
         ):
-            return self._empty_leader_module(
+            return self._leader_failure_or_observation(
+                observation,
                 state="failed",
-                reason_codes=["stage6_snapshot_invalid"],
+                reason_code="stage6_snapshot_invalid",
             )
         if (board.as_of - now).total_seconds() > 5:
-            return self._empty_leader_module(
+            return self._leader_failure_or_observation(
+                observation,
                 state="failed",
-                reason_codes=["stage6_snapshot_from_future"],
+                reason_code="stage6_snapshot_from_future",
             )
         if created_at < board.as_of:
-            return self._empty_leader_module(
+            return self._leader_failure_or_observation(
+                observation,
                 state="failed",
-                reason_codes=["stage6_snapshot_invalid"],
+                reason_code="stage6_snapshot_invalid",
             )
         reason_codes = list(
             (snapshot.get("reasonCounts") or {}).keys()
@@ -894,12 +1308,21 @@ class RadarReadService:
             float(snapshot.get("coverage", 0.0)) <= 0
             and snapshot_quality != "empty"
         ):
+            if observation.status in {"available", "empty", "stale"}:
+                return self._observation_only_leader_module(
+                    observation,
+                    extra_reasons=(
+                        reason_codes
+                        or ["leader_inputs_unavailable"]
+                    ),
+                )
             return self._empty_leader_module(
                 state="not_ready",
                 reason_codes=(
                     reason_codes
                     or ["leader_inputs_unavailable"]
                 ),
+                observation=observation,
             )
 
         last_success = RadarLeaderSnapshot(
@@ -932,9 +1355,18 @@ class RadarReadService:
             for entry in board.confirmed
         ]
         if snapshot_quality == "unavailable":
+            if observation.status in {"available", "empty", "stale"}:
+                return self._observation_only_leader_module(
+                    observation,
+                    extra_reasons=(
+                        reason_codes
+                        or ["leader_rule_not_ready"]
+                    ),
+                )
             return self._empty_leader_module(
                 state="not_ready",
                 reason_codes=reason_codes or ["leader_rule_not_ready"],
+                observation=observation,
             )
         if freshness.is_stale:
             state = "stale"
@@ -951,6 +1383,7 @@ class RadarReadService:
             leader_state.value: count
             for leader_state, count in board.overflow_counts
         }
+        review_queue = self._leader_review_queue()
         return RadarLeaderModule(
             state=state,
             quality=quality,
@@ -959,6 +1392,13 @@ class RadarReadService:
             lastSuccess=last_success,
             freshness=freshness,
             sources=[],
+            sourceSummary=self._leader_source_summary(
+                observation,
+                review_queue=review_queue,
+                board_entries=board_entries,
+                board_as_of=board.as_of,
+                board_fetched_at=created_at,
+            ),
             summary=RadarLeaderSummary(
                 eligibleCount=int(snapshot.get("eligibleCount", 0)),
                 preliminaryCount=len(preliminary),
@@ -971,7 +1411,8 @@ class RadarReadService:
                 ruleVersion=board.rule_version,
                 reasonCodes=reason_codes,
             ),
-            reviewQueue=self._leader_review_queue(),
+            observation=observation,
+            reviewQueue=review_queue,
             preliminary=preliminary,
             candidates=candidates,
             confirmed=confirmed,
@@ -1066,14 +1507,7 @@ class RadarReadService:
         }
         status = status_by_module.get(module.state)
         if module.state == "not_ready":
-            status = (
-                "no_snapshot"
-                if any(code in {
-                    "candidate_snapshot_missing",
-                    "stage6_storage_not_ready",
-                } for code in module.reason_codes)
-                else "failed"
-            )
+            status = "no_snapshot"
         leader = next(
             (
                 item
@@ -1086,11 +1520,29 @@ class RadarReadService:
             ),
             None,
         )
+        observation_item = next(
+            (
+                item
+                for item in module.observation.items
+                if item.symbol == normalized_symbol
+            ),
+            None,
+        )
         if status is None:
-            status = "matched" if leader is not None else "not_listed"
+            status = (
+                "matched"
+                if leader is not None
+                else "observed"
+                if observation_item is not None
+                else "not_listed"
+            )
         reason_codes = list(module.reason_codes)
         if status == "not_listed":
-            reason_codes = ["stock_not_in_public_tiers"]
+            reason_codes = [
+                "stock_not_in_observation_candidates"
+                if module.observation.display_allowed
+                else "stock_not_in_public_tiers"
+            ]
 
         return RadarStockResponse(
             checkedAt=now,
@@ -1100,6 +1552,7 @@ class RadarReadService:
             snapshot=module.last_success,
             freshness=module.freshness,
             leader=leader,
+            observationItem=observation_item,
             reasonCodes=reason_codes,
         )
 

@@ -54,6 +54,12 @@ class IndustryRecordStatus(str, Enum):
     SOURCE_FAILED = "source_failed"
 
 
+class IndustryRecordProvenance(str, Enum):
+    CAPCO_RELEASE = "capco_release"
+    BSE_EXACT_CATEGORY_CROSSWALK = "bse_exact_category_crosswalk"
+    CNINFO_CAPCO_CURRENT_CROSSWALK = "cninfo_capco_current_crosswalk"
+
+
 class IndustryMiddleClassStatus(str, Enum):
     SOURCE_NOT_PUBLISHED = "source_not_published"
 
@@ -103,6 +109,11 @@ class IndexEvidenceStatus(str, Enum):
 class EvidenceVersionKind(str, Enum):
     OFFICIAL = "official"
     INTERNAL_EVIDENCE = "internal_evidence"
+
+
+class EvidenceTemporalBasis(str, Enum):
+    EXACT_EFFECTIVE_INTERVAL = "exact_effective_interval"
+    CURRENT_OFFICIAL_OBSERVATION = "current_official_observation"
 
 
 class SourceIssue(ContractModel):
@@ -360,8 +371,28 @@ class IndustryClassificationRecord(ContractModel):
         alias="middleClassStatus",
     )
     record_status: IndustryRecordStatus = Field(alias="recordStatus")
+    record_provenance: IndustryRecordProvenance = Field(
+        default=IndustryRecordProvenance.CAPCO_RELEASE,
+        alias="recordProvenance",
+    )
+    knowledge_effective_from: Optional[datetime] = Field(
+        default=None,
+        alias="knowledgeEffectiveFrom",
+    )
+    evidence_url: Optional[str] = Field(
+        default=None,
+        alias="evidenceUrl",
+        min_length=1,
+    )
     issue_codes: Tuple[str, ...] = Field(default=(), alias="issueCodes")
     source_fields: Dict[str, Any] = Field(default_factory=dict, alias="sourceFields")
+
+    @field_validator("knowledge_effective_from")
+    @classmethod
+    def require_aware_knowledge_time(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("record knowledgeEffectiveFrom必须包含时区")
+        return value
 
     @model_validator(mode="after")
     def validate_levels_and_identity(self):
@@ -389,6 +420,15 @@ class IndustryClassificationRecord(ContractModel):
             and self.identity_status == IndustryIdentityStatus.UNRESOLVED
         ):
             raise ValueError("accepted记录必须具有已解析身份")
+        if self.record_provenance != IndustryRecordProvenance.CAPCO_RELEASE:
+            if (
+                self.identity_status != IndustryIdentityStatus.EXACT
+                or self.record_status != IndustryRecordStatus.ACCEPTED
+                or self.security_identity != self.source_symbol
+            ):
+                raise ValueError("官方行业补充记录必须是精确当前证券身份")
+            if self.knowledge_effective_from is None or self.evidence_url is None:
+                raise ValueError("官方行业补充记录必须保留可知时间和证据地址")
         return self
 
 
@@ -414,6 +454,11 @@ class IndustryClassificationCompleteness(ContractModel):
     mapped_count: int = Field(alias="mappedCount", ge=0)
     unconfirmed_count: int = Field(alias="unconfirmedCount", ge=0)
     excluded_source_count: int = Field(alias="excludedSourceCount", ge=0)
+    supplemental_record_count: int = Field(
+        default=0,
+        alias="supplementalRecordCount",
+        ge=0,
+    )
     mapping_coverage: Optional[float] = Field(
         default=None,
         alias="mappingCoverage",
@@ -444,6 +489,8 @@ class IndustryClassificationCompleteness(ContractModel):
             raise ValueError("唯一来源代码数不能大于来源记录数")
         if self.excluded_source_count > self.source_record_count:
             raise ValueError("排除来源记录数不能大于来源记录数")
+        if self.supplemental_record_count > self.mapped_count:
+            raise ValueError("补充行业记录数不能大于已映射数")
         if self.mapped_count > self.current_master_count:
             raise ValueError("映射数量不能大于当前主档数量")
         if self.mapped_count + self.unconfirmed_count != self.current_master_count:
@@ -474,8 +521,17 @@ class IndustryClassificationSnapshot(ContractModel):
 
     @model_validator(mode="after")
     def validate_snapshot_counts(self):
-        if self.release is not None and len(self.records) != self.release.source_record_count:
-            raise ValueError("行业记录数必须与发布版本来源记录数一致")
+        supplemental_count = sum(
+            record.record_provenance
+            != IndustryRecordProvenance.CAPCO_RELEASE
+            for record in self.records
+        )
+        if supplemental_count != self.completeness.supplemental_record_count:
+            raise ValueError("行业补充记录数与完整度不一致")
+        if self.release is not None and len(self.records) != (
+            self.release.source_record_count + supplemental_count
+        ):
+            raise ValueError("行业记录数必须等于发布版本原始记录与受控补充记录之和")
         if len(self.current_master_gaps) != self.completeness.unconfirmed_count:
             raise ValueError("当前主档缺口数必须与unconfirmedCount一致")
         if self.status != SourceStatus.FAILED and self.release is None:
@@ -1475,6 +1531,10 @@ class IndexMethodologyEvidence(ContractModel):
         min_length=1,
     )
     version_kind: EvidenceVersionKind = Field(alias="versionKind")
+    temporal_basis: EvidenceTemporalBasis = Field(
+        default=EvidenceTemporalBasis.EXACT_EFFECTIVE_INTERVAL,
+        alias="temporalBasis",
+    )
     published_at: Optional[datetime] = Field(
         default=None,
         alias="publishedAt",
@@ -1569,6 +1629,10 @@ class IndexConstituentSetEvidence(ContractModel):
     index_provider: str = Field(alias="indexProvider", min_length=1)
     index_code: str = Field(alias="indexCode", min_length=1)
     index_name: str = Field(alias="indexName", min_length=1)
+    temporal_basis: EvidenceTemporalBasis = Field(
+        default=EvidenceTemporalBasis.EXACT_EFFECTIVE_INTERVAL,
+        alias="temporalBasis",
+    )
     announced_at: Optional[datetime] = Field(
         default=None,
         alias="announcedAt",

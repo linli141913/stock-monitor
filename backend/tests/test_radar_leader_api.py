@@ -11,6 +11,11 @@ from radar.api import _service
 from radar.api import router as radar_router
 from radar.config import RadarSettings
 from radar.leader_repository import LeaderRepository
+from radar.leader_observation_store import (
+    LeaderObservationItem,
+    LeaderObservationSnapshot,
+    LeaderObservationStoreReadResult,
+)
 from radar.migrations import (
     MigrationDriftError,
     STAGE5_RADAR_MIGRATIONS,
@@ -99,6 +104,15 @@ class FakeRiskReviewRepository:
         }
 
 
+class MatchingRiskReviewRepository(FakeRiskReviewRepository):
+    def get_latest_review_batch_summary(self):
+        summary = super().get_latest_review_batch_summary()
+        summary["candidatePlanId"] = (
+            "radar-leader-runtime-candidate-plan-v1:" + "b" * 64
+        )
+        return summary
+
+
 def market_status_provider(market, now):
     return (
         market_calendar.MarketStatus("trading", "交易中"),
@@ -116,6 +130,7 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
         settings,
         leader_repository=None,
         risk_review_repository=None,
+        leader_observation_loader=None,
     ):
         arguments = {
             "settings": settings,
@@ -126,6 +141,10 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
             arguments["leader_repository"] = leader_repository
         if risk_review_repository is not None:
             arguments["risk_review_repository"] = risk_review_repository
+        if leader_observation_loader is not None:
+            arguments["leader_observation_loader"] = (
+                leader_observation_loader
+            )
         try:
             return RadarReadService(
                 UnusedRadarRepository(),
@@ -133,6 +152,43 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
             )
         except TypeError as exc:
             self.fail(f"阶段6G仓储注入尚未实现: {exc}")
+
+    @staticmethod
+    def observation_result(*, as_of=None, status="available"):
+        as_of = as_of or (NOW - timedelta(seconds=30))
+        if status != "available":
+            return LeaderObservationStoreReadResult(
+                status=status,
+                reasons=(f"leader_observation_{status}",),
+            )
+        snapshot = LeaderObservationSnapshot(
+            radar_run_id="market-run-observation",
+            candidate_plan_id=(
+                "radar-leader-runtime-candidate-plan-v1:" + "b" * 64
+            ),
+            as_of=as_of,
+            published_at=max(as_of, NOW - timedelta(seconds=20)),
+            scanned_count=5157,
+            mapped_count=383,
+            items=(LeaderObservationItem(
+                symbol="000725",
+                name="京东方A",
+                industry_code="C39",
+                industry_name="计算机、通信和其他电子设备制造业",
+                within_industry_rank=2,
+                price=4.21,
+                change_percent=2.43,
+                source_time=as_of,
+                quote_source_contract_id="tencent-full-market-quote-v1:batch-1",
+                sector_source_contract_id="radar-sector-aggregate-v1:sector:C39",
+            ),),
+        )
+        return LeaderObservationStoreReadResult(
+            status="available",
+            reasons=(),
+            snapshot=snapshot,
+            evidence_sha256="c" * 64,
+        )
 
     def build_payload(self, settings):
         service = self.service(settings)
@@ -359,6 +415,205 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
             payload["module"]["reasonCodes"],
         )
 
+    def test_real_observation_is_visible_without_formal_snapshot_or_approval(self):
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_observation_loader=lambda: self.observation_result(),
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        module = payload["module"]
+        self.assertEqual(module["state"], "available")
+        self.assertEqual(module["quality"], "partial")
+        self.assertEqual(module["summary"]["eligibleCount"], 1)
+        self.assertEqual(module["preliminary"], [])
+        self.assertEqual(module["candidates"], [])
+        self.assertEqual(module["confirmed"], [])
+        self.assertEqual(module["observation"]["status"], "available")
+        self.assertTrue(module["observation"]["displayAllowed"])
+        self.assertFalse(module["observation"]["humanApprovalRequired"])
+        self.assertFalse(module["observation"]["formalUsable"])
+        self.assertEqual(
+            module["observation"]["items"][0]["symbol"],
+            "000725",
+        )
+        self.assertNotIn("score", module["observation"]["items"][0])
+
+    def test_leader_source_summary_uses_only_real_bound_observation_sources(self):
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            risk_review_repository=MatchingRiskReviewRepository(),
+            leader_observation_loader=lambda: self.observation_result(),
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        module = payload["module"]
+        summary = {
+            item["domain"]: item
+            for item in module["sourceSummary"]
+        }
+        self.assertEqual(module["sources"], [])
+        self.assertEqual(set(summary), {
+            "quote", "sector", "business", "announcement",
+        })
+        self.assertEqual(summary["quote"]["status"], "available")
+        self.assertEqual(summary["quote"]["sourceContractIds"], [
+            "tencent-full-market-quote-v1:batch-1",
+        ])
+        self.assertEqual(summary["quote"]["coveredCount"], 1)
+        self.assertEqual(summary["quote"]["expectedCount"], 1)
+        self.assertEqual(summary["sector"]["status"], "available")
+        self.assertEqual(summary["sector"]["sourceContractIds"], [
+            "radar-sector-aggregate-v1:sector:C39",
+        ])
+        self.assertEqual(summary["business"]["status"], "missing")
+        self.assertIn(
+            "leader_business_source_summary_missing",
+            summary["business"]["reasonCodes"],
+        )
+        self.assertEqual(summary["announcement"]["status"], "available")
+        self.assertEqual(summary["announcement"]["coveredCount"], 385)
+        self.assertEqual(
+            summary["announcement"]["scope"],
+            "current_observation_candidates",
+        )
+
+    def test_leader_announcement_source_is_unverified_when_plan_does_not_match(self):
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            risk_review_repository=FakeRiskReviewRepository(),
+            leader_observation_loader=lambda: self.observation_result(),
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        announcement = next(
+            item for item in payload["module"]["sourceSummary"]
+            if item["domain"] == "announcement"
+        )
+        self.assertEqual(announcement["status"], "unverified")
+        self.assertEqual(announcement["coveredCount"], 0)
+        self.assertIn(
+            "leader_announcement_candidate_plan_mismatch",
+            announcement["reasonCodes"],
+        )
+
+    def test_observation_stale_and_failed_states_are_explicit(self):
+        settings = RadarSettings(
+            enabled=True,
+            shadow_mode=True,
+            leader_stage6_enabled=True,
+        )
+        stale = self.service(
+            settings,
+            leader_observation_loader=lambda: self.observation_result(
+                as_of=NOW - timedelta(seconds=391),
+            ),
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+        failed = self.service(
+            settings,
+            leader_observation_loader=lambda: self.observation_result(
+                status="failed",
+            ),
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(stale["module"]["state"], "stale")
+        self.assertTrue(stale["module"]["observation"]["displayAllowed"])
+        self.assertTrue(stale["module"]["observation"]["freshness"]["isStale"])
+        self.assertEqual(failed["module"]["state"], "failed")
+        self.assertFalse(failed["module"]["observation"]["displayAllowed"])
+        self.assertIn(
+            "leader_observation_failed",
+            failed["module"]["reasonCodes"],
+        )
+
+    def test_successful_empty_observation_is_not_a_source_failure(self):
+        snapshot = LeaderObservationSnapshot(
+            radar_run_id="market-run-empty",
+            candidate_plan_id="candidate-plan-empty",
+            as_of=NOW - timedelta(seconds=30),
+            published_at=NOW - timedelta(seconds=20),
+            scanned_count=5157,
+            mapped_count=0,
+            items=(),
+        )
+        result = LeaderObservationStoreReadResult(
+            status="available",
+            reasons=(),
+            snapshot=snapshot,
+            evidence_sha256="d" * 64,
+        )
+
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_observation_loader=lambda: result,
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "empty")
+        self.assertEqual(payload["module"]["observation"]["status"], "empty")
+        self.assertEqual(payload["module"]["observation"]["items"], [])
+
+    def test_observation_from_future_fails_closed(self):
+        result = self.observation_result(as_of=NOW + timedelta(seconds=6))
+
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_observation_loader=lambda: result,
+        ).build_leaders().model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["module"]["state"], "failed")
+        self.assertFalse(payload["module"]["observation"]["displayAllowed"])
+        self.assertIn(
+            "leader_observation_from_future",
+            payload["module"]["reasonCodes"],
+        )
+
+    def test_stock_radar_reports_real_observation_without_leader_rating(self):
+        service = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_observation_loader=lambda: self.observation_result(),
+        )
+
+        matched = service.build_stock("000725").model_dump(
+            mode="json",
+            by_alias=True,
+        )
+        absent = service.build_stock("000001").model_dump(
+            mode="json",
+            by_alias=True,
+        )
+
+        self.assertEqual(matched["status"], "observed")
+        self.assertIsNone(matched["leader"])
+        self.assertEqual(matched["observationItem"]["symbol"], "000725")
+        self.assertNotIn("score", matched["observationItem"])
+        self.assertEqual(absent["status"], "not_listed")
+        self.assertIsNone(absent["observationItem"])
+        self.assertEqual(
+            absent["reasonCodes"],
+            ["stock_not_in_observation_candidates"],
+        )
+
     def test_stock_radar_matches_latest_public_leader_tier(self):
         service = self.service(
             RadarSettings(
@@ -425,6 +680,27 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
         self.assertIsNone(payload["snapshot"])
         self.assertEqual(payload["reasonCodes"], ["candidate_snapshot_missing"])
 
+    def test_stock_radar_reports_waiting_when_snapshot_is_not_ready(self):
+        snapshot = self.snapshot(
+            as_of=NOW - timedelta(seconds=30),
+            entries=[self.entry("000725", "preliminary", 88)],
+            quality="unavailable",
+        )
+        snapshot["reasonCounts"] = {"data_status_missing": 1}
+
+        payload = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(snapshot),
+        ).build_stock("000725").model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(payload["status"], "no_snapshot")
+        self.assertIsNone(payload["snapshot"])
+        self.assertEqual(payload["reasonCodes"], ["data_status_missing"])
+
     def test_stock_radar_preserves_stale_and_failed_semantics(self):
         stale = self.service(
             RadarSettings(
@@ -489,7 +765,21 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
         self.assertEqual(module["reviewQueue"]["documentCount"], 1919)
         self.assertEqual(module["reviewQueue"]["reviewVersionCount"], 0)
         self.assertFalse(module["reviewQueue"]["formalUsable"])
-        self.assertIn("d8_review_versions_missing", module["reviewQueue"]["reasonCodes"])
+        self.assertFalse(module["reviewQueue"]["humanApprovalRequired"])
+        self.assertEqual(
+            module["reviewQueue"]["purpose"],
+            "official_announcement_scan",
+        )
+        self.assertEqual(
+            module["reviewQueue"]["semanticCoverageStatus"],
+            "partial",
+        )
+        self.assertIn(
+            "关键词发现不等于完整语义审查",
+            module["reviewQueue"]["coverageStatement"],
+        )
+        self.assertIn("official_risk_scan_ready", module["reviewQueue"]["reasonCodes"])
+        self.assertNotIn("d8_review_versions_missing", module["reviewQueue"]["reasonCodes"])
 
         queue = service.build_leader_review_queue(
             limit=25,
@@ -592,6 +882,37 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["module"]["preliminary"], [])
 
+    def test_real_observation_survives_malformed_formal_snapshot(self):
+        snapshot = self.snapshot(
+            as_of=NOW - timedelta(seconds=30),
+            entries=[self.entry("000001", "preliminary", 95)],
+        )
+        snapshot.pop("createdAt")
+        service = self.service(
+            RadarSettings(
+                enabled=True,
+                shadow_mode=True,
+                leader_stage6_enabled=True,
+            ),
+            leader_repository=FakeLeaderRepository(snapshot),
+            leader_observation_loader=lambda: self.observation_result(),
+        )
+
+        payload = service.build_leaders().model_dump(
+            mode="json",
+            by_alias=True,
+        )
+
+        self.assertEqual(payload["module"]["state"], "available")
+        self.assertEqual(
+            payload["module"]["observation"]["items"][0]["symbol"],
+            "000725",
+        )
+        self.assertIn(
+            "stage6_snapshot_invalid",
+            payload["module"]["reasonCodes"],
+        )
+
     def test_overview_uses_leader_module_only_when_explicitly_enabled(self):
         as_of = NOW - timedelta(seconds=30)
         service = self.service(
@@ -636,6 +957,12 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
                     shadow_mode=True,
                     leader_stage6_enabled=True,
                 ),
+            ), patch(
+                "radar.api.load_latest_leader_observation",
+                return_value=LeaderObservationStoreReadResult(
+                    status="not_ready",
+                    reasons=("leader_observation_snapshot_missing",),
+                ),
             ):
                 try:
                     service = _service(connection)
@@ -665,6 +992,12 @@ class RadarLeaderReadServiceTests(unittest.TestCase):
                     enabled=True,
                     shadow_mode=True,
                     leader_stage6_enabled=True,
+                ),
+            ), patch(
+                "radar.api.load_latest_leader_observation",
+                return_value=LeaderObservationStoreReadResult(
+                    status="not_ready",
+                    reasons=("leader_observation_snapshot_missing",),
                 ),
             ):
                 try:

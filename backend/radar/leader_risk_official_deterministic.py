@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from enum import Enum
 import hashlib
@@ -77,6 +77,9 @@ LEADER_OFFICIAL_DETERMINISTIC_RISK_FROZEN_CONTRACT_ID = (
 LEADER_OFFICIAL_DETERMINISTIC_RISK_SOURCE_CONTRACT_ID = (
     "radar-leader-official-deterministic-risk-source-v1"
 )
+LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID = (
+    "radar-leader-official-risk-lifecycle-v1"
+)
 _OFFICIAL_DETERMINISTIC_RISK_PRODUCER_TOKEN = object()
 
 
@@ -117,6 +120,10 @@ class LeaderOfficialDeterministicRiskProjection:
     content_fetched_at: Tuple[datetime, ...] = ()
     deterministic_fact_ids: Tuple[str, ...] = ()
     manual_fact_ids: Tuple[str, ...] = ()
+    lifecycle_contract_id: Optional[str] = None
+    open_event_carry_forward_complete: bool = False
+    correction_links_complete: bool = False
+    resolution_links_complete: bool = False
     source_contract_ids: Tuple[str, ...] = (
         CNINFO_SOURCE_CONTRACT_ID,
         CNINFO_ISSUER_SCOPE_CONTRACT_ID,
@@ -132,11 +139,28 @@ class LeaderOfficialDeterministicRiskProjection:
 
     @property
     def formal_gate_gaps(self) -> Tuple[str, ...]:
-        return (
-            "risk_official_open_event_carry_forward_not_proven",
-            "risk_official_correction_links_not_proven",
+        return tuple((
+            *(
+                ()
+                if self.open_event_carry_forward_complete
+                else (
+                    "risk_official_open_event_"
+                    "carry_forward_not_proven",
+                )
+            ),
+            *(
+                ()
+                if self.correction_links_complete
+                else ("risk_official_correction_links_not_proven",)
+            ),
+            *(
+                ()
+                if self.resolution_links_complete
+                else ("risk_official_resolution_links_not_proven",)
+            ),
+            "risk_official_formal_coverage_not_proven",
             "risk_official_formal_gate_disabled",
-        )
+        ))
 
     def to_evidence(self) -> Mapping[str, object]:
         return {
@@ -167,6 +191,19 @@ class LeaderOfficialDeterministicRiskProjection:
             ],
             "deterministicFactIds": list(self.deterministic_fact_ids),
             "manualFactIds": [],
+            "lifecycle": {
+                "contractId": self.lifecycle_contract_id,
+                "openEventCarryForwardComplete": (
+                    self.open_event_carry_forward_complete
+                ),
+                "correctionLinksComplete": (
+                    self.correction_links_complete
+                ),
+                "resolutionLinksComplete": (
+                    self.resolution_links_complete
+                ),
+                "formalCoverageComplete": False,
+            },
             "sourceContractIds": list(self.source_contract_ids),
             "formalGateGaps": list(self.formal_gate_gaps),
             "gate": {
@@ -195,6 +232,7 @@ class LeaderOfficialDeterministicRiskBatchResult:
     source_time: Optional[datetime] = None
     fetched_at: Optional[datetime] = None
     reasons: Tuple[str, ...] = ()
+    lifecycle_contract_id: Optional[str] = None
     contract_id: str = LEADER_OFFICIAL_DETERMINISTIC_RISK_CONTRACT_ID
     risk_filter_passed: bool = False
     formal_score_ready: bool = False
@@ -226,6 +264,7 @@ class LeaderOfficialDeterministicRiskBatchResult:
             "candidateCount": self.candidate_count,
             "readyCount": self.ready_count,
             "reasons": list(self.reasons),
+            "lifecycleContractId": self.lifecycle_contract_id,
             "items": [
                 {
                     **item.to_evidence(),
@@ -291,6 +330,10 @@ def _projection_payload(
     documents: Sequence[OfficialRiskDocumentMetadata],
     contents: Sequence[OfficialRiskDocumentContentResult],
     facts: Sequence[RiskDocumentFact],
+    lifecycle_contract_id: Optional[str] = None,
+    open_event_carry_forward_complete: bool = False,
+    correction_links_complete: bool = False,
+    resolution_links_complete: bool = False,
 ) -> Mapping[str, object]:
     return {
         "symbol": symbol,
@@ -318,6 +361,12 @@ def _projection_payload(
             value.fetched_at.astimezone(UTC).isoformat() for value in contents
         ],
         "deterministicFactIds": [value.fact_id for value in facts],
+        "lifecycleContractId": lifecycle_contract_id,
+        "openEventCarryForwardComplete": (
+            open_event_carry_forward_complete
+        ),
+        "correctionLinksComplete": correction_links_complete,
+        "resolutionLinksComplete": resolution_links_complete,
     }
 
 
@@ -331,6 +380,10 @@ def _build_projection(
     documents: Sequence[OfficialRiskDocumentMetadata] = (),
     contents: Sequence[OfficialRiskDocumentContentResult] = (),
     facts: Sequence[RiskDocumentFact] = (),
+    lifecycle_contract_id: Optional[str] = None,
+    open_event_carry_forward_complete: bool = False,
+    correction_links_complete: bool = False,
+    resolution_links_complete: bool = False,
 ) -> LeaderOfficialDeterministicRiskProjection:
     payload = _projection_payload(
         symbol=symbol,
@@ -341,6 +394,12 @@ def _build_projection(
         documents=documents,
         contents=contents,
         facts=facts,
+        lifecycle_contract_id=lifecycle_contract_id,
+        open_event_carry_forward_complete=(
+            open_event_carry_forward_complete
+        ),
+        correction_links_complete=correction_links_complete,
+        resolution_links_complete=resolution_links_complete,
     )
     return LeaderOfficialDeterministicRiskProjection(
         projection_id=_projection_identity(payload),
@@ -369,6 +428,12 @@ def _build_projection(
             value.fetched_at.astimezone(UTC) for value in contents
         ),
         deterministic_fact_ids=tuple(value.fact_id for value in facts),
+        lifecycle_contract_id=lifecycle_contract_id,
+        open_event_carry_forward_complete=(
+            open_event_carry_forward_complete
+        ),
+        correction_links_complete=correction_links_complete,
+        resolution_links_complete=resolution_links_complete,
     )
 
 
@@ -393,6 +458,29 @@ def is_leader_official_deterministic_risk_projection_valid(
         != (
             CNINFO_SOURCE_CONTRACT_ID,
             CNINFO_ISSUER_SCOPE_CONTRACT_ID,
+        )
+        or not isinstance(value.open_event_carry_forward_complete, bool)
+        or not isinstance(value.correction_links_complete, bool)
+        or not isinstance(value.resolution_links_complete, bool)
+        or (
+            value.lifecycle_contract_id is None
+            and any((
+                value.open_event_carry_forward_complete,
+                value.correction_links_complete,
+                value.resolution_links_complete,
+            ))
+        )
+        or (
+            value.lifecycle_contract_id is not None
+            and (
+                value.lifecycle_contract_id
+                != LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID
+                or not all((
+                    value.open_event_carry_forward_complete,
+                    value.correction_links_complete,
+                    value.resolution_links_complete,
+                ))
+            )
         )
         or any((
             value.risk_filter_passed is not False,
@@ -463,6 +551,12 @@ def is_leader_official_deterministic_risk_projection_valid(
         "contentSha256s": list(value.content_sha256s),
         "contentFetchedAt": [item.isoformat() for item in value.content_fetched_at],
         "deterministicFactIds": list(value.deterministic_fact_ids),
+        "lifecycleContractId": value.lifecycle_contract_id,
+        "openEventCarryForwardComplete": (
+            value.open_event_carry_forward_complete
+        ),
+        "correctionLinksComplete": value.correction_links_complete,
+        "resolutionLinksComplete": value.resolution_links_complete,
     }
     return value.projection_id == _projection_identity(payload)
 
@@ -493,6 +587,11 @@ def is_leader_official_deterministic_risk_batch_valid(
         or _aware(value.fetched_at) is None
         or _aware(value.fetched_at) < _aware(value.source_time)
         or value.reasons
+        or (
+            value.lifecycle_contract_id is not None
+            and value.lifecycle_contract_id
+            != LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID
+        )
         or any((
             value.risk_filter_passed is not False,
             value.formal_score_ready is not False,
@@ -530,6 +629,96 @@ def is_leader_official_deterministic_risk_batch_valid(
             candidate_plan.items,
         ))
     )
+
+
+def _bind_leader_official_deterministic_risk_lifecycle(
+    value: LeaderOfficialDeterministicRiskBatchResult,
+    *,
+    candidate_plan: LeaderRuntimeCandidatePlan,
+    completed_symbols: Tuple[str, ...],
+) -> LeaderOfficialDeterministicRiskBatchResult:
+    """内部绑定已经由生命周期生产者验证的完成标志。"""
+
+    if (
+        not is_leader_official_deterministic_risk_batch_valid(
+            value,
+            candidate_plan=candidate_plan,
+        )
+        or not isinstance(completed_symbols, tuple)
+        or len(completed_symbols) != len(set(completed_symbols))
+        or not set(completed_symbols).issubset({
+            item.symbol for item in candidate_plan.items
+        })
+    ):
+        raise ValueError("risk_official_lifecycle_binding_unverified")
+    items = []
+    for item in value.projection_batch.items:
+        projection = item.projection
+        if item.symbol in completed_symbols:
+            payload = {
+                "symbol": projection.symbol,
+                "issuerIdentity": projection.issuer_identity,
+                "asOf": projection.as_of.isoformat(),
+                "radarRunId": projection.radar_run_id,
+                "candidatePlanId": projection.candidate_plan_id,
+                "quoteBatchId": projection.quote_batch_id,
+                "windowFrom": projection.window_from.isoformat(),
+                "windowUntil": projection.window_until.isoformat(),
+                "evidenceKind": projection.evidence_kind.value,
+                "queryCategoryCount": projection.query_category_count,
+                "queryPageCount": projection.query_page_count,
+                "documentIds": list(projection.document_ids),
+                "documentTitles": list(projection.document_titles),
+                "documentCategories": list(projection.document_categories),
+                "documentUrls": list(projection.document_urls),
+                "documentPublishedAt": [
+                    item_.isoformat()
+                    for item_ in projection.document_published_at
+                ],
+                "contentSha256s": list(projection.content_sha256s),
+                "contentFetchedAt": [
+                    item_.isoformat()
+                    for item_ in projection.content_fetched_at
+                ],
+                "deterministicFactIds": list(
+                    projection.deterministic_fact_ids
+                ),
+                "lifecycleContractId": (
+                    LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID
+                ),
+                "openEventCarryForwardComplete": True,
+                "correctionLinksComplete": True,
+                "resolutionLinksComplete": True,
+            }
+            projection = replace(
+                projection,
+                projection_id=_projection_identity(payload),
+                lifecycle_contract_id=(
+                    LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID
+                ),
+                open_event_carry_forward_complete=True,
+                correction_links_complete=True,
+                resolution_links_complete=True,
+            )
+            item = replace(item, projection=projection)
+        items.append(item)
+    projection_batch = replace(
+        value.projection_batch,
+        items=tuple(items),
+    )
+    result = replace(
+        value,
+        projection_batch=projection_batch,
+        lifecycle_contract_id=(
+            LEADER_OFFICIAL_RISK_LIFECYCLE_CONTRACT_ID
+        ),
+    )
+    object.__setattr__(
+        result,
+        "_producer_token",
+        _OFFICIAL_DETERMINISTIC_RISK_PRODUCER_TOKEN,
+    )
+    return result
 
 
 def is_supported_leader_risk_projection(

@@ -238,6 +238,60 @@ class LeaderFormalResearchProductionAcceptanceTests(unittest.TestCase):
             result.reasons,
         )
 
+    def test_fetched_source_clock_skew_uses_same_five_second_boundary_as_delivery(self):
+        provenance = tuple(
+            self.provenance(name=name)
+            for name in (
+                "sector_rule",
+                "history",
+                "business_catalyst",
+                "tradability",
+                "risk",
+            )
+        )
+        within_boundary = (
+            *provenance[:3],
+            replace(
+                provenance[3],
+                source_time=self.plan.as_of + timedelta(seconds=5),
+                fetched_at=self.plan.as_of,
+            ),
+            provenance[4],
+        )
+
+        accepted = build_leader_formal_research_production_acceptance(
+            self.input(provenance=within_boundary)
+        )
+
+        self.assertEqual(
+            accepted.status,
+            LeaderFormalResearchProductionAcceptanceStatus.READY_FOR_REVIEW,
+        )
+
+        beyond_boundary = (
+            *provenance[:3],
+            replace(
+                provenance[3],
+                source_time=(
+                    self.plan.as_of
+                    + timedelta(seconds=5, microseconds=1)
+                ),
+                fetched_at=self.plan.as_of,
+            ),
+            provenance[4],
+        )
+        rejected = build_leader_formal_research_production_acceptance(
+            self.input(provenance=beyond_boundary)
+        )
+        self.assertEqual(
+            rejected.status,
+            LeaderFormalResearchProductionAcceptanceStatus.MISSING,
+        )
+        self.assertIn(
+            "leader_formal_research_production_provenance_time_unverified",
+            rejected.reasons,
+        )
+
     def test_identity_or_coverage_mismatch_is_blocked_without_raw_details(self):
         provenance = tuple(
             self.provenance(name=name)

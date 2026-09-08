@@ -704,6 +704,27 @@ def finalize_leader_tradability_live_acceptance(
                 runtime,
                 provisional_as_of,
             )
+        except ValueError as exc:
+            reason = str(exc)
+            if reason.startswith(
+                "leader_phase6_prepared_binding_unverified:"
+            ):
+                statuses["phase6Prefreeze"] = "source_unverified"
+                return _result(
+                    LeaderTradabilityLiveAcceptanceStatus.SOURCE_UNVERIFIED,
+                    candidate_collection=candidate_collection,
+                    as_of=provisional_as_of,
+                    reasons=(reason,),
+                    source_statuses=statuses,
+                )
+            statuses["phase6Prefreeze"] = "source_failed"
+            return _result(
+                LeaderTradabilityLiveAcceptanceStatus.SOURCE_FAILED,
+                candidate_collection=candidate_collection,
+                as_of=provisional_as_of,
+                reasons=("phase6_prefreeze_source_failed",),
+                source_statuses=statuses,
+            )
         except Exception:
             statuses["phase6Prefreeze"] = "source_failed"
             return _result(

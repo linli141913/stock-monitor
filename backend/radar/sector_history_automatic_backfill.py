@@ -173,6 +173,7 @@ def _series_payload(
                 item.occurred_at.isoformat(),
                 item.close,
                 item.turnover_amount_cny,
+                item.volume_shares,
             ]
             for item in series.bars
         ],
@@ -201,12 +202,13 @@ def _series_from_payload(
         raise ValueError("sector_history_checkpoint_unverified")
     bars = []
     for row in payload["bars"]:
-        if not isinstance(row, list) or len(row) != 3:
+        if not isinstance(row, list) or len(row) not in {3, 4}:
             raise ValueError("sector_history_checkpoint_unverified")
         bars.append(HistoricalMinuteBar(
             occurred_at=datetime.fromisoformat(row[0]),
             close=row[1],
             turnover_amount_cny=row[2],
+            volume_shares=row[3] if len(row) == 4 else None,
         ))
     return HistoricalMinuteSeries(
         symbol=symbol,
@@ -366,6 +368,7 @@ def run_sector_history_automatic_backfill(
         )
 
     series_by_symbol = {}
+    reused_symbols = set()
     reused = 0
     missing = []
     for symbol in symbols:
@@ -397,6 +400,7 @@ def run_sector_history_automatic_backfill(
             missing.append(symbol)
             continue
         series_by_symbol[symbol] = series
+        reused_symbols.add(symbol)
         reused += 1
 
     fetched = 0
@@ -458,6 +462,7 @@ def run_sector_history_automatic_backfill(
     }
     verified_trading = {}
     verified_non_trading = {}
+    daily_trading_proofs = {}
     presence_batches = []
     if dates_to_verify:
         try:
@@ -479,6 +484,9 @@ def run_sector_history_automatic_backfill(
             )
             verified_non_trading.update(
                 presence.verified_non_trading_dates_by_symbol
+            )
+            daily_trading_proofs.update(
+                presence.daily_trading_proofs_by_symbol
             )
     if presence_batches:
         reason_counts = {}
@@ -512,6 +520,65 @@ def run_sector_history_automatic_backfill(
             "failureReasonCounts": reason_counts,
         }
 
+    reconciliation_refresh = []
+    for symbol, proofs in daily_trading_proofs.items():
+        series = series_by_symbol.get(symbol)
+        if (
+            symbol not in reused_symbols
+            or type(series) is not HistoricalMinuteSeries
+        ):
+            continue
+        proof_dates = {proof.trade_date for proof in proofs}
+        bars_by_date = {
+            trade_day: tuple(
+                bar for bar in series.bars
+                if bar.occurred_at.date() == trade_day
+            )
+            for trade_day in proof_dates
+        }
+        if any(
+            not bars
+            or (
+                (
+                    bars[0].occurred_at.timetz().replace(tzinfo=None)
+                    > time(9, 35)
+                    or bars[-1].occurred_at.timetz().replace(tzinfo=None)
+                    < time(15, 0)
+                )
+                and any(bar.volume_shares is None for bar in bars)
+            )
+            for bars in bars_by_date.values()
+        ):
+            reconciliation_refresh.append(symbol)
+    if reconciliation_refresh:
+        refresh_symbols = tuple(sorted(reconciliation_refresh))
+        try:
+            refresh_batch = minute_loader(
+                refresh_symbols,
+                request.expected_trade_dates,
+            )
+        except Exception:
+            refresh_batch = None
+        refreshed = set()
+        if type(refresh_batch) is SectorHistoryMinuteFrozenBatch:
+            loader_failure_count += refresh_batch.failure_count
+            for symbol, series in refresh_batch.series_by_symbol.items():
+                if symbol not in refresh_symbols:
+                    continue
+                try:
+                    _write_atomic(
+                        series_dir / f"series-{symbol}.json",
+                        _series_payload(series, request_identity=identity),
+                        compact=True,
+                    )
+                except OSError:
+                    continue
+                series_by_symbol[symbol] = series
+                refreshed.add(symbol)
+                fetched += 1
+                reused -= 1
+        loader_failure_count += len(set(refresh_symbols) - refreshed)
+
     completed_at = (
         clock()
         if clock is not None
@@ -540,6 +607,7 @@ def run_sector_history_automatic_backfill(
         source_batch_ids=request.source_batch_ids,
         verified_trading_dates_by_symbol=verified_trading,
         verified_non_trading_dates_by_symbol=verified_non_trading,
+        daily_trading_proofs_by_symbol=daily_trading_proofs,
     )
     backfill = build_sector_history_backfill(replay_query)
     failure_count = len(symbols) - len(series_by_symbol)

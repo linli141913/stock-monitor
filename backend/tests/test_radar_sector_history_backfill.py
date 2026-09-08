@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import requests
@@ -10,6 +11,7 @@ from radar.contracts import (
     IndustryHistoryStatus,
 )
 from radar.sector_history_backfill import (
+    HistoricalDailyTradingProof,
     HistoricalMinuteBar,
     HistoricalMinuteSeries,
     SectorHistoryBackfillQuery,
@@ -193,6 +195,21 @@ class SectorHistoryBackfillTests(unittest.TestCase):
             "sina-a-share-5m-history-v1",
         )
         self.assertEqual(result.bars[0].turnover_amount_cny, 1234.5)
+        self.assertEqual(result.bars[0].volume_shares, 100)
+
+    def test_sina_parser_missing_volume_fails_closed_without_crashing(self):
+        result = parse_sina_minute_payload(
+            symbol="000001",
+            payload=[{
+                "day": "2026-08-20 09:35:00",
+                "close": "10.1",
+                "amount": "1234.5",
+            }],
+            expected_trade_dates=(date(2026, 8, 20),),
+            fetched_at=AS_OF,
+        )
+
+        self.assertEqual(result.bars, ())
 
     def test_online_history_immediately_builds_20_day_and_5_day_evidence(self):
         result = build_sector_history_backfill(query())
@@ -263,8 +280,12 @@ class SectorHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(result.status, "partial")
         self.assertIsNone(result.history_evidence)
         self.assertIn("sector_history_member_dates_incomplete", result.reasons)
+        self.assertIn(
+            f"sector_history_member_date_missing:{symbol}:{missing_day.isoformat()}",
+            result.reasons,
+        )
 
-    def test_daily_presence_verifies_intraday_halt_without_faking_bars(self):
+    def test_daily_presence_alone_cannot_verify_sparse_intraday_history(self):
         value = query()
         symbol = next(iter(value.series_by_symbol))
         series = value.series_by_symbol[symbol]
@@ -286,10 +307,145 @@ class SectorHistoryBackfillTests(unittest.TestCase):
             verified_trading_dates_by_symbol={symbol: (target_day,)},
         ))
 
+        self.assertEqual(result.status, "partial")
+        self.assertIsNone(result.history_evidence)
+        self.assertIn("sector_history_member_dates_incomplete", result.reasons)
+        self.assertIn(
+            (
+                "sector_history_member_intraday_unverified:"
+                f"{symbol}:{target_day.isoformat()}"
+            ),
+            result.reasons,
+        )
+
+    def test_daily_presence_keeps_internal_zero_trade_interval_compatible(self):
+        value = query()
+        symbol = next(iter(value.series_by_symbol))
+        series = value.series_by_symbol[symbol]
+        target_day = value.expected_trade_dates[0]
+        internal_gap = replace(
+            series,
+            bars=tuple(
+                bar for bar in series.bars
+                if not (
+                    bar.occurred_at.date() == target_day
+                    and bar.occurred_at.time() == value.comparable_time
+                )
+            ),
+        )
+
+        result = build_sector_history_backfill(replace(
+            value,
+            series_by_symbol={**value.series_by_symbol, symbol: internal_gap},
+            verified_trading_dates_by_symbol={symbol: (target_day,)},
+        ))
+
+        self.assertEqual(result.status, "ready", result.reasons)
+
+    def test_exact_independent_daily_proof_verifies_sparse_intraday_history(self):
+        value = query()
+        symbol = next(iter(value.series_by_symbol))
+        series = value.series_by_symbol[symbol]
+        target_day = value.expected_trade_dates[0]
+        sparse_bars = tuple(
+            replace(bar, volume_shares=100)
+            for bar in series.bars
+            if not (
+                bar.occurred_at.date() == target_day
+                and bar.occurred_at.time() == time(9, 35)
+            )
+        )
+        sparse = replace(
+            series,
+            source_contract_id="sina-a-share-5m-history-v1",
+            source_url=(
+                "https://quotes.sina.cn/cn/api/jsonp_v2.php/=/"
+                "CN_MarketDataService.getKLineData"
+            ),
+            bars=sparse_bars,
+        )
+        proof = HistoricalDailyTradingProof(
+            trade_date=target_day,
+            close=Decimal(str(sparse_bars[1].close)),
+            volume_shares=200,
+            source_contract_id="tencent-qfq-daily-trading-presence-v1",
+            source_url="https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get",
+            fetched_at=AS_OF - timedelta(seconds=1),
+            content_sha256="sha256:" + "f" * 64,
+        )
+
+        result = build_sector_history_backfill(replace(
+            value,
+            series_by_symbol={**value.series_by_symbol, symbol: sparse},
+            verified_trading_dates_by_symbol={symbol: (target_day,)},
+            daily_trading_proofs_by_symbol={symbol: (proof,)},
+        ))
+
         self.assertEqual(result.status, "ready", result.reasons)
         self.assertEqual(
             result.sector_analyses[0].same_minute_turnover_samples[0].trade_date,
             target_day,
+        )
+
+    def test_sparse_intraday_proof_mismatch_remains_fail_closed(self):
+        value = query()
+        symbol = next(iter(value.series_by_symbol))
+        series = value.series_by_symbol[symbol]
+        target_day = value.expected_trade_dates[0]
+        sparse_bars = tuple(
+            replace(bar, volume_shares=100)
+            for bar in series.bars
+            if not (
+                bar.occurred_at.date() == target_day
+                and bar.occurred_at.time() == time(9, 35)
+            )
+        )
+        sparse = replace(
+            series,
+            source_contract_id="sina-a-share-5m-history-v1",
+            source_url=(
+                "https://quotes.sina.cn/cn/api/jsonp_v2.php/=/"
+                "CN_MarketDataService.getKLineData"
+            ),
+            bars=sparse_bars,
+        )
+        proof = HistoricalDailyTradingProof(
+            trade_date=target_day,
+            close=Decimal(str(sparse_bars[1].close)),
+            volume_shares=201,
+            source_contract_id="tencent-qfq-daily-trading-presence-v1",
+            source_url="https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get",
+            fetched_at=AS_OF - timedelta(seconds=1),
+            content_sha256="sha256:" + "e" * 64,
+        )
+
+        result = build_sector_history_backfill(replace(
+            value,
+            series_by_symbol={**value.series_by_symbol, symbol: sparse},
+            verified_trading_dates_by_symbol={symbol: (target_day,)},
+            daily_trading_proofs_by_symbol={symbol: (proof,)},
+        ))
+
+        self.assertEqual(result.status, "partial")
+        self.assertIn("sector_history_member_dates_incomplete", result.reasons)
+
+        close_mismatch = build_sector_history_backfill(replace(
+            value,
+            series_by_symbol={**value.series_by_symbol, symbol: sparse},
+            verified_trading_dates_by_symbol={symbol: (target_day,)},
+            daily_trading_proofs_by_symbol={
+                symbol: (replace(
+                    proof,
+                    close=proof.close + Decimal("0.01"),
+                    volume_shares=200,
+                ),),
+            },
+        ))
+
+        self.assertEqual(close_mismatch.status, "partial")
+        self.assertIn(
+            "sector_history_member_dates_incomplete",
+            close_mismatch.reasons,
         )
 
     def test_daily_absence_verifies_suspension_and_excludes_member_day(self):
@@ -498,6 +654,10 @@ class SectorHistoryBackfillTests(unittest.TestCase):
             batch.verified_non_trading_dates_by_symbol["000001"],
             (date(2026, 8, 19),),
         )
+        proof = batch.daily_trading_proofs_by_symbol["000001"][0]
+        self.assertEqual(proof.trade_date, date(2026, 8, 20))
+        self.assertEqual(proof.close, Decimal("10.1"))
+        self.assertEqual(proof.volume_shares, 100)
 
     def test_daily_presence_accepts_target_date_explicitly_returned_at_window_edge(self):
         target = date(2026, 8, 20)
@@ -526,6 +686,28 @@ class SectorHistoryBackfillTests(unittest.TestCase):
             batch.verified_non_trading_dates_by_symbol["000001"],
             (),
         )
+
+    def test_star_market_daily_proof_preserves_tencent_share_unit(self):
+        target = date(2026, 8, 20)
+        batch = fetch_historical_trading_presence_batch(
+            {"688001": (target,)},
+            expected_trade_dates=(target,),
+            requester=lambda _query_symbol: {
+                "code": 0,
+                "data": {
+                    "sh688001": {
+                        "qfqday": [[
+                            "2026-08-20", "10", "10.1", "10.2", "9.9",
+                            "445576",
+                        ]],
+                    },
+                },
+            },
+            clock=lambda: AS_OF,
+        )
+
+        proof = batch.daily_trading_proofs_by_symbol["688001"][0]
+        self.assertEqual(proof.volume_shares, 445576)
 
     def test_daily_presence_still_rejects_absent_target_without_enclosure(self):
         target = date(2026, 8, 20)

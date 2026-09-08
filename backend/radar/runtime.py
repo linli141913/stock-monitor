@@ -35,12 +35,16 @@ from radar.repository import (
     RepositoryStateError,
 )
 from radar.scheduler import (
+    FormalJobSpec,
+    FormalReadinessLoader,
     ScheduleRegistration,
     ScheduleRegistrationState,
     ScheduledRunOutcome,
     ScheduledRunState,
     ScheduledShadowJob,
     ShadowJobSpec,
+    SettingsProvider,
+    register_formal_jobs,
     register_shadow_jobs,
 )
 from radar.sector_shadow_runner import (
@@ -253,6 +257,7 @@ class RadarRuntime:
         leader_formal_research_source_provenance_provider: Optional[
             Callable
         ] = None,
+        leader_observation_publisher: Optional[Callable] = None,
         clock: Callable[[], datetime] = _utc_now,
         market_status_provider: MarketStatusProvider = (
             market_calendar.get_market_status
@@ -307,6 +312,7 @@ class RadarRuntime:
         self.leader_formal_research_source_provenance_provider = (
             leader_formal_research_source_provenance_provider
         )
+        self.leader_observation_publisher = leader_observation_publisher
         if (
             self.settings.etf_stage5_enabled
             and self.etf_product_master_fetcher is None
@@ -576,6 +582,20 @@ class RadarRuntime:
                             )
                             return plan
 
+                        observation_publish_reasons = ()
+                        if self.leader_observation_publisher is not None:
+                            try:
+                                self.leader_observation_publisher(
+                                    plan,
+                                    quote_batch.items,
+                                    security_records,
+                                    self.clock(),
+                                )
+                            except Exception:
+                                observation_publish_reasons = (
+                                    "leader_observation_publish_failed",
+                                )
+
                         source_context = (
                             build_leader_research_runtime_source_context(
                                 candidate_plan=plan,
@@ -723,6 +743,7 @@ class RadarRuntime:
                                     *single_pass.reasons,
                                     *runtime_assembly_health_reasons,
                                     *runtime_production_acceptance_health_reasons,
+                                    *observation_publish_reasons,
                                 ))),
                                 production_acceptance=(
                                     runtime_production_acceptance
@@ -755,6 +776,7 @@ class RadarRuntime:
                                 *single_pass.reasons,
                                 *runtime_assembly_health_reasons,
                                 *runtime_production_acceptance_health_reasons,
+                                *observation_publish_reasons,
                             ))),
                             production_acceptance=(
                                 runtime_production_acceptance
@@ -1034,6 +1056,7 @@ def register_production_shadow_jobs(
     leader_formal_research_source_provenance_provider: Optional[
         Callable
     ] = None,
+    leader_observation_publisher: Optional[Callable] = None,
     clock: Callable[[], datetime] = _utc_now,
     market_status_provider: MarketStatusProvider = (
         market_calendar.get_market_status
@@ -1060,6 +1083,13 @@ def register_production_shadow_jobs(
             )
             for job_id in ordered_job_ids
         )
+
+    if leader_observation_publisher is None:
+        from radar.leader_observation_store import (
+            publish_runtime_leader_observation,
+        )
+
+        leader_observation_publisher = publish_runtime_leader_observation
 
     runtime = RadarRuntime(
         database_path=database_path,
@@ -1091,6 +1121,7 @@ def register_production_shadow_jobs(
         leader_formal_research_source_provenance_provider=(
             leader_formal_research_source_provenance_provider
         ),
+        leader_observation_publisher=leader_observation_publisher,
         clock=clock,
         market_status_provider=market_status_provider,
         connection_factory=connection_factory,
@@ -1117,4 +1148,26 @@ def register_production_shadow_jobs(
     return tuple(
         registration_by_id[job_id]
         for job_id in ordered_job_ids
+    )
+
+
+def register_production_formal_jobs(
+    scheduler,
+    *,
+    specs: tuple[FormalJobSpec, ...],
+    settings_provider: SettingsProvider,
+    readiness_loader: FormalReadinessLoader,
+    clock: Callable[[], datetime] = _utc_now,
+) -> tuple[ScheduleRegistration, ...]:
+    """只转发完整强身份规格；空规格不读取配置或证据。
+
+    本缝不创建正式 executor、binding、任务ID、锁或调度器。
+    """
+
+    return register_formal_jobs(
+        scheduler,
+        specs,
+        settings_provider=settings_provider,
+        readiness_loader=readiness_loader,
+        clock=clock,
     )

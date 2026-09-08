@@ -20,6 +20,7 @@ from radar.contracts import (
     IndustryClassificationRecord,
     IndustryClassificationRelease,
     IndustryClassificationSnapshot,
+    IndustryRecordProvenance,
     MarketFeatureSnapshot,
     RadarBatchMeta,
     SecurityMasterRecord,
@@ -140,6 +141,59 @@ def _load_json(value: str, label: str, expected_type: Type) -> Any:
 
 def _industry_release_id(release: IndustryClassificationRelease) -> str:
     return industry_classification_release_id(release)
+
+
+def _industry_record_source_fields_for_storage(
+    record: IndustryClassificationRecord,
+) -> Dict[str, Any]:
+    source_fields = dict(record.source_fields)
+    if (
+        record.record_provenance
+        != IndustryRecordProvenance.CAPCO_RELEASE
+        or "classificationProvenance" in source_fields
+    ):
+        source_fields["classificationProvenance"] = (
+            record.record_provenance.value
+        )
+    if record.knowledge_effective_from is not None:
+        source_fields["knowledgeEffectiveFrom"] = (
+            record.knowledge_effective_from.isoformat()
+        )
+    if record.evidence_url is not None:
+        source_fields["evidenceUrl"] = record.evidence_url
+    return source_fields
+
+
+def _industry_record_from_storage_row(
+    row: sqlite3.Row,
+    *,
+    classification_system: str,
+    release_period: str,
+) -> IndustryClassificationRecord:
+    source_fields = _load_json(row[12], "行业记录原始字段", dict)
+    return IndustryClassificationRecord(
+        classificationSystem=classification_system,
+        releasePeriod=release_period,
+        sourceSymbol=row[0],
+        sourceName=row[1],
+        securityIdentity=row[2],
+        identityStatus=row[3],
+        categoryCode=row[4],
+        categoryName=row[5],
+        divisionCode=row[6],
+        divisionName=row[7],
+        manufacturingSubclassCode=row[8],
+        manufacturingSubclassName=row[9],
+        recordStatus=row[10],
+        recordProvenance=source_fields.get(
+            "classificationProvenance",
+            IndustryRecordProvenance.CAPCO_RELEASE.value,
+        ),
+        knowledgeEffectiveFrom=source_fields.get("knowledgeEffectiveFrom"),
+        evidenceUrl=source_fields.get("evidenceUrl"),
+        issueCodes=_load_json(row[11], "行业记录问题代码", list),
+        sourceFields=source_fields,
+    )
 
 
 def _symbols_checksum(symbols: Tuple[str, ...]) -> str:
@@ -1137,7 +1191,7 @@ class RadarRepository:
             record.manufacturing_subclass_name,
             record.record_status.value,
             _canonical_json(list(record.issue_codes)),
-            _canonical_json(record.source_fields),
+            _canonical_json(_industry_record_source_fields_for_storage(record)),
         ) for record in records)
         inserted = 0
         unchanged = 0
@@ -1280,23 +1334,14 @@ class RadarRepository:
             "WHERE industry_release_id=? ORDER BY source_symbol",
             (industry_release_id,),
         ).fetchall()
-        return tuple(IndustryClassificationRecord(
-            classificationSystem=classification_system,
-            releasePeriod=release_period,
-            sourceSymbol=row[0],
-            sourceName=row[1],
-            securityIdentity=row[2],
-            identityStatus=row[3],
-            categoryCode=row[4],
-            categoryName=row[5],
-            divisionCode=row[6],
-            divisionName=row[7],
-            manufacturingSubclassCode=row[8],
-            manufacturingSubclassName=row[9],
-            recordStatus=row[10],
-            issueCodes=_load_json(row[11], "行业记录问题代码", list),
-            sourceFields=_load_json(row[12], "行业记录原始字段", dict),
-        ) for row in rows)
+        return tuple(
+            _industry_record_from_storage_row(
+                row,
+                classification_system=classification_system,
+                release_period=release_period,
+            )
+            for row in rows
+        )
 
     def list_industry_classification_records_by_release_id(
         self,

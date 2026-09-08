@@ -118,6 +118,38 @@ class LeaderBusinessAnnualReportSelectorTests(unittest.TestCase):
         self.assertEqual(result.document.document_id, "cninfo:2002")
         self.assertEqual(result.replaced_document_ids, ("cninfo:2001",))
 
+    def test_cninfo_full_report_title_suffix_is_accepted(self):
+        result = select_latest_official_annual_report(
+            plan_item(),
+            queue_item(
+                document("公司2025年年度报告摘要", "2101"),
+                document("公司2025年年度报告全文", "2102"),
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderBusinessAnnualReportSelectionStatus.READY,
+        )
+        self.assertEqual(result.report_year, 2025)
+        self.assertEqual(result.document.document_id, "cninfo:2102")
+
+    def test_cninfo_repeated_annual_word_full_report_is_accepted(self):
+        result = select_latest_official_annual_report(
+            plan_item(),
+            queue_item(
+                document("亚翔集成2024年度年度报告全文", "2201"),
+                document("亚翔集成-公司2024年度报告全文及摘要", "2202"),
+            ),
+        )
+
+        self.assertEqual(
+            result.status,
+            LeaderBusinessAnnualReportSelectionStatus.READY,
+        )
+        self.assertEqual(result.report_year, 2024)
+        self.assertEqual(result.document.document_id, "cninfo:2201")
+
     def test_same_time_full_reports_are_ambiguous(self):
         published_at = AS_OF - timedelta(days=20)
 

@@ -34,6 +34,7 @@ BUSINESS_DOCUMENT_CONTENT_CONTRACT_ID = (
     "radar-leader-business-document-content-v1"
 )
 REQUEST_TIMEOUT_SECONDS = 20.0
+MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS = 2
 MAXIMUM_PDF_BYTES = 50 * 1024 * 1024
 MAXIMUM_PAGE_COUNT = 800
 MAXIMUM_PAGE_CHARACTERS = 100_000
@@ -433,17 +434,24 @@ def fetch_official_business_document_content(
     assert isinstance(kind, OfficialBusinessDocumentKind)
     requester = transport or _default_transport
     try:
-        response = requester(
-            document.source_url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Referer": "https://www.cninfo.com.cn/",
-                "Accept": "application/pdf",
-            },
-            timeout=REQUEST_TIMEOUT_SECONDS,
-            allow_redirects=False,
-            stream=True,
-        )
+        response = None
+        for attempt in range(MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS):
+            try:
+                response = requester(
+                    document.source_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://www.cninfo.com.cn/",
+                        "Accept": "application/pdf",
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    allow_redirects=False,
+                    stream=True,
+                )
+                break
+            except requests.RequestException:
+                if attempt + 1 == MAXIMUM_TRANSIENT_REQUEST_ATTEMPTS:
+                    raise
     except _BusinessDocumentContentLimitError:
         return _result(
             document,

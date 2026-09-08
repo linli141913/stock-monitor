@@ -25,6 +25,8 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>PYTHONUNBUFFERED</key>
         <string>1</string>
+        <key>RADAR_FORMAL_SHADOW_LEDGER_DIR</key>
+        <string>/private/tmp/stage10-formal-shadow-ledger-v1</string>
         <key>RADAR_ENABLED</key>
         <string>false</string>
         <key>RADAR_SHADOW_MODE</key>

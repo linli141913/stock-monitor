@@ -68,6 +68,7 @@ SINA_A_SHARE_PAGE_URL = "https://finance.sina.com.cn/realstock/"
 MAXIMUM_SAMPLE_COUNT = 8
 MAXIMUM_COLLECTION_SECONDS = 40
 PUBLIC_CALENDAR_REQUEST_ATTEMPTS = 2
+MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES = 2 * 1024 * 1024
 SINA_LIFECYCLE_BATCH_SIZE = 100
 SINA_LIFECYCLE_REQUEST_ATTEMPTS = 2
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
@@ -107,6 +108,70 @@ class PublicCalendarDocument:
     text: str
     source_time: Optional[datetime]
     fetched_at: datetime
+    raw_content: Optional[bytes] = field(default=None, repr=False)
+    text_encoding: Optional[str] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.source_url, str)
+            or not self.source_url.startswith("https://")
+            or not isinstance(self.document_id, str)
+            or not self.document_id.strip()
+            or not isinstance(self.text, str)
+            or not _aware(self.fetched_at)
+            or (
+                self.source_time is not None
+                and (
+                    not _aware(self.source_time)
+                    or self.source_time > self.fetched_at
+                )
+            )
+        ):
+            raise ValueError("public_live_calendar_document_unverified")
+        if self.raw_content is None:
+            if self.text_encoding is not None:
+                raise ValueError(
+                    "public_live_calendar_document_raw_content_unverified"
+                )
+            return
+        if (
+            type(self.raw_content) is not bytes
+            or not self.raw_content
+            or len(self.raw_content) > MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES
+            or not isinstance(self.text_encoding, str)
+            or not self.text_encoding.strip()
+        ):
+            raise ValueError(
+                "public_live_calendar_document_raw_content_unverified"
+            )
+        try:
+            decoded = self.raw_content.decode(self.text_encoding, errors="strict")
+        except (LookupError, UnicodeDecodeError) as exc:
+            raise ValueError(
+                "public_live_calendar_document_raw_content_unverified"
+            ) from exc
+        if decoded != self.text:
+            raise ValueError(
+                "public_live_calendar_document_raw_content_unverified"
+            )
+
+    @property
+    def raw_content_sha256(self) -> Optional[str]:
+        if self.raw_content is None:
+            return None
+        return "sha256:" + hashlib.sha256(self.raw_content).hexdigest()
+
+    @property
+    def has_raw_content(self) -> bool:
+        return self.raw_content is not None
+
+    @property
+    def content_sha256(self) -> str:
+        """原始响应存在时只对该字节流求摘要；旧测试构造保留兼容路径。"""
+
+        return self.raw_content_sha256 or _sha256_bytes(
+            self.text.encode("utf-8")
+        )
 
     def __repr__(self) -> str:
         return (
@@ -240,7 +305,8 @@ def build_public_calendar_evidence(
         for value in exchanges
     ))
     if (
-        not normalized_exchanges
+        type(document) is not PublicCalendarDocument
+        or not normalized_exchanges
         or any(value not in {"sse", "szse"} for value in normalized_exchanges)
         or not isinstance(trading_date, date)
         or isinstance(trading_date, datetime)
@@ -275,7 +341,7 @@ def build_public_calendar_evidence(
             "public_live_calendar_window_unavailable"
         )
     ordered_dates = tuple(reversed(trading_dates))
-    content_sha256 = _sha256_bytes(document.text.encode("utf-8"))
+    content_sha256 = document.content_sha256
     return tuple(
         PublicTradingCalendarEvidence(
             exchange=exchange,
@@ -892,7 +958,12 @@ def _fetch_calendar_document(
             or response.encoding
             or "utf-8"
         )
-        text = response.content.decode(encoding, errors="replace")
+        raw_content = response.content
+        try:
+            text = raw_content.decode(encoding, errors="strict")
+        except (AttributeError, LookupError, UnicodeDecodeError) as exc:
+            last_error = exc
+            continue
         source_time = None
         last_modified = response.headers.get("Last-Modified")
         if last_modified:
@@ -925,6 +996,8 @@ def _fetch_calendar_document(
             text=text,
             source_time=source_time,
             fetched_at=fetched_at,
+            raw_content=raw_content,
+            text_encoding=encoding,
         )
         if source_time is not None:
             return last_document

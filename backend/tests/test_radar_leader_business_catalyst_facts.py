@@ -63,6 +63,108 @@ def content(*page_texts, **changes):
 
 
 class LeaderBusinessCatalystFactTests(unittest.TestCase):
+    def test_official_3d_printing_equipment_sales_growth_extracts_exact_object(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "公司持续推进3D打印应用场景的拓展，"
+                "不断挖掘3D打印多方位应用的可能性，"
+                "推动下游产业化应用突破，3D打印设备销售量"
+                "较上年同期增加，赋能经营业绩稳步增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("3D打印设备",))
+
+    def test_official_named_business_pressure_extracts_exact_objects(self):
+        cases = (
+            (
+                "公司出版业务以大众图书出版为主，"
+                "受市场整体疲软、行业竞争加剧等因素影响，"
+                "对营收、利润形成较大冲击，经营承压明显。",
+                ("出版",),
+            ),
+            (
+                "2026年上半年，天然橡胶下游需求走弱，"
+                "公司橡胶产品销量及售价不及预期。",
+                ("橡胶",),
+            ),
+            (
+                "报告期内，由于影视业务的生产制作和发行周期"
+                "导致公司收入确认存在一定的季节性波动等原因，"
+                "公司上半年影视业务确认收入较少。",
+                ("影视",),
+            ),
+        )
+
+        for text, expected in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.READY,
+                )
+                self.assertEqual(result.business_terms, expected)
+
+    def test_named_business_pressure_patterns_fail_closed(self):
+        cases = (
+            "公司预计出版业务以大众图书出版为主，"
+            "对营收、利润形成较大冲击，经营承压明显。",
+            "天然橡胶下游需求走弱，行业橡胶产品销量及售价不及预期。",
+            "由于影视业务的生产制作和发行周期，"
+            "公司上半年收入较少。",
+            "公司出版业务以大众图书出版为主，"
+            "对营收、利润形成较大冲击，经营承压明显。"
+            "公司随后否认上述说法。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_forecast_or_generic_3d_printing_metric_is_not_confirmed(self):
+        cases = (
+            "公司预计3D打印设备销售量较上年同期增加。",
+            "公司计划不断挖掘3D打印多方位应用的可能性，3D打印设备销售量较上年同期增加。",
+            "公司预计不断挖掘3D打印多方位应用的可能性，3D打印设备销售量较上年同期增加。",
+            "不断挖掘3D打印多方位应用的可能性，3D打印设备销售量较上年同期增加，上述说法不实。",
+            "不断挖掘3D打印多方位应用的可能性，3D打印设备销售量较上年同期增加，以上仅为预测。",
+            "设备销售量较上年同期增加。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(
+                        event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST
+                    ),
+                    content(text),
+                )
+
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
     def test_contract_fact_extracts_event_and_explicit_business_object(self):
         result = extract_official_business_catalyst_facts(
             document(),
@@ -686,6 +788,73 @@ class LeaderBusinessCatalystFactTests(unittest.TestCase):
 
         self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
         self.assertEqual(result.business_terms, ("金针菇", "火腿", "肉制品"))
+
+    def test_named_products_with_realized_shipment_share_are_extracted(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明。报告期内，锂电铜箔和"
+                "电子电路铜箔高附加值产品的出货占比均显著提升。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("锂电铜箔", "电子电路铜箔"))
+
+    def test_named_product_demand_causally_driving_revenue_is_extracted(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明。报告期内，公司新能源电源、"
+                "其他电源产品市场需求较好，带动公司整体营业收入实现同比增长。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("新能源电源",))
+
+    def test_named_product_new_patterns_keep_future_or_generic_claims_unverified(self):
+        cases = (
+            "报告期内，公司计划提升锂电铜箔和电子电路铜箔高附加值产品的出货占比。",
+            "报告期内，公司主要产品市场需求较好，带动公司整体营业收入同比增长。",
+            "报告期内，公司新能源电源、其他电源产品市场需求较好，预计带动营业收入增长。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                result = extract_official_business_catalyst_facts(
+                    document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+                    content(text),
+                )
+                self.assertEqual(
+                    result.status,
+                    AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+                )
+                self.assertEqual(result.business_terms, ())
+
+    def test_named_industry_subsegment_realized_revenue_decline_is_extracted(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content(
+                "三、业绩变动原因说明。公司酒店主业经营持续承压，"
+                "酒店业客房板块收入同比下降。"
+            ),
+        )
+
+        self.assertEqual(result.status, AutomaticBusinessEvidenceStatus.READY)
+        self.assertEqual(result.business_terms, ("酒店业",))
+
+    def test_named_industry_subsegment_future_claim_is_unverified(self):
+        result = extract_official_business_catalyst_facts(
+            document(event_kind=OfficialBusinessCatalystKind.EARNINGS_FORECAST),
+            content("公司预计酒店业客房板块收入同比下降。"),
+        )
+
+        self.assertEqual(
+            result.status,
+            AutomaticBusinessEvidenceStatus.SOURCE_UNVERIFIED,
+        )
+        self.assertEqual(result.business_terms, ())
 
     def test_forecasted_profit_can_be_explained_by_confirmed_product_metrics(self):
         result = extract_official_business_catalyst_facts(

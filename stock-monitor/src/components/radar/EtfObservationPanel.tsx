@@ -4,12 +4,21 @@ import {
   Clock3,
   Layers3,
 } from 'lucide-react';
+import { useState } from 'react';
 
-import type { RadarEtfModule, RadarModuleState } from '@/types/radar';
+import { nextVisibleCount, takeVisibleItems } from '@/lib/progressive-list';
+import type {
+  RadarEtfModule,
+  RadarEtfProductResearchState,
+  RadarModuleState,
+  RadarReplayEtfResearchResponse,
+} from '@/types/radar';
 import styles from './Radar.module.css';
 
 interface EtfObservationPanelProps {
   module: RadarEtfModule;
+  research: RadarReplayEtfResearchResponse | null;
+  researchLoadError: string;
   formatTime: (value: string | null | undefined, withSeconds?: boolean) => string;
   renderedAt: string | null;
 }
@@ -54,15 +63,34 @@ function assetLabel(value: string) {
   return value === 'domestic_equity' ? '沪深股票' : value;
 }
 
+const RESEARCH_STATE_LABELS: Record<RadarEtfProductResearchState, string> = {
+  product_ready_for_index_research: '可继续指数研究',
+  active_product_separate_track: '主动ETF单独观察',
+  out_of_scope_asset: '非境内股票研究范围',
+  product_evidence_incomplete: '产品证据待补齐',
+};
+
+const ETF_LIST_PAGE_SIZE = 100;
+
 export default function EtfObservationPanel({
   module,
+  research,
+  researchLoadError,
   formatTime,
   renderedAt,
 }: EtfObservationPanelProps) {
+  const [visibleResearchCount, setVisibleResearchCount] = useState(ETF_LIST_PAGE_SIZE);
+  const [visibleProductCount, setVisibleProductCount] = useState(ETF_LIST_PAGE_SIZE);
   const stateMessage = STATE_COPY[module.state];
   const hasCandidates = module.candidates.length > 0;
   const latestSource = module.lastAttempt?.sourceTime
     || module.lastSuccess?.sourceTime;
+  const researchSnapshot = research?.snapshot || null;
+  const visibleResearchItems = takeVisibleItems(
+    researchSnapshot?.items || [],
+    visibleResearchCount,
+  );
+  const visibleProducts = takeVisibleItems(module.products, visibleProductCount);
 
   return (
     <section className={`${styles.panel} ${styles.etfPanel}`}>
@@ -150,7 +178,7 @@ export default function EtfObservationPanel({
                 <div>
                   <span className={styles.etfFieldLabel}>状态</span>
                   <strong className={candidate.formalUsable ? styles.etfFormal : styles.etfPending}>
-                    {candidate.formalUsable ? '正式可用' : '仅影子记录'}
+                    {candidate.formalUsable ? '研究数据完整' : '证据补充中'}
                   </strong>
                 </div>
               </article>
@@ -163,10 +191,81 @@ export default function EtfObservationPanel({
           <span>
             {module.state === 'empty'
               ? '这是来自真实快照的空榜，不代表数据抓取失败。'
-              : '候选规则或输入尚未达到正式展示门槛。'}
+              : '候选规则或真实输入尚不完整。'}
           </span>
         </div>
       )}
+
+      <div className={styles.etfSection}>
+        <div className={styles.etfSectionHeader}>
+          <div>
+            <strong>逐产品研究分流</strong>
+            <span>来自已验证的阶段9冻结输出；只表示研究范围与证据完整度，不是排名或交易建议。</span>
+          </div>
+          <span>{researchSnapshot ? `${researchSnapshot.productCount} 只` : '尚未发布'}</span>
+        </div>
+        {researchLoadError ? (
+          <div className={styles.warningBanner} role="status">
+            <AlertTriangle size={14} />
+            <span>{researchLoadError}；未用当前产品主档推测历史研究状态。</span>
+          </div>
+        ) : research?.state === 'failed' ? (
+          <div className={styles.errorBanner} role="alert">
+            <AlertTriangle size={14} />
+            <span>研究状态发布物校验失败，已停止展示。</span>
+          </div>
+        ) : researchSnapshot ? (
+          <>
+            <div className={styles.etfResearchSummary}>
+              <span>指数研究 <b>{researchSnapshot.indexResearchReadyCount}</b></span>
+              <span>主动分轨 <b>{researchSnapshot.activeSeparateTrackCount}</b></span>
+              <span>范围外 <b>{researchSnapshot.outOfScopeAssetCount}</b></span>
+              <span>证据待补 <b>{researchSnapshot.evidenceIncompleteCount}</b></span>
+              <span>监测证据就绪 <b>{researchSnapshot.monitoringReadyCount}</b></span>
+            </div>
+            <div className={styles.etfResearchList}>
+              {visibleResearchItems.map((item) => (
+                <article key={item.symbol} className={styles.etfResearchRow}>
+                  <div><strong>{item.symbol}</strong><span>{item.targetIndexName || '未标明跟踪指数'}</span></div>
+                  <strong>{RESEARCH_STATE_LABELS[item.researchState]}</strong>
+                  <span>
+                    监测：{item.monitoringStatus === 'ready' ? '证据就绪' : item.monitoringStatus === 'missing' ? '证据待补' : '未提供正式准入包'}
+                  </span>
+                  <span>
+                    排名：{item.rankingStatus === 'ready' ? '政策就绪' : item.rankingStatus === 'missing' ? '政策待补' : '未评估'}
+                  </span>
+                </article>
+              ))}
+            </div>
+            <div className={styles.progressiveListFooter} aria-live="polite">
+              <span>已显示 {visibleResearchItems.length} / {researchSnapshot.items.length} 只</span>
+              {visibleResearchItems.length < researchSnapshot.items.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleResearchCount((current) => nextVisibleCount(
+                    current,
+                    ETF_LIST_PAGE_SIZE,
+                    researchSnapshot.items.length,
+                  ))}
+                >
+                  继续显示 {Math.min(
+                    ETF_LIST_PAGE_SIZE,
+                    researchSnapshot.items.length - visibleResearchItems.length,
+                  )} 只
+                </button>
+              )}
+            </div>
+            <div className={styles.etfMeta}>
+              <span>冻结时点 <b>{formatTime(researchSnapshot.asOf, true)}</b></span>
+              <span>来源 <b>{researchSnapshot.source}</b></span>
+            </div>
+          </>
+        ) : (
+          <div className={styles.inlineEmpty}>
+            尚无已发布的逐产品研究快照；页面不从实时产品主档猜测阶段9结果。
+          </div>
+        )}
+      </div>
 
       <div className={styles.etfSection}>
         <div className={styles.etfSectionHeader}>
@@ -185,7 +284,7 @@ export default function EtfObservationPanel({
               <span>版本时间</span>
               <span>来源</span>
             </div>
-            {module.products.map((product) => (
+            {visibleProducts.map((product) => (
               <div className={styles.etfProductRow} key={`${product.symbol}-${product.sourceContractId}`}>
                 <div>
                   <strong>{product.symbol}</strong>
@@ -206,6 +305,24 @@ export default function EtfObservationPanel({
                 </div>
               </div>
             ))}
+            <div className={styles.progressiveListFooter} aria-live="polite">
+              <span>已显示 {visibleProducts.length} / {module.products.length} 个产品</span>
+              {visibleProducts.length < module.products.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleProductCount((current) => nextVisibleCount(
+                    current,
+                    ETF_LIST_PAGE_SIZE,
+                    module.products.length,
+                  ))}
+                >
+                  继续显示 {Math.min(
+                    ETF_LIST_PAGE_SIZE,
+                    module.products.length - visibleProducts.length,
+                  )} 个
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className={styles.inlineEmpty}>暂无已记录的官方产品主档。</div>

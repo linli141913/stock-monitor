@@ -13,20 +13,21 @@ import RadarAiInsightLoader from '@/components/radar/RadarAiInsightLoader';
 import LeaderObservationPanel from '@/components/radar/LeaderObservationPanel';
 import ModuleStatePanel from '@/components/radar/ModuleStatePanel';
 import RadarDataGatePanel from '@/components/radar/RadarDataGatePanel';
+import RadarReplayQualityPanel from '@/components/radar/RadarReplayQualityPanel';
+import RadarStage10ReadinessPanel from '@/components/radar/RadarStage10ReadinessPanel';
 import RadarStatusStrip from '@/components/radar/RadarStatusStrip';
 import EtfObservationPanel from '@/components/radar/EtfObservationPanel';
 import SectorObservationPanel from '@/components/radar/SectorObservationPanel';
 import type {
   RadarEtfsResponse,
   RadarLeaderModule,
-  RadarLeaderReviewDocument,
-  RadarLeaderReviewDocumentResponse,
-  RadarLeaderReviewFormResponse,
-  RadarLeaderReviewSubmissionDraft,
   RadarLeaderReviewQueueResponse,
-  RadarLeaderReviewVersionPreflightResponse,
   RadarLeadersResponse,
   RadarOverviewResponse,
+  RadarFormalReadinessResponse,
+  RadarFormalShadowProgressResponse,
+  RadarReplayEtfResearchResponse,
+  RadarReplayQualityResponse,
   RadarSectorsResponse,
   RadarSectorHistoryResponse,
 } from '@/types/radar';
@@ -115,37 +116,6 @@ function blockerLabels(
   return visible;
 }
 
-function buildLeaderReviewRequestPayload(
-  reviewForm: RadarLeaderReviewFormResponse,
-  draft: RadarLeaderReviewSubmissionDraft,
-) {
-  return {
-    reviewBatchId: reviewForm.summary.reviewBatchId,
-    documentId: reviewForm.item.documentId,
-    candidateCategory: reviewForm.item.candidateCategory,
-    contentSha256: reviewForm.contentSha256,
-    candidateId: reviewForm.candidate.candidateId,
-    ...draft,
-    effectiveUntil: draft.effectiveUntil
-      ? new Date(draft.effectiveUntil).toISOString()
-      : null,
-    targetEvent: {
-      ...draft.targetEvent,
-      publishedAt: new Date(draft.targetEvent.publishedAt).toISOString(),
-      effectiveFrom: new Date(draft.targetEvent.effectiveFrom).toISOString(),
-      effectiveUntil: draft.targetEvent.effectiveUntil
-        ? new Date(draft.targetEvent.effectiveUntil).toISOString()
-        : null,
-    },
-    factSupplements: draft.factSupplements.map((fact) => ({
-      ...fact,
-      mappedDocumentId: fact.factKind === 'referenced_document_id'
-        ? draft.targetEvent.documentId
-        : null,
-    })),
-  };
-}
-
 export default function RadarPage() {
   const [activeTab, setActiveTab] = useState<RadarTab>('overview');
   const [focusedIndustryCode, setFocusedIndustryCode] = useState('');
@@ -157,32 +127,52 @@ export default function RadarPage() {
   const [sectorHistory, setSectorHistory] = useState<
     RadarSectorHistoryResponse | null
   >(null);
+  const [replayQuality, setReplayQuality] = useState<
+    RadarReplayQualityResponse | null
+  >(null);
+  const [etfResearch, setEtfResearch] = useState<
+    RadarReplayEtfResearchResponse | null
+  >(null);
+  const [formalReadiness, setFormalReadiness] = useState<
+    RadarFormalReadinessResponse | null
+  >(null);
+  const [formalShadowProgress, setFormalShadowProgress] = useState<
+    RadarFormalShadowProgressResponse | null
+  >(null);
   const [leaderReviewQueue, setLeaderReviewQueue] = useState<
     RadarLeaderReviewQueueResponse | null
-  >(null);
-  const [selectedReviewDocument, setSelectedReviewDocument] = useState<
-    RadarLeaderReviewDocument | null
-  >(null);
-  const [leaderReviewForm, setLeaderReviewForm] = useState<
-    RadarLeaderReviewFormResponse | null
   >(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const [sectorsRefreshError, setSectorsRefreshError] = useState('');
   const [etfsRefreshError, setEtfsRefreshError] = useState('');
+  const [etfResearchRefreshError, setEtfResearchRefreshError] = useState('');
   const [leadersRefreshError, setLeadersRefreshError] = useState('');
   const [historyRefreshError, setHistoryRefreshError] = useState('');
+  const [replayRefreshError, setReplayRefreshError] = useState('');
+  const [formalReadinessRefreshError, setFormalReadinessRefreshError] = useState('');
+  const [formalShadowProgressRefreshError, setFormalShadowProgressRefreshError] = useState('');
   const [leaderReviewQueueError, setLeaderReviewQueueError] = useState('');
   const [leaderReviewQueueLoading, setLeaderReviewQueueLoading] = useState(false);
-  const [leaderReviewSubmitting, setLeaderReviewSubmitting] = useState(false);
-  const [leaderReviewSubmitMessage, setLeaderReviewSubmitMessage] = useState('');
   const [renderedAt, setRenderedAt] = useState<string | null>(null);
   const overviewInFlight = useRef(false);
   const sectorsInFlight = useRef(false);
   const etfsInFlight = useRef(false);
+  const etfResearchInFlight = useRef(false);
   const leadersInFlight = useRef(false);
   const historyInFlight = useRef(false);
+  const replayInFlight = useRef(false);
+  const formalReadinessInFlight = useRef(false);
+  const formalShadowProgressInFlight = useRef(false);
+  const historyTabActive = useRef(false);
+  const mounted = useRef(true);
+  const replayRequestGeneration = useRef(0);
+  const formalReadinessRequestGeneration = useRef(0);
+  const formalShadowProgressRequestGeneration = useRef(0);
+  const replayAbortController = useRef<AbortController | null>(null);
+  const formalReadinessAbortController = useRef<AbortController | null>(null);
+  const formalShadowProgressAbortController = useRef<AbortController | null>(null);
   const leaderReviewQueueInFlight = useRef(false);
   const leaderReviewQueueOffset = useRef(0);
 
@@ -233,14 +223,33 @@ export default function RadarPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      historyTabActive.current = false;
+      replayRequestGeneration.current += 1;
+      formalReadinessRequestGeneration.current += 1;
+      formalShadowProgressRequestGeneration.current += 1;
+      replayAbortController.current?.abort();
+      formalReadinessAbortController.current?.abort();
+      formalShadowProgressAbortController.current?.abort();
+      replayAbortController.current = null;
+      formalReadinessAbortController.current = null;
+      formalShadowProgressAbortController.current = null;
+    };
+  }, []);
+
   const loadOverview = useCallback(async (silent = false) => {
     if (overviewInFlight.current) return;
     overviewInFlight.current = true;
     if (!silent) setRefreshing(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch(
         `/api/backend/api/radar/overview?_t=${Date.now()}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', signal: controller.signal },
       );
       if (!response.ok) throw new Error('主线雷达数据暂不可用');
       const payload = await response.json() as RadarOverviewResponse;
@@ -252,9 +261,12 @@ export default function RadarPage() {
       setRefreshError('');
     } catch (error) {
       setRefreshError(
-        error instanceof Error ? error.message : '主线雷达数据暂不可用',
+        error instanceof Error && error.name === 'AbortError'
+          ? '主线雷达请求超时，请重试'
+          : error instanceof Error ? error.message : '主线雷达数据暂不可用',
       );
     } finally {
+      window.clearTimeout(timeoutId);
       overviewInFlight.current = false;
       setInitialLoading(false);
       if (!silent) setRefreshing(false);
@@ -311,6 +323,30 @@ export default function RadarPage() {
     }
   }, []);
 
+  const loadEtfResearch = useCallback(async () => {
+    if (etfResearchInFlight.current) return;
+    etfResearchInFlight.current = true;
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/replays/latest/etfs?_t=${Date.now()}`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok) throw new Error('ETF逐产品研究状态暂不可用');
+      const payload = await response.json() as RadarReplayEtfResearchResponse;
+      if (payload.schemaVersion !== 'radar-replay-etf-research-v1') {
+        throw new Error('ETF研究状态数据契约不匹配');
+      }
+      setEtfResearch(payload);
+      setEtfResearchRefreshError('');
+    } catch (error) {
+      setEtfResearchRefreshError(
+        error instanceof Error ? error.message : 'ETF逐产品研究状态暂不可用',
+      );
+    } finally {
+      etfResearchInFlight.current = false;
+    }
+  }, []);
+
   const loadLeaders = useCallback(async () => {
     if (leadersInFlight.current) return;
     leadersInFlight.current = true;
@@ -361,6 +397,143 @@ export default function RadarPage() {
     }
   }, []);
 
+  const loadReplayQuality = useCallback(async (force = false) => {
+    if (replayInFlight.current && !force) return;
+    replayRequestGeneration.current += 1;
+    const requestGeneration = replayRequestGeneration.current;
+    replayAbortController.current?.abort();
+    const controller = new AbortController();
+    replayAbortController.current = controller;
+    replayInFlight.current = true;
+    const canCommit = () => (
+      mounted.current
+      && historyTabActive.current
+      && requestGeneration === replayRequestGeneration.current
+    );
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/replays/latest?_t=${Date.now()}`,
+        { cache: 'no-store', signal: controller.signal },
+      );
+      if (!response.ok) throw new Error('历史回放质量报告暂不可用');
+      const payload = await response.json() as RadarReplayQualityResponse;
+      if (payload.schemaVersion !== 'radar-replay-quality-v1') {
+        throw new Error('历史回放数据契约不匹配');
+      }
+      if (!canCommit()) return;
+      setReplayQuality(payload);
+      setRenderedAt(new Date().toISOString());
+      setReplayRefreshError('');
+    } catch (error) {
+      if (!canCommit()) return;
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setReplayRefreshError(
+        error instanceof Error ? error.message : '历史回放质量报告暂不可用',
+      );
+    } finally {
+      if (requestGeneration === replayRequestGeneration.current) {
+        replayInFlight.current = false;
+        replayAbortController.current = null;
+      }
+    }
+  }, []);
+
+  const loadFormalReadiness = useCallback(async (force = false) => {
+    if (formalReadinessInFlight.current && !force) return;
+    formalReadinessRequestGeneration.current += 1;
+    const requestGeneration = formalReadinessRequestGeneration.current;
+    formalReadinessAbortController.current?.abort();
+    const controller = new AbortController();
+    formalReadinessAbortController.current = controller;
+    formalReadinessInFlight.current = true;
+    const canCommit = () => (
+      mounted.current
+      && historyTabActive.current
+      && requestGeneration === formalReadinessRequestGeneration.current
+    );
+    if (canCommit()) {
+      setFormalReadiness(null);
+      setFormalReadinessRefreshError('');
+    }
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/formal-readiness?_t=${Date.now()}`,
+        { cache: 'no-store', signal: controller.signal },
+      );
+      if (!response.ok) throw new Error('正式启用准备度报告暂不可用');
+      const payload = await response.json() as RadarFormalReadinessResponse;
+      if (payload.contractVersion !== 'radar-formal-readiness-v1') {
+        throw new Error('正式启用准备度数据契约不匹配');
+      }
+      if (!canCommit()) return;
+      setFormalReadiness(payload);
+      setRenderedAt(new Date().toISOString());
+    } catch (error) {
+      if (!canCommit()) return;
+      setFormalReadiness(null);
+      if (error instanceof Error && error.name === 'AbortError') {
+        setFormalReadinessRefreshError('');
+        return;
+      }
+      setFormalReadinessRefreshError(
+        error instanceof Error ? error.message : '正式启用准备度报告暂不可用',
+      );
+    } finally {
+      if (requestGeneration === formalReadinessRequestGeneration.current) {
+        formalReadinessInFlight.current = false;
+        formalReadinessAbortController.current = null;
+      }
+    }
+  }, []);
+
+  const loadFormalShadowProgress = useCallback(async (force = false) => {
+    if (formalShadowProgressInFlight.current && !force) return;
+    formalShadowProgressRequestGeneration.current += 1;
+    const requestGeneration = formalShadowProgressRequestGeneration.current;
+    formalShadowProgressAbortController.current?.abort();
+    const controller = new AbortController();
+    formalShadowProgressAbortController.current = controller;
+    formalShadowProgressInFlight.current = true;
+    const canCommit = () => (
+      mounted.current
+      && historyTabActive.current
+      && requestGeneration === formalShadowProgressRequestGeneration.current
+    );
+    if (canCommit()) {
+      setFormalShadowProgress(null);
+      setFormalShadowProgressRefreshError('');
+    }
+    try {
+      const response = await fetch(
+        `/api/backend/api/radar/formal-shadow-progress?_t=${Date.now()}`,
+        { cache: 'no-store', signal: controller.signal },
+      );
+      if (!response.ok) throw new Error('真实影子进度暂不可用');
+      const payload = await response.json() as RadarFormalShadowProgressResponse;
+      if (payload.contractVersion !== 'radar-formal-shadow-progress-v1') {
+        throw new Error('真实影子进度数据契约不匹配');
+      }
+      if (!canCommit()) return;
+      setFormalShadowProgress(payload);
+      setRenderedAt(new Date().toISOString());
+    } catch (error) {
+      if (!canCommit()) return;
+      setFormalShadowProgress(null);
+      if (error instanceof Error && error.name === 'AbortError') {
+        setFormalShadowProgressRefreshError('');
+        return;
+      }
+      setFormalShadowProgressRefreshError(
+        error instanceof Error ? error.message : '真实影子进度暂不可用',
+      );
+    } finally {
+      if (requestGeneration === formalShadowProgressRequestGeneration.current) {
+        formalShadowProgressInFlight.current = false;
+        formalShadowProgressAbortController.current = null;
+      }
+    }
+  }, []);
+
   const loadLeaderReviewQueue = useCallback(async (offset = 0) => {
     if (leaderReviewQueueInFlight.current) return;
     leaderReviewQueueInFlight.current = true;
@@ -370,135 +543,23 @@ export default function RadarPage() {
         `/api/backend/api/radar/leaders/review-queue?limit=8&offset=${offset}&_t=${Date.now()}`,
         { cache: 'no-store' },
       );
-      if (!response.ok) throw new Error('D2审核队列暂不可用');
+      if (!response.ok) throw new Error('官方公告清单暂不可用');
       const payload = await response.json() as RadarLeaderReviewQueueResponse;
       if (payload.schemaVersion !== 'radar-leader-review-queue-v1') {
-        throw new Error('D2审核队列数据契约不匹配');
+        throw new Error('官方公告清单数据契约不匹配');
       }
       setLeaderReviewQueue(payload);
       leaderReviewQueueOffset.current = payload.offset;
-      setSelectedReviewDocument(null);
-      setLeaderReviewForm(null);
-      setLeaderReviewSubmitMessage('');
       setLeaderReviewQueueError('');
     } catch (error) {
       setLeaderReviewQueueError(
-        error instanceof Error ? error.message : 'D2审核队列暂不可用',
+        error instanceof Error ? error.message : '官方公告清单暂不可用',
       );
     } finally {
       leaderReviewQueueInFlight.current = false;
       setLeaderReviewQueueLoading(false);
     }
   }, []);
-
-  const loadLeaderReviewDocument = useCallback(async (
-    item: RadarLeaderReviewDocument,
-  ) => {
-    const batchId = leaderReviewQueue?.summary.reviewBatchId;
-    if (!batchId) return;
-    setLeaderReviewQueueLoading(true);
-    try {
-      const params = new URLSearchParams({
-        reviewBatchId: batchId,
-        documentId: item.documentId,
-        candidateCategory: item.candidateCategory,
-        _t: String(Date.now()),
-      });
-      const response = await fetch(
-        `/api/backend/api/radar/leaders/review-queue/document?${params}`,
-        { cache: 'no-store' },
-      );
-      if (!response.ok) throw new Error('公告审核状态暂不可用');
-      const payload = await response.json() as RadarLeaderReviewDocumentResponse;
-      if (payload.schemaVersion !== 'radar-leader-review-document-v1') {
-        throw new Error('公告审核状态契约不匹配');
-      }
-      setSelectedReviewDocument(payload.item);
-      const formResponse = await fetch(
-        `/api/backend/api/radar/leaders/review-queue/review-form?${params.toString()}`,
-        { cache: 'no-store' },
-      );
-      if (!formResponse.ok) throw new Error('公告正文审核预览暂不可用');
-      const formPayload = await formResponse.json() as RadarLeaderReviewFormResponse;
-      if (formPayload.schemaVersion !== 'radar-leader-review-form-v1') {
-        throw new Error('公告正文审核预览契约不匹配');
-      }
-      setLeaderReviewForm(formPayload);
-      setLeaderReviewSubmitMessage('');
-      setLeaderReviewQueueError('');
-    } catch (error) {
-      setLeaderReviewQueueError(
-        error instanceof Error ? error.message : '公告审核状态暂不可用',
-      );
-    } finally {
-      setLeaderReviewQueueLoading(false);
-    }
-  }, [leaderReviewQueue?.summary.reviewBatchId]);
-
-  const submitLeaderReview = useCallback(async (
-    draft: RadarLeaderReviewSubmissionDraft,
-  ) => {
-    if (!leaderReviewForm) return;
-    setLeaderReviewSubmitting(true);
-    setLeaderReviewSubmitMessage('');
-    try {
-      const response = await fetch(
-        '/api/backend/api/radar/leaders/review-queue/review-version',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          cache: 'no-store',
-          body: JSON.stringify(buildLeaderReviewRequestPayload(
-            leaderReviewForm,
-            draft,
-          )),
-        },
-      );
-      const payload = await response.json() as {
-        detail?: string;
-        reviewVersion?: string;
-      };
-      if (!response.ok) throw new Error(payload.detail || '人工审核版本提交失败');
-      setLeaderReviewSubmitMessage(`已保存 ${payload.reviewVersion || '人工审核版本'}`);
-      await loadLeaderReviewQueue(leaderReviewQueueOffset.current);
-    } catch (error) {
-      setLeaderReviewSubmitMessage(
-        error instanceof Error ? error.message : '人工审核版本提交失败',
-      );
-    } finally {
-      setLeaderReviewSubmitting(false);
-    }
-  }, [leaderReviewForm, loadLeaderReviewQueue]);
-
-  const preflightLeaderReview = useCallback(async (
-    draft: RadarLeaderReviewSubmissionDraft,
-  ) => {
-    if (!leaderReviewForm) {
-      throw new Error('人工审核表单尚未就绪');
-    }
-    const response = await fetch(
-      '/api/backend/api/radar/leaders/review-queue/review-version/preflight',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify(buildLeaderReviewRequestPayload(
-          leaderReviewForm,
-          draft,
-        )),
-      },
-    );
-    const payload = await response.json() as (
-      RadarLeaderReviewVersionPreflightResponse & { detail?: string }
-    );
-    if (!response.ok) {
-      throw new Error(payload.detail || '第二个D8版本预检失败');
-    }
-    if (payload.schemaVersion !== 'radar-leader-review-version-preflight-v1') {
-      throw new Error('第二个D8版本预检契约不匹配');
-    }
-    return payload;
-  }, [leaderReviewForm]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadOverview(false), 0);
@@ -525,15 +586,21 @@ export default function RadarPage() {
 
   useEffect(() => {
     if (activeTab !== 'etf') return;
-    const initialTimer = window.setTimeout(() => void loadEtfs(), 0);
+    const initialTimer = window.setTimeout(() => {
+      void loadEtfs();
+      void loadEtfResearch();
+    }, 0);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadEtfs();
+      if (document.visibilityState === 'visible') {
+        void loadEtfs();
+        void loadEtfResearch();
+      }
     }, 180_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [activeTab, loadEtfs]);
+  }, [activeTab, loadEtfResearch, loadEtfs]);
 
   useEffect(() => {
     if (activeTab !== 'leaders') return;
@@ -555,28 +622,81 @@ export default function RadarPage() {
 
   useEffect(() => {
     if (activeTab !== 'history') return;
-    const initialTimer = window.setTimeout(() => void loadSectorHistory(), 0);
+    historyTabActive.current = true;
+    const initialTimer = window.setTimeout(() => {
+      void loadSectorHistory();
+      void loadReplayQuality();
+      void loadFormalReadiness();
+      void loadFormalShadowProgress();
+    }, 0);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadSectorHistory();
+      if (document.visibilityState === 'visible') {
+        void loadSectorHistory();
+        void loadReplayQuality();
+        void loadFormalReadiness();
+        void loadFormalShadowProgress();
+      }
     }, 300_000);
     return () => {
+      historyTabActive.current = false;
+      replayRequestGeneration.current += 1;
+      formalReadinessRequestGeneration.current += 1;
+      formalShadowProgressRequestGeneration.current += 1;
+      replayAbortController.current?.abort();
+      formalReadinessAbortController.current?.abort();
+      formalShadowProgressAbortController.current?.abort();
+      replayAbortController.current = null;
+      formalReadinessAbortController.current = null;
+      formalShadowProgressAbortController.current = null;
+      replayInFlight.current = false;
+      formalReadinessInFlight.current = false;
+      formalShadowProgressInFlight.current = false;
+      setReplayQuality(null);
+      setReplayRefreshError('');
+      setFormalReadiness(null);
+      setFormalReadinessRefreshError('');
+      setFormalShadowProgress(null);
+      setFormalShadowProgressRefreshError('');
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [activeTab, loadSectorHistory]);
+  }, [
+    activeTab,
+    loadFormalReadiness,
+    loadFormalShadowProgress,
+    loadReplayQuality,
+    loadSectorHistory,
+  ]);
 
   const refreshNow = async () => {
     await loadOverview(false);
     if (activeTab === 'sectors') await loadSectors();
-    if (activeTab === 'etf') await loadEtfs();
+    if (activeTab === 'etf') {
+      await Promise.all([loadEtfs(), loadEtfResearch()]);
+    }
     if (activeTab === 'leaders') {
       await loadLeaders();
       await loadLeaderReviewQueue(leaderReviewQueueOffset.current);
     }
-    if (activeTab === 'history') await loadSectorHistory();
+    if (activeTab === 'history') {
+      await Promise.all([
+        loadSectorHistory(),
+        loadReplayQuality(true),
+        loadFormalReadiness(true),
+        loadFormalShadowProgress(true),
+      ]);
+    }
   };
 
   const showTab = (tab: RadarTab) => {
+    if (tab === 'history' && activeTab !== 'history') {
+      setReplayQuality(null);
+      setReplayRefreshError('');
+      setFormalReadiness(null);
+      setFormalReadinessRefreshError('');
+      setFormalShadowProgress(null);
+      setFormalShadowProgressRefreshError('');
+    }
     setActiveTab(tab);
   };
 
@@ -624,8 +744,11 @@ export default function RadarPage() {
   const leaderEligibleCount = leaderModule?.summary.eligibleCount || 0;
   const leaderSnapshotReady = Boolean(leaderModule?.lastSuccess);
   const leaderRuntimeEnabled = !('enabledStage' in overview.modules.leaders);
-  const leaderReviewQueueReady = leaderModule?.reviewQueue?.status === 'ready';
-  const leaderReviewVersionCount = leaderModule?.reviewQueue?.reviewVersionCount || 0;
+  const leaderRiskScanReady = leaderModule?.reviewQueue?.status === 'ready';
+  const leaderObservationReady = Boolean(
+    leaderModule?.observation.displayAllowed
+    && leaderModule.observation.candidateCount > 0,
+  );
   const dataHealthy = overview.mode === 'shadow'
     && market.state === 'available'
     && sectorModule.state === 'available';
@@ -644,7 +767,7 @@ export default function RadarPage() {
         <div>
           <span className={styles.eyebrow}>MAINLINE RADAR / VERIFIED SHADOW DATA</span>
           <h1>主线雷达</h1>
-          <p>市场、行业、ETF与三级龙头按各自门槛展示真实影子快照。</p>
+          <p>市场、行业、ETF与龙头观察按真实数据范围展示。</p>
         </div>
         <div className={styles.heroActions}>
           <span className={styles.shadowBadge}>
@@ -688,7 +811,7 @@ export default function RadarPage() {
           <span><b>{sectorModule.summary.totalCount}</b> 行业快照</span>
           <span><b className={styles.greenNumber}>{sectorModule.summary.usableCount}</b> 影子可用</span>
           <span><b>{etfModule.summary.productCount}</b> ETF产品</span>
-          <span><b>{leaderModule?.summary.eligibleCount ?? '—'}</b> 龙头合资格</span>
+          <span><b>{leaderModule?.summary.eligibleCount ?? '—'}</b> 龙头观察候选</span>
           <span className={anomalyCount ? styles.anomalyStat : ''}><b>{anomalyCount}</b> 模块异常</span>
         </div>
       </section>
@@ -728,7 +851,7 @@ export default function RadarPage() {
               stage={etfModule.state === 'not_enabled' ? 5 : undefined}
               metrics={[
                 { label: '产品主档', value: `${etfModule.summary.productCount} 只` },
-                { label: '正式准入', value: `${etfModule.summary.eligibleProductCount} 只` },
+                { label: '完整证据', value: `${etfModule.summary.eligibleProductCount} 只` },
                 { label: '待补证据', value: `${etfModule.summary.missingCount} 只` },
                 {
                   label: '计算覆盖',
@@ -783,7 +906,7 @@ export default function RadarPage() {
                 },
                 {
                   label: '20个交易日影子验证',
-                  detail: '观察达标后再申请正式启用',
+                  detail: '观察达标后自动标记为已验证',
                   status: etfModule.summary.formalStateEnabled ? 'done' : 'pending',
                 },
               ]}
@@ -793,7 +916,7 @@ export default function RadarPage() {
             <ModuleStatePanel
               state={overview.modules.leaders.state}
               title="龙头梯队"
-              description="总览只显示确定性状态机摘要，完整证据与失效条件进入龙头梯队页查看。"
+              description="总览优先显示真实观察候选；证据完整时再附加确定性三级状态。"
               stage={'enabledStage' in overview.modules.leaders
                 ? overview.modules.leaders.enabledStage
                 : undefined}
@@ -805,13 +928,13 @@ export default function RadarPage() {
               ] : [
                 { label: '生产开关', value: '尚未启用' },
                 { label: '影子快照', value: '未生成' },
-                { label: '正式状态', value: '保持关闭' },
+                { label: '三级状态', value: '尚未形成' },
               ]}
               progress={[
                 {
                   label: '阶段6影子入口',
                   value: leaderRuntimeEnabled ? '已启用' : '未启用',
-                  detail: '研究链路开关，不等于正式状态可用',
+                  detail: '用于生成真实观察候选',
                   percent: leaderRuntimeEnabled ? 100 : 0,
                   tone: leaderRuntimeEnabled ? 'good' : 'warning',
                 },
@@ -823,16 +946,16 @@ export default function RadarPage() {
                   tone: leaderCoverage === 100 ? 'good' : 'accent',
                 },
                 {
-                  label: '可用影子快照',
-                  value: leaderSnapshotReady ? '已生成' : '未生成',
-                  detail: '无快照时不展示梯队',
-                  percent: leaderSnapshotReady ? 100 : 0,
-                  tone: leaderSnapshotReady ? 'good' : 'warning',
+                  label: '真实观察快照',
+                  value: leaderObservationReady ? '已生成' : '未生成',
+                  detail: '健康行情与已确认行业映射形成后即可展示',
+                  percent: leaderObservationReady ? 100 : 0,
+                  tone: leaderObservationReady ? 'good' : 'warning',
                 },
                 {
-                  label: '正式可用状态',
-                  value: `${leaderFormalCount} 只`,
-                  detail: '正式门禁通过的龙头数量',
+                  label: '三级规则状态',
+                  value: leaderSnapshotReady ? `${leaderFormalCount} 只已评级` : '尚未形成',
+                  detail: '这是附加研究层，不阻塞观察候选展示',
                   percent: leaderEligibleCount > 0
                     ? (leaderFormalCount / leaderEligibleCount) * 100
                     : 0,
@@ -841,36 +964,33 @@ export default function RadarPage() {
               ]}
               milestones={[
                 {
-                  label: 'D2 官方来源验收',
-                  detail: '385只冻结候选的七类风险公告',
-                  status: leaderReviewQueueReady ? 'done' : 'active',
+                  label: '真实全市场观察',
+                  detail: '健康行情与已确认行业映射形成当轮候选',
+                  status: leaderObservationReady ? 'done' : 'active',
                 },
                 {
-                  label: 'D8 连续人工审核版本',
-                  detail: '至少两个真实连续版本，不复制补位',
-                  status: leaderReviewVersionCount >= 2 ? 'done' : 'active',
+                  label: '官方公告扫描',
+                  detail: '展示官方来源、时间和实际覆盖，不冒充确定风险',
+                  status: leaderRiskScanReady ? 'done' : 'active',
                 },
                 {
-                  label: '风险审核存储迁移',
-                  detail: '生产迁移6与只增审核仓储',
-                  status: leaderReviewQueueReady ? 'done' : 'pending',
+                  label: '监测结果直接展示',
+                  detail: '观察候选与官方公告可直接查看',
+                  status: 'done',
                 },
                 {
-                  label: '阶段6影子启用',
-                  detail: '受控重载后才生成真实梯队快照',
-                  status: leaderRuntimeEnabled ? 'done' : 'pending',
+                  label: '三级规则研究',
+                  detail: '证据完整后附加评分和状态，仍不触发交易',
+                  status: leaderSnapshotReady ? 'done' : 'pending',
                 },
               ]}
               blockers={[
                 ...(!leaderRuntimeEnabled ? ['阶段6影子入口未启用'] : []),
-                ...(leaderReviewVersionCount < 2 ? ['D8真实连续人工版本不足'] : []),
-                ...(!leaderSnapshotReady ? ['龙头候选影子快照尚未生成'] : []),
+                ...(!leaderObservationReady ? ['真实观察候选快照尚未生成'] : []),
               ]}
-              nextStep={leaderReviewVersionCount === 0
-                ? '基于已保存的3份真实正文形成第一个D8人工审核版本，后续再积累第二个连续版本。'
-                : leaderReviewVersionCount === 1
-                  ? '第一个真实D8人工版本已形成；等待包含实质证据变化的第二个连续版本，禁止复制补位。'
-                  : 'D8连续人工版本门槛已具备，等待下一轮影子快照复核。'}
+              nextStep={leaderObservationReady
+                ? '观察候选已可用；继续补充确定性研究证据，不阻塞当前监测。'
+                : '等待下一轮健康全市场行情自动形成真实观察候选。'}
             />
           </div>
         </div>
@@ -910,12 +1030,16 @@ export default function RadarPage() {
           {etfs ? (
             <EtfObservationPanel
               module={etfs.module}
+              research={etfResearch}
+              researchLoadError={etfResearchRefreshError}
               formatTime={formatTime}
               renderedAt={renderedAt}
             />
           ) : (
             <EtfObservationPanel
               module={etfModule}
+              research={etfResearch}
+              researchLoadError={etfResearchRefreshError}
               formatTime={formatTime}
               renderedAt={renderedAt}
             />
@@ -934,16 +1058,9 @@ export default function RadarPage() {
             <LeaderObservationPanel
               module={leaderModule}
               reviewQueuePage={leaderReviewQueue}
-              selectedReviewDocument={selectedReviewDocument}
-              reviewForm={leaderReviewForm}
               reviewQueueLoading={leaderReviewQueueLoading}
               reviewQueueError={leaderReviewQueueError}
-              reviewSubmitting={leaderReviewSubmitting}
-              reviewSubmitMessage={leaderReviewSubmitMessage}
               onReviewPageChange={(offset) => void loadLeaderReviewQueue(offset)}
-              onReviewDocumentSelect={(item) => void loadLeaderReviewDocument(item)}
-              onReviewPreflight={preflightLeaderReview}
-              onReviewSubmit={(draft) => void submitLeaderReview(draft)}
               formatTime={formatTime}
               renderedAt={renderedAt}
             />
@@ -963,6 +1080,16 @@ export default function RadarPage() {
 
       {activeTab === 'history' && (
         <>
+          <RadarStage10ReadinessPanel
+            data={formalReadiness}
+            loadError={formalReadinessRefreshError}
+            shadowProgress={formalShadowProgress}
+            shadowProgressLoadError={formalShadowProgressRefreshError}
+          />
+          <RadarReplayQualityPanel
+            data={replayQuality}
+            loadError={replayRefreshError}
+          />
           {historyRefreshError && (
             <div className={styles.refreshError}>
               {historyRefreshError}。没有用旧数据冒充本轮成功。
@@ -1022,23 +1149,23 @@ export default function RadarPage() {
                 status: sectorHistory.calibrationStatus === 'proposal_ready' ? 'done' : 'active',
               },
               {
-                label: '版本化正式阈值批准',
+                label: '版本化规则状态',
                 detail: sectorHistory.formalApproval
-                  ? `阈值集 ${sectorHistory.thresholdSetId || '—'}，批准于 ${formatDateTime(sectorHistory.approvedAt)}`
-                  : `审阅稿 ${sectorHistory.calibrationIdentity?.slice(0, 12) || '—'}；自动分析不能代替正式批准`,
+                  ? `已加载阈值集 ${sectorHistory.thresholdSetId || '—'}，更新于 ${formatDateTime(sectorHistory.approvedAt)}`
+                  : `当前校准版本 ${sectorHistory.calibrationIdentity?.slice(0, 12) || '—'}，系统继续自动校验`,
                 status: sectorHistory.formalApproval ? 'done' : 'pending',
               },
             ] : []}
             blockers={sectorHistory?.state === 'available' && !sectorHistory.formalApproval
               ? [
-                '真实训练集与留出集已经严格隔离；正式八状态策略尚未批准',
+                '真实训练集与留出集已经严格隔离；八状态策略版本尚未完成校验',
                 ...sectorHistory.thresholdReviewReasonCodes,
               ]
               : sectorHistory?.reasonCodes || []}
             nextStep={sectorHistory?.state === 'available'
               ? (sectorHistory.formalApproval
-                ? '批准版本已可由行业规则同轮证据包自动加载；其他真实门继续独立核验'
-                : '填写完整八状态进入/保持/退出策略并作一次具名批准；系统随后自动校验和接入')
+                ? '规则版本已可由行业监测自动加载；其他真实数据继续独立校验'
+                : '系统继续用真实样本自动校验八状态进入、保持与退出策略')
               : '运行全自动历史同步后，本页将直接读取持久化结果'}
             badges={[
               '不展示虚假胜率',

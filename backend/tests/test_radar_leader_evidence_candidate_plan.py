@@ -707,8 +707,7 @@ class LeaderEvidenceCandidatePlanTests(unittest.TestCase):
         tradability = (
             tradability_helpers.LeaderTradabilityProductionCollectorTests(
                 methodName=(
-                    "test_source_clock_skew_within_existing_five_seconds_"
-                    "is_accepted"
+                    "test_official_ten_second_bucket_skew_is_accepted"
                 )
             )
         )

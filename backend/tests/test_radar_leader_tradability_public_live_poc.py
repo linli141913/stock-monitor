@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+import hashlib
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -16,6 +17,7 @@ from radar.leader_tradability_features import (
     TradingSessionStatus,
 )
 from radar.sources.leader_tradability_public_live_poc import (
+    MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES,
     PublicCalendarDocument,
     PublicLivePocSourceBundle,
     PublicLivePocSourceError,
@@ -469,6 +471,41 @@ class PublicLivePocTests(unittest.TestCase):
             datetime(2025, 12, 22, tzinfo=SHANGHAI_TZ),
         )
 
+    def test_calendar_fetch_preserves_exact_response_content_bytes(self):
+        raw = (
+            b"<a title=\"\xe5\x85\xb3\xe4\xba\x8e\xe4\xb8\x8a\xe6\xb5\xb7\xe8\xaf\x81\xe5\x88\xb8\xe4\xba\xa4\xe6\x98\x93\xe6\x89\x802026\xe5\xb9\xb4\xe9\x83\xa8\xe5\x88\x86\xe8\x8a\x82\xe5\x81\x87\xe6\x97\xa5\xe4\xbc\x91\xe5\xb8\x82\xe5\xae\x89\xe6\x8e\x92\xe7\x9a\x84\xe9\x80\x9a\xe7\x9f\xa5\">"
+            b"</a><span>2025-12-22</span>"
+        )
+
+        class Response:
+            apparent_encoding = "utf-8"
+            encoding = "utf-8"
+            content = raw
+            headers = {}
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+        class Session:
+            trust_env = True
+
+            @staticmethod
+            def get(*args, **kwargs):
+                return Response()
+
+        document = _fetch_calendar_document(
+            as_of=AS_OF,
+            session=Session(),
+        )
+
+        self.assertEqual(document.raw_content, raw)
+        self.assertEqual(
+            document.raw_content_sha256,
+            "sha256:" + hashlib.sha256(raw).hexdigest(),
+        )
+        self.assertNotIn(raw.decode("utf-8"), repr(document))
+
     def test_calendar_retries_once_when_first_page_lacks_source_time(self):
         incomplete = b"<strong>2026\xe5\xb9\xb4\xe4\xbc\x91\xe5\xb8\x82\xe5\xae\x89\xe6\x8e\x92</strong>"
         complete = """
@@ -906,6 +943,88 @@ class PublicLivePocTests(unittest.TestCase):
             values[0].source_contract_id,
             "sse-a-share-trading-calendar-v1",
         )
+
+    def test_calendar_evidence_hashes_original_bytes_not_utf8_reencoding(self):
+        text = """
+            <strong>2026年休市安排</strong><table>
+            <tr><td>元旦：1月1日至1月3日休市</td></tr>
+            <tr><td>春节：2月15日至2月23日休市</td></tr>
+            <tr><td>清明节：4月4日至4月6日休市</td></tr>
+            <tr><td>劳动节：5月1日至5月5日休市</td></tr>
+            <tr><td>端午节：6月19日至6月21日休市</td></tr>
+            <tr><td>中秋节：9月25日至9月27日休市</td></tr>
+            <tr><td>国庆节：10月1日至10月7日休市</td></tr>
+            </table>
+        """
+        raw = text.encode("gb18030")
+        document = PublicCalendarDocument(
+            source_url=(
+                "https://www.sse.com.cn/disclosure/dealinstruc/closed/"
+            ),
+            document_id="sse-a-share-calendar-2026",
+            text=text,
+            source_time=AS_OF,
+            fetched_at=AS_OF,
+            raw_content=raw,
+            text_encoding="gb18030",
+        )
+
+        evidence = build_public_calendar_evidence(
+            document=document,
+            trading_date=AS_OF.date(),
+            exchanges=("sse",),
+        )[0]
+
+        self.assertEqual(
+            evidence.content_sha256,
+            "sha256:" + hashlib.sha256(raw).hexdigest(),
+        )
+        self.assertNotEqual(
+            evidence.content_sha256,
+            "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        )
+
+    def test_calendar_document_rejects_unverified_raw_bytes_and_time_order(self):
+        values = (
+            {
+                "raw_content": b"calendar-v1",
+                "text_encoding": "utf-8",
+                "text": "calendar-v2",
+                "source_time": AS_OF,
+                "fetched_at": AS_OF,
+            },
+            {
+                "raw_content": None,
+                "text_encoding": None,
+                "text": "calendar-v1",
+                "source_time": AS_OF + timedelta(seconds=1),
+                "fetched_at": AS_OF,
+            },
+            {
+                "raw_content": b"x" * (
+                    MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES + 1
+                ),
+                "text_encoding": "utf-8",
+                "text": "x" * (
+                    MAXIMUM_PUBLIC_CALENDAR_RAW_CONTENT_BYTES + 1
+                ),
+                "source_time": AS_OF,
+                "fetched_at": AS_OF,
+            },
+        )
+        for changes in values:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "public_live_calendar_document",
+                ):
+                    PublicCalendarDocument(
+                        source_url=(
+                            "https://www.sse.com.cn/disclosure/"
+                        ),
+                        document_id="sse-a-share-calendar-2026",
+                        **changes,
+                    )
 
 
 if __name__ == "__main__":

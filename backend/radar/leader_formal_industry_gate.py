@@ -29,6 +29,7 @@ from radar.leader_runtime_candidate_plan import (
     LeaderRuntimeCandidatePlan,
     is_leader_runtime_candidate_plan_valid,
 )
+from radar.sector_rule_readiness import SectorThresholdApprovalEvidence
 
 
 LEADER_FORMAL_INDUSTRY_GATE_EVIDENCE_CONTRACT_ID = (
@@ -36,12 +37,90 @@ LEADER_FORMAL_INDUSTRY_GATE_EVIDENCE_CONTRACT_ID = (
 )
 INPUT_UNVERIFIED = "leader_formal_industry_gate_input_unverified"
 POLICY_UNAPPROVED = "leader_formal_industry_gate_policy_unapproved"
+POLICY_INPUT_UNVERIFIED = (
+    "leader_formal_industry_gate_policy_input_unverified"
+)
+SECTOR_STATE_APPROVAL_NOT_APPLICABLE = (
+    "leader_formal_industry_gate_sector_state_approval_not_applicable"
+)
+LEADER_FORMAL_INDUSTRY_GATE_POLICY_AUDIT_CONTRACT_ID = (
+    "radar-leader-formal-industry-gate-policy-audit-v1"
+)
+DOCUMENTED_QUALITATIVE_REQUIREMENTS = (
+    "industry_state_active",
+    "not_single_stock_advance",
+    "industry_turnover_qualified",
+    "diffusion_persistence_or_reflux",
+    "catalyst_source_reliable",
+    "data_complete",
+)
+POLICY_REQUIREMENT_SOURCE_REFERENCES = (
+    "docs/股票监测助手V5.0升级规划书.md::7.4评分计算合同",
+    "docs/股票监测助手V5.0升级规划书.md::9.5硬门槛/行业门槛",
+    "docs/股票监测助手V5.0升级规划书.md::9.8状态机正式合同",
+)
+REQUIRED_POLICY_FIELDS = (
+    "metric_fields_and_units",
+    "primary_and_fallback_sources",
+    "source_time_and_max_latency",
+    "statistics_window",
+    "minimum_sample_size",
+    "normalization_formula_and_bounds",
+    "single_stock_concentration_threshold",
+    "industry_turnover_threshold",
+    "diffusion_persistence_reflux_rule",
+    "catalyst_source_admission_rule",
+    "minimum_data_completeness",
+    "missing_stale_conflict_policy",
+    "degraded_calculation_policy",
+    "entry_hold_exit_thresholds",
+    "approval_identity_and_time",
+)
 
 
 class LeaderFormalIndustryGateEvidenceStatus(str, Enum):
     READY = "ready"
     MISSING = "missing"
     BLOCKED = "blocked"
+
+
+class LeaderFormalIndustryGatePolicyAuditStatus(str, Enum):
+    UNAPPROVED = "unapproved"
+    SOURCE_UNVERIFIED = "source_unverified"
+
+
+@dataclass(frozen=True)
+class LeaderFormalIndustryGatePolicyAudit:
+    status: LeaderFormalIndustryGatePolicyAuditStatus
+    qualitative_requirements: Tuple[str, ...]
+    requirement_source_references: Tuple[str, ...]
+    required_policy_fields: Tuple[str, ...]
+    observed_approval_contract_id: Optional[str]
+    observed_approval_id: Optional[str]
+    reasons: Tuple[str, ...]
+    contract_id: str = (
+        LEADER_FORMAL_INDUSTRY_GATE_POLICY_AUDIT_CONTRACT_ID
+    )
+    approved: bool = False
+
+    def to_evidence(self) -> Mapping[str, object]:
+        return {
+            "contractId": self.contract_id,
+            "status": self.status.value,
+            "qualitativeRequirements": list(
+                self.qualitative_requirements
+            ),
+            "requirementSourceReferences": list(
+                self.requirement_source_references
+            ),
+            "requiredPolicyFields": list(self.required_policy_fields),
+            "observedApprovalContractId": (
+                self.observed_approval_contract_id
+            ),
+            "observedApprovalId": self.observed_approval_id,
+            "reasons": list(self.reasons),
+            "approved": False,
+        }
 
 
 @dataclass(frozen=True)
@@ -80,6 +159,7 @@ class LeaderFormalIndustryGateEvidenceResult:
     parent_candidate_plan_id: Optional[str]
     candidate_plan_id: Optional[str]
     industry_scope_snapshot_id: Optional[str]
+    policy_audit: LeaderFormalIndustryGatePolicyAudit
     items: Tuple[LeaderFormalIndustryGateEvidenceItem, ...] = ()
     reasons: Tuple[str, ...] = ()
     contract_id: str = LEADER_FORMAL_INDUSTRY_GATE_EVIDENCE_CONTRACT_ID
@@ -107,6 +187,7 @@ class LeaderFormalIndustryGateEvidenceResult:
             "candidateCount": self.candidate_count,
             "industryScopeSnapshotId": self.industry_scope_snapshot_id,
             "evidenceReadyCount": self.evidence_ready_count,
+            "policyAudit": self.policy_audit.to_evidence(),
             "items": [item.to_evidence() for item in self.items],
             "reasons": list(self.reasons),
             "gate": {
@@ -118,7 +199,65 @@ class LeaderFormalIndustryGateEvidenceResult:
         }
 
 
-def _blocked(plan: Any) -> LeaderFormalIndustryGateEvidenceResult:
+def _build_policy_audit(
+    policy_approval: Any,
+) -> LeaderFormalIndustryGatePolicyAudit:
+    if policy_approval is None:
+        return LeaderFormalIndustryGatePolicyAudit(
+            status=(
+                LeaderFormalIndustryGatePolicyAuditStatus.UNAPPROVED
+            ),
+            qualitative_requirements=(
+                DOCUMENTED_QUALITATIVE_REQUIREMENTS
+            ),
+            requirement_source_references=(
+                POLICY_REQUIREMENT_SOURCE_REFERENCES
+            ),
+            required_policy_fields=REQUIRED_POLICY_FIELDS,
+            observed_approval_contract_id=None,
+            observed_approval_id=None,
+            reasons=(POLICY_UNAPPROVED,),
+        )
+    if type(policy_approval) is SectorThresholdApprovalEvidence:
+        return LeaderFormalIndustryGatePolicyAudit(
+            status=(
+                LeaderFormalIndustryGatePolicyAuditStatus.UNAPPROVED
+            ),
+            qualitative_requirements=(
+                DOCUMENTED_QUALITATIVE_REQUIREMENTS
+            ),
+            requirement_source_references=(
+                POLICY_REQUIREMENT_SOURCE_REFERENCES
+            ),
+            required_policy_fields=REQUIRED_POLICY_FIELDS,
+            observed_approval_contract_id=policy_approval.contract_id,
+            observed_approval_id=policy_approval.approval_id,
+            reasons=(
+                SECTOR_STATE_APPROVAL_NOT_APPLICABLE,
+                POLICY_UNAPPROVED,
+            ),
+        )
+    return LeaderFormalIndustryGatePolicyAudit(
+        status=(
+            LeaderFormalIndustryGatePolicyAuditStatus.SOURCE_UNVERIFIED
+        ),
+        qualitative_requirements=DOCUMENTED_QUALITATIVE_REQUIREMENTS,
+        requirement_source_references=(
+            POLICY_REQUIREMENT_SOURCE_REFERENCES
+        ),
+        required_policy_fields=REQUIRED_POLICY_FIELDS,
+        observed_approval_contract_id=None,
+        observed_approval_id=None,
+        reasons=(POLICY_INPUT_UNVERIFIED,),
+    )
+
+
+def _blocked(
+    plan: Any,
+    *,
+    policy_audit: LeaderFormalIndustryGatePolicyAudit,
+    reason: str = INPUT_UNVERIFIED,
+) -> LeaderFormalIndustryGateEvidenceResult:
     valid = (
         plan
         if isinstance(plan, LeaderRuntimeCandidatePlan)
@@ -134,7 +273,8 @@ def _blocked(plan: Any) -> LeaderFormalIndustryGateEvidenceResult:
         ),
         candidate_plan_id=None,
         industry_scope_snapshot_id=None,
-        reasons=(INPUT_UNVERIFIED,),
+        policy_audit=policy_audit,
+        reasons=(reason,),
     )
 
 
@@ -148,8 +288,20 @@ def build_leader_formal_industry_gate_evidence(
     candidate_plan: Any,
     industry_scope: Any,
     single_pass: Any,
+    policy_approval: Any = None,
 ) -> LeaderFormalIndustryGateEvidenceResult:
     """绑定可信行业状态与父池横截面；不判定正式通过。"""
+
+    policy_audit = _build_policy_audit(policy_approval)
+    if (
+        policy_audit.status
+        is LeaderFormalIndustryGatePolicyAuditStatus.SOURCE_UNVERIFIED
+    ):
+        return _blocked(
+            parent_plan,
+            policy_audit=policy_audit,
+            reason=POLICY_INPUT_UNVERIFIED,
+        )
 
     try:
         inputs_valid = all((
@@ -186,7 +338,7 @@ def build_leader_formal_industry_gate_evidence(
     except (AttributeError, KeyError, TypeError, ValueError):
         inputs_valid = False
     if not inputs_valid:
-        return _blocked(parent_plan)
+        return _blocked(parent_plan, policy_audit=policy_audit)
 
     scope_by_code = {
         item.industry_code: item.state
@@ -204,7 +356,7 @@ def build_leader_formal_industry_gate_evidence(
             or formal.industry_code != plan_item.industry_code
             or plan_item.industry_code not in scope_by_code
         ):
-            return _blocked(parent_plan)
+            return _blocked(parent_plan, policy_audit=policy_audit)
         sector = formal.item("sector_formal_gate")
         cross_section = formal.item("cross_section")
         sector_ready = (
@@ -256,6 +408,7 @@ def build_leader_formal_industry_gate_evidence(
         parent_candidate_plan_id=parent_plan.candidate_set_id,
         candidate_plan_id=candidate_plan.candidate_set_id,
         industry_scope_snapshot_id=industry_scope.state_snapshot_id,
+        policy_audit=policy_audit,
         items=tuple(items),
         reasons=_dedupe(tuple(
             reason for item in items for reason in item.reasons

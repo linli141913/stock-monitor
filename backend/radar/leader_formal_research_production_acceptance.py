@@ -376,7 +376,9 @@ def build_leader_formal_research_production_acceptance(
             or source_time > as_of + timedelta(
                 seconds=MAXIMUM_FUTURE_SKEW_SECONDS
             )
-            or fetched_at < source_time
+            or fetched_at + timedelta(
+                seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            ) < source_time
         ):
             if component_name not in missing:
                 missing.append(component_name)

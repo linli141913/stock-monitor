@@ -586,12 +586,12 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
                 patch(
                     "radar.leader_business_automatic_evidence."
                     "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
-                    "radar-leader-business-deterministic-relation-v32",
+                    "radar-leader-business-deterministic-relation-v35-test",
                 ),
                 patch(
                     "radar.leader_business_deterministic_verification."
                     "DETERMINISTIC_BUSINESS_RELATION_RULE_VERSION",
-                    "radar-leader-business-deterministic-relation-v32",
+                    "radar-leader-business-deterministic-relation-v35-test",
                 ),
             ):
                 second = self.run_batch(
@@ -610,7 +610,7 @@ class LeaderBusinessAutomaticEvidenceTests(unittest.TestCase):
             self.assertIsNotNone(second.items[0].artifact)
             self.assertEqual(
                 second.items[0].artifact.rule_version,
-                "radar-leader-business-deterministic-relation-v32",
+                "radar-leader-business-deterministic-relation-v35-test",
             )
 
 

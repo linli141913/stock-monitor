@@ -1,3 +1,4 @@
+import copy
 import math
 import unittest
 from dataclasses import replace
@@ -10,6 +11,7 @@ from radar.contracts import (
     EtfMetricState,
     EtfProductMasterRecord,
     EtfRankingInputAudit,
+    EvidenceTemporalBasis,
     EvidenceVersionKind,
     IndexConstituentEvidenceItem,
     IndexConstituentSetEvidence,
@@ -24,12 +26,18 @@ from radar.etf_formal_admission import (
     EtfIndustryScopeKind,
     EtfLifecycleEvidence,
     EtfLifecycleStatus,
+    build_etf_industry_scope_evidence,
+    build_etf_lifecycle_evidence_from_current_master,
     provide_etf_formal_admission_evidence,
 )
 from radar.etf_stage5_policy import (
     DEFAULT_ETF_RULE_POLICY,
     REQUIRED_RANKING_FIELDS,
     EtfRulePolicy,
+)
+import radar.etf_formal_admission as etf_formal_admission
+from radar.sources.etf_index_evidence import (
+    build_official_csindex_identity_resolution,
 )
 
 
@@ -267,6 +275,204 @@ def provide(**overrides):
 
 
 class EtfFormalAdmissionTests(unittest.TestCase):
+    def test_formal_admission_bundle_roundtrip_binds_sample_run_time_and_hash(self):
+        builder = getattr(
+            etf_formal_admission,
+            "build_etf_formal_admission_bundle",
+            None,
+        )
+        loader = getattr(
+            etf_formal_admission,
+            "load_etf_formal_admission_bundle",
+            None,
+        )
+        self.assertTrue(callable(builder))
+        self.assertTrue(callable(loader))
+        if not callable(builder) or not callable(loader):
+            return
+
+        admission = provide(policy=DEFAULT_ETF_RULE_POLICY)
+        bundle = builder(
+            sample_id="sample-1",
+            radar_run_id="run-1",
+            as_of=AS_OF,
+            admissions=(admission,),
+        )
+        restored = loader(bundle.to_evidence())
+
+        self.assertEqual(restored.sample_id, "sample-1")
+        self.assertEqual(restored.radar_run_id, "run-1")
+        self.assertEqual(restored.as_of, AS_OF)
+        self.assertEqual(restored.admissions, (admission,))
+        self.assertEqual(len(restored.snapshot_sha256), 64)
+        self.assertEqual(
+            bundle.to_evidence()["admissions"][0]["monitoringStatus"],
+            "ready",
+        )
+        self.assertEqual(
+            bundle.to_evidence()["admissions"][0]["rankingStatus"],
+            "missing",
+        )
+
+    def test_formal_admission_bundle_rejects_tampered_or_mismatched_evidence(self):
+        builder = getattr(
+            etf_formal_admission,
+            "build_etf_formal_admission_bundle",
+            None,
+        )
+        loader = getattr(
+            etf_formal_admission,
+            "load_etf_formal_admission_bundle",
+            None,
+        )
+        self.assertTrue(callable(builder))
+        self.assertTrue(callable(loader))
+        if not callable(builder) or not callable(loader):
+            return
+
+        bundle = builder(
+            sample_id="sample-1",
+            radar_run_id="run-1",
+            as_of=AS_OF,
+            admissions=(provide(policy=DEFAULT_ETF_RULE_POLICY),),
+        )
+        tampered = copy.deepcopy(bundle.to_evidence())
+        tampered["admissions"][0]["monitoringStatus"] = "missing"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "etf_formal_admission_bundle_unverified",
+        ):
+            loader(tampered)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "etf_formal_admission_bundle_identity_mismatch",
+        ):
+            builder(
+                sample_id="sample-1",
+                radar_run_id="run-1",
+                as_of=AS_OF + timedelta(minutes=1),
+                admissions=(provide(),),
+            )
+
+    def test_forward_current_official_index_evidence_enters_current_admission(self):
+        current_methodology = methodology().model_copy(update={
+            "temporal_basis": (
+                EvidenceTemporalBasis.CURRENT_OFFICIAL_OBSERVATION
+            ),
+            "effective_from": None,
+            "first_observed_at": AS_OF - timedelta(hours=2),
+            "fetched_at": AS_OF - timedelta(hours=1),
+        })
+        current_constituents = constituents().model_copy(update={
+            "temporal_basis": (
+                EvidenceTemporalBasis.CURRENT_OFFICIAL_OBSERVATION
+            ),
+            "announced_at": None,
+            "effective_from": None,
+            "first_observed_at": AS_OF - timedelta(hours=2),
+            "fetched_at": AS_OF - timedelta(hours=1),
+        })
+
+        result = provide(
+            methodology_evidence=current_methodology,
+            constituent_evidence=current_constituents,
+        )
+
+        self.assertEqual(
+            result.item("index_methodology").status,
+            EtfFormalAdmissionStatus.READY,
+        )
+        self.assertEqual(
+            result.item("index_constituents").status,
+            EtfFormalAdmissionStatus.READY,
+        )
+
+    def test_current_official_master_and_index_classification_build_evidence(self):
+        official_product = product().model_copy(update={
+            "source_fields": {
+                "基金代码": "159915",
+                "上市日期": "2011-12-09",
+            },
+            "fetched_at": AS_OF - timedelta(hours=1),
+        })
+        lifecycle_evidence = (
+            build_etf_lifecycle_evidence_from_current_master(
+                product=official_product,
+                as_of=AS_OF,
+            )
+        )
+        resolution = build_official_csindex_identity_resolution(
+            requested_index_name="中证光伏产业指数",
+            search_payload={
+                "code": "200",
+                "success": True,
+                "data": [{
+                    "indexCode": "931151",
+                    "indexName": "光伏产业",
+                    "indexClassify": "主题",
+                    "publishDate": "2019-04-22",
+                }],
+            },
+            basic_payloads={
+                "931151": {
+                    "code": "200",
+                    "data": {
+                        "indexCode": "931151",
+                        "indexFullNameCn": "中证光伏产业指数",
+                    },
+                },
+            },
+            fetched_at=AS_OF - timedelta(hours=1),
+        )
+        scope_evidence = build_etf_industry_scope_evidence(
+            symbol="515790",
+            index_resolution=resolution,
+            as_of=AS_OF,
+        )
+
+        self.assertEqual(lifecycle_evidence.status, EtfLifecycleStatus.ACTIVE)
+        self.assertEqual(lifecycle_evidence.listing_date, date(2011, 12, 9))
+        self.assertEqual(len(lifecycle_evidence.source_sha256), 64)
+        self.assertEqual(scope_evidence.scope_kind, EtfIndustryScopeKind.THEME)
+        self.assertEqual(scope_evidence.index_code, "931151")
+        self.assertEqual(len(scope_evidence.source_sha256), 64)
+
+    def test_unknown_index_classification_fails_closed(self):
+        resolution = build_official_csindex_identity_resolution(
+            requested_index_name="未知指数",
+            search_payload={
+                "code": "200",
+                "success": True,
+                "data": [{
+                    "indexCode": "931999",
+                    "indexName": "未知",
+                    "indexClassify": "其他",
+                }],
+            },
+            basic_payloads={
+                "931999": {
+                    "code": "200",
+                    "data": {
+                        "indexCode": "931999",
+                        "indexFullNameCn": "未知指数",
+                    },
+                },
+            },
+            fetched_at=AS_OF,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "etf_industry_scope_classification_unverified",
+        ):
+            build_etf_industry_scope_evidence(
+                symbol="515790",
+                index_resolution=resolution,
+                as_of=AS_OF,
+            )
+
     def test_same_identity_complete_chain_returns_only_ready_evidence(self):
         result = provide()
 
@@ -292,13 +498,23 @@ class EtfFormalAdmissionTests(unittest.TestCase):
 
         self.assertEqual(result.status, EtfFormalAdmissionStatus.MISSING)
         self.assertEqual(
+            result.monitoring_status,
+            EtfFormalAdmissionStatus.READY,
+        )
+        self.assertEqual(
+            result.ranking_status,
+            EtfFormalAdmissionStatus.MISSING,
+        )
+        self.assertEqual(
             result.item("rule_policy").reasons,
             (
                 "etf_rule_not_frozen",
-                "formal_source_inputs_incomplete",
                 "ranking_calibration_sample_missing",
             ),
         )
+        evidence = result.to_evidence()
+        self.assertEqual(evidence["monitoringStatus"], "ready")
+        self.assertEqual(evidence["rankingStatus"], "missing")
 
     def test_current_source_gaps_are_reported_without_filling_values(self):
         result = provide_etf_formal_admission_evidence(

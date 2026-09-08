@@ -563,7 +563,7 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
         self.assertNotIn("public_quote_fetch_before_source", report.reasons)
         self.assertNotIn("public_source_fetch_before_source", report.reasons)
 
-    def test_source_clock_skew_beyond_contract_tolerance_is_rejected(self):
+    def test_exchange_bucket_skew_does_not_relax_quote_clock_contract(self):
         fetched_at = datetime(
             2026, 8, 3, 9, 59, 40, tzinfo=SHANGHAI_TZ
         )
@@ -582,6 +582,22 @@ class PublicCompositeTradabilityPocTests(unittest.TestCase):
         )
 
         self.assertIn("public_quote_fetch_before_source", report.reasons)
+        self.assertNotIn("public_source_fetch_before_source", report.reasons)
+
+    def test_exchange_source_clock_skew_beyond_ten_seconds_is_rejected(self):
+        fetched_at = datetime(
+            2026, 8, 3, 9, 59, 40, tzinfo=SHANGHAI_TZ
+        )
+        source_time = datetime(
+            2026, 8, 3, 9, 59, 51, tzinfo=SHANGHAI_TZ
+        )
+        report = self.run_poc(
+            official_observations=(self.complete_official(
+                source_time=source_time,
+                fetched_at=fetched_at,
+            ),),
+        )
+
         self.assertIn("public_source_fetch_before_source", report.reasons)
 
     def test_explicit_suspension_conflict_blocks_record(self):

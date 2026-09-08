@@ -37,6 +37,7 @@ PUBLIC_COMPOSITE_TRADABILITY_CONTRACT_ID = (
     "radar-leader-tradability-public-composite-poc-v1"
 )
 MAXIMUM_FUTURE_SKEW_SECONDS = 5
+MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS = 10
 MAXIMUM_DYNAMIC_SOURCE_AGE_SECONDS = 90
 MAXIMUM_COMPOSITE_SCOPE_COUNT = 6000
 _SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -712,8 +713,13 @@ def _observation_reasons(
     seen = set()
     seen_symbols = set()
     as_of_utc = _aware_utc(query.as_of)
+    source_clock_skew_seconds = (
+        MAXIMUM_EXCHANGE_SOURCE_CLOCK_SKEW_SECONDS
+        if expected_kind == PublicSourceKind.EXCHANGE_OFFICIAL
+        else MAXIMUM_FUTURE_SKEW_SECONDS
+    )
     maximum_time = (
-        as_of_utc + timedelta(seconds=MAXIMUM_FUTURE_SKEW_SECONDS)
+        as_of_utc + timedelta(seconds=source_clock_skew_seconds)
         if as_of_utc is not None
         else None
     )
@@ -784,7 +790,9 @@ def _observation_reasons(
         ):
             reasons.append("public_source_future_time")
         elif fetched_at + timedelta(
-            seconds=MAXIMUM_FUTURE_SKEW_SECONDS
+            seconds=(
+                source_clock_skew_seconds
+            )
         ) < source_time:
             reasons.append("public_source_fetch_before_source")
         effective_from = item.effective_from

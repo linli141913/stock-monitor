@@ -1,7 +1,841 @@
 # 股票监测助手 V5 当前续做检查点
 
-> 保存时间：2026-08-28 16:01 CST
+> 保存时间：2026-09-08 15:20 CST
 > 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08阶段9首个development真实收盘基线登记
+
+- 15:15 CST确认已越过项目安全收盘门15:05，且今天development任务包、输出包存在、独立输出目录尚不存在、没有重复日终采集进程。使用公开腾讯行情和当前强类型合同完成一次独立真实收盘采集：状态`ready`，证券`7213/7213`、四个固定市场指数`4/4`，缺失0；工件位于`/private/tmp/stage9-objective-daily-close-20260908-development-v1`。该独立工件只作真实诊断，没有绕过正式活动登记门。
+- 正式活动拒绝外部CLI直接塞入`daily-snapshot`，原因是`formal_sequence`只允许活动自身的恢复入口续采，避免绕过样本身份与活动revision门。没有为此改代码或放宽合同；改用既有正式活动`resume`入口重新采集并原子登记，唯一正式快照为`/private/tmp/stage9-replay-campaign-formal-20260907-v2/artifacts/stage9-cohort-1f24102622550f5ff3203dd0/daily-2026-09-08-r3/daily-outcome-snapshot.json`。
+- 正式快照合同为`radar-replay-outcome-daily-snapshot-v1`，状态`ready`，抓取时间`2026-09-08T15:17:44.443282+08:00`，证券`7213/7213`、指数`4/4`、缺失0、原因空；快照ID为`stage9-outcome-daily-a8ac349512b64c7feae89ed7`，文件SHA-256为`e3ae3dae24ed317e96b6fc60b707a9876234d0a50c76cdaaa838b8e991df401a`。来源身份分别绑定腾讯证券收盘原文哈希`4cc0a2af...`和四指数原文哈希`a6f67c6b...`。
+- 正式campaign现为`stage9-formal-forward-20260907-v2/formal_sequence/revision=3/cohort=1`，development样本`forward-development-20260908T103027529340`及其run`stage6-prefreeze-20260908T101112546517`已精确绑定1个收盘日。状态`incomplete_partitions`只表示calibration与holdout尚未登记；第二次只读恢复返回`daily_snapshot_verified`且revision仍为3，证明当日快照幂等、没有重复登记。最新状态文件SHA-256为`46017fd77d27167e25307e4f347334e2468f66954e532fada488b4063ef16fd1`。
+- 新鲜验证：日终合同、日终CLI、campaign及campaign CLI联合65项全部`OK`；`git diff --check`通过，暂存区为空。4000仍为node PID47371、8001仍为Python PID47135；聚合健康仅因行业特征真实数据质量为`backgroundTasks=degraded`，其他组件healthy。本轮未直接读写生产SQLite、未调用付费AI、未修改运行环境/正式开关、未重载服务、未Git提交或推送；91个已跟踪修改和140个未跟踪路径全部保留。
+
+下一步：1）下一个有效交易日连续竞价窗口通过阶段10唯一入口登记`calibration`样本，同时继续独立累计趋势、ETF和龙头观察；2）calibration样本当日15:05后立即登记其真实收盘基线；3）再下一个不同交易日登记`holdout`并按相同步骤采集基线，随后逐日补齐每个样本所需的后续5个交易日事实，成熟后自动生成客观标签和阶段9总质量报告。
+
+> 保存时间：2026-09-08 13:44 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08阶段10真实影子进度运行接线与页面验收
+
+- 用户明确允许开始上个检查点所列的本地运行接线。已按TDD先给LaunchAgent资产测试增加固定只读台账路径断言，红灯为缺少`RADAR_FORMAL_SHADOW_LEDGER_DIR`；随后将`/private/tmp/stage10-formal-shadow-ledger-v1`写入FastAPI基础、雷达关闭、行业、市场、ETF、龙头及D8七份配置模板，确保以后切换既有运行档位不会丢失只读台账路径。该变量只让新接口读取内容寻址JSON台账，不开启正式执行、不触发采集、不访问SQLite。
+- `backend/tests/test_launchd_assets.py`共7项转绿，`ops/launchd/manage.sh validate`通过。受控执行既有`enable-leader-stage6`运行档位前复核影子模式、ETF阶段5和龙头阶段6仍为true，D8写入未开启；运行资产归档到`/Users/linjian/Library/LaunchAgents/stock-monitor-archive/20260908-132917-radar-2b6b2b`，FastAPI与ngrok重载成功，ngrok未停止。仓库与已安装FastAPI plist的SHA-256一致为`bfe3ef1fe266f9949d124a982c13b121804191ed2004422f9a0f95a084872292`。
+- 8001新后端为Python PID47135，4000新前端为node PID47371。后端和前端代理的`/api/radar/formal-shadow-progress`均HTTP 200，精确返回趋势`2/20`、ETF`2/5`、龙头`1/20`，最新连续数`2/2/1`，最近有效日均为`2026-09-08`，台账SHA-256为`7fd9bd643f91c01e0d8cf45a4126b41f640f340797dc71c194d41f424ee9d35a`。
+- 已在项目标准地址`http://localhost:4000/radar`完成真实浏览器16:9验收并将页面保留给用户：进入“历史验证”后可见“真实影子台账 已验证载入”、短哈希和三项真实进度；精确元素计数为趋势1、ETF 1、龙头1、已验证台账1，误导性`0/20`为0。浏览器控制台0错误/0警告，正式就绪、真实影子进度、最新回放和行业历史请求均为200；正式开关和九项正式证据门仍保持关闭/未载入，没有把影子天数冒充正式启用。
+- 13:42复核新后端进程启动后的完整日志范围：行情、ETF行情、市场特征和ETF产品主档任务持续成功，行业特征按真实数据质量返回`completed/degraded`；新进程范围内没有`state=failed`、异常、Traceback或SQLite I/O错误。聚合健康因此仍为`degraded`且只有`backgroundTasks=degraded`，这是健康合同对任一数据质量降级的准确映射，不是4000/8001宕机；FastAPI、隧道和前端均healthy。重载前旧PID的ETF SQLite I/O失败没有在新进程复现，本轮未直接读取或写入生产SQLite。
+- 13:43最终核对：`git diff --check`通过，暂存区为空；Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，91个已跟踪修改和140个未跟踪路径全部保留。本轮未提交或推送、未调用付费AI、未启用D8写入或其他正式开关、未部署。
+
+下一步：1）2026-09-08 15:05后仅对已登记的development cohort采集与当日15:00精确绑定的客观结果；2）下一有效交易日继续由阶段10单入口生成calibration并独立累计趋势、ETF、龙头真实观察；3）后续若行业特征持续降级，按其具体来源完整度单独收口，不把数据质量降级误修成服务故障。
+
+> 保存时间：2026-09-08 12:10 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08阶段10真实影子进度只读接线与占位0彻底解耦
+
+- 已按TDD新增独立只读接口`GET /api/radar/formal-shadow-progress`和强类型合同`radar-formal-shadow-progress-v1`。接口只在显式配置`RADAR_FORMAL_SHADOW_LEDGER_DIR`时读取绝对`/private/tmp`路径下的内容寻址v2台账，复用既有清单、SHA-256、合同、官方日历原文和未来时间校验；不访问SQLite、不请求外部来源、不生成报告，也不表达或触发正式启用。
+- 可用态只投影趋势、ETF、龙头三个模块的真实有效交易日、固定目标日数、最新连续日与最近有效日，并返回台账内容SHA-256；未配置、缺失、篡改、未来时间或路径无法验证时返回`missing/failed`、空模块和稳定原因，绝不返回占位0或泄漏本机路径。正式就绪报告`/formal-readiness`继续保持独立合同和原有兼容行为。
+- 雷达“历史验证”页增加独立影子进度请求、AbortController、代次保护、离页清理和5分钟刷新。阶段10模块优先展示真实台账；正式就绪报告缺失/未验证时显示“未载入 / N”，不会再把关闭态默认0冒充已核验0天。页面同时展示真实台账载入状态、短哈希、最新连续日和最近有效日；正式开关与九项证据门仍只读且未被改动。
+- 12:05以一次性进程环境对真实`/private/tmp/stage10-formal-shadow-ledger-v1`调用新接口，HTTP 200且精确返回趋势`2/20`、ETF`2/5`、龙头`1/20`，最新连续数分别为`2/2/1`，最近有效日均为`2026-09-08`，台账SHA-256仍为`7fd9bd643f91c01e0d8cf45a4126b41f640f340797dc71c194d41f424ee9d35a`。
+- 新鲜验证：新增合同/API及相邻合同43项`OK`，影子台账联合58项`OK`；最终精确隔离生产SQLite的完整后端2838项全部`OK`。前端10项Node测试、`npx tsc --noEmit`、ESLint、Next.js 16.2.10正式build全部通过；触及Python文件编译、`pip check`、跟踪与相关未跟踪文件的空白检查全部通过。
+- 12:10只读核对：4000仍为node PID38232且`/radar` HTTP 200，8001仍为Python PID25456。由于本批没有修改生产环境或重启/重载服务，运行中8001访问新接口仍为404，这是旧进程未加载源码的预期事实；不宣称当前浏览器已显示新进度。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，84个已跟踪修改、140个未跟踪路径全部保留，暂存区为空；未Git提交或推送，未读写生产SQLite、调用付费AI、改变正式开关或部署。
+
+下一步：1）获得独立运行配置与服务重载授权后，将只读台账路径配置为`/private/tmp/stage10-formal-shadow-ledger-v1`，受控重载8001/4000并做16:9页面、网络和控制台验收；2）2026-09-08 15:05后为已登记development cohort采集与当日15:00精确绑定的客观结果；3）下一有效交易日继续由阶段10单入口生成calibration并按冻结规则独立累计三个模块，保持正式门与生产开关关闭直至各自真实证据齐全。
+
+> 保存时间：2026-09-08 11:36 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08龙头首个真实观察日登记、阶段9失败解耦与0天误导修复
+
+- 已按TDD修复阶段9正式cohort失败时丢失阶段6部分成功输入的根因：现场阶段6 CLI摘要不含`prepared.radarRunId`，失败路径又未从已校验工件恢复run身份，导致有效趋势/龙头输入未被返回给阶段10。现在强制从阶段6工件恢复并交叉核对`radarRunId`，失败时仍可独立登记已验证模块；相关57项通过。
+- 11:03独立现场复跑为可交易383/383、15只证据候选但主营确定性`ready=0`，如实保持龙头0天。随后只对巨潮官方PDF中明确已发生的三类句式增加严格识别：出版业务承压、橡胶产品销量/售价不及预期、影视业务收入确认较少；未把&79/002702的模糊语料猜成主营。冻结15只重放后`601949`以年报与公告精确同词“出版”成为真实`ready`，其余14只继续缺失/未验证。
+- 11:21—11:25新鲜盘中整链完成：可交易383/383、15只证据候选、1只官方确定性合资格候选，阶段6五源`ready_for_review`（旧内部状态名，不要求用户审批）。工件为`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260908T112142400999.json`，run为`stage6-prefreeze-20260908T112142400999`；龙头观察登记返回`available`，台账SHA-256为`7fd9bd643f91c01e0d8cf45a4126b41f640f340797dc71c194d41f424ee9d35a`。真实台账现为趋势`2/20`、ETF`2/5`、龙头`1/20`。
+- 新句式使确定性规则版本升为`radar-leader-business-deterministic-relation-v35`。11:27再取新鲜行情时候选池真实漂移为证据候选0，因此未制造v35龙头输入或覆盖已登记观察；该轮工件为`stage6-live-five-source-20260908T112733588244.json`，结果是合法空池。
+- 运行页`/api/radar/formal-readiness`尚无正式就绪报告，后端降级合同返回的默认0被前端误显示为真实`0/20`。前端已改为当报告缺失/未验证时显示“未载入 / 20”，只有读到已核验报告才显示数字；未将`/private/tmp`台账复制到运行生产仓冒充接线。现有4000/8001未重启，所以运行页仍是旧bundle，不宣称已现场加载本修复。
+- 新鲜验证：官方主营联合109项、阶段9失败解耦相关57项、精确隔离生产SQLite后完整后端2831项全部`OK`；前端7项Node合同测试、TypeScript、ESLint和Next.js 16.2.10正式build全部通过；Python编译与`pip check`通过。本轮未读写生产SQLite、未调用付费AI、未修改生产环境/开关，未停止/重启/重载服务，未Git暂存、提交或推送。
+- 11:36只读核对：4000为node PID38232且`/radar` HTTP 200，8001为Python PID25456（根路径404是既有路由行为）；Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，84个已跟踪修改、137个未跟踪路径全部保留，暂存区为空。
+
+下一步：1）2026-09-08 15:05后对已登记的阶段9 development cohort采集与当日15:00收盘精确绑定的客观结果；2）下一有效交日由阶段10单入口生成calibration，并按v35口径继续独立累积趋势/ETF/龙头观察；3）在不伪造`/private/tmp`证据的前提下完成正式就绪报告生成与运行读仓接线，让页面显示真实台账数，不再显示缺报告的默认0。
+
+> 保存时间：2026-09-08 10:43 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-08阶段6五源现场通过、阶段9首份正式样本登记与采集韧性修复
+
+- 09:47起用上交所官方日历确认2026-09-08为A股全日交易日，发布AM冻结时隙`stage10-20260908-am-v1/cn-20260908-am`；schedule input SHA-256为`2fbd87228380e3931631dc95a380f4c31971efbb82b006c477cf6d327f5ac050`，manifest SHA-256为`f4046a9db101bf34cf39299f3a14fba0b5cd296cd50e1a75a60b0f044c7149cb`。
+- 现场阶段6 v3在10:11运行成功：可交易性`completed 383/383`，市场状态`ready/oscillation`，15只证据候选中2只通过官方主营与催化确定性关系，五类真实来源全部`ready_for_review`（仅为旧内部状态名，不要求用户审批）。工件为`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260908T101112546517.json`，顺序行业状态为`sector-state-20260908T101112546517.json`。
+- v3首次因中证指数官方来源单次`ReadTimeout`未登记。保留同一上午交易会话的已验证阶段6冻结工件，10:30重新采集全部前向来源后成功登记首份`development`样本`forward-development-20260908T103027529340`；campaign `stage9-formal-forward-20260907-v2` 升为revision 2/cohort 1，radarRunId严格绑定`stage6-prefreeze-20260908T101112546517`。工件位于`/private/tmp/stage9-formal-cohort-development-20260908-v6`。
+- 本样本前向来源`missing=0/unverifiable=0/failed=0`，公司行动2条精确范围排除已披露，不是来源失败。质量报告当前`not_ready/effectiveness=collecting`是因仅有1份development，尚缺calibration、holdout、客观结果与成熟标签，不是本轮工程失败。ETF 515050的逐产品研究快照已发布，`monitoringStatus=ready`，排名规则仍如实`missing`；运行中`/api/radar/replays/latest/etfs`已200返回新快照。
+- 正式影子台账已真实累计：趋势`2/20`天，ETF`2/5`天，龙头`0/20`天。10:23新一轮真实候选漂移后15只全部缺官方确定性关系，正确保持资格池0；10:11龙头回执后续已超时，没有倒填时间冒充现场登记。四个正式开关仍为false。
+- 为减少无意义整批重跑，已按TDD给阶段9中证指数来源增加严格一次网络重试：仅`Timeout/ConnectionError`重试1次，稳定失败第2次后仍失败关闭。同时修正正式研究来源层与上游不一致的5秒时钟偏差边界，并为行业历史缺口附加精确`symbol/date`诊断，未放宽数据门。
+- 新鲜验证：阶段9/10相关99项、精确隔离生产SQLite后完整后端2828项全部`OK`；触及Python文件编译、`pip check`、`git diff --check`通过。测试日志的AI/来源失败为Mock分支，本轮未调用付费AI。
+- 10:41只读核对：4000为node PID38232，8001为Python PID25456；前端聚合健康`degraded`仅`backgroundTasks`为degraded，FastAPI、隧道与Vercel均healthy。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，84个已跟踪修改与137个未跟踪路径全部保留，未暂存、提交或推送。本轮未读写生产SQLite、未停止/重启/重载服务、未修改生产环境/依赖/正式开关或部署。
+
+下一步：1）2026-09-08 15:05后对已登记cohort运行唯一campaign收盘采集，只接受当日15:00后的真实客观结果；2）下一有效交易日由同一入口生成calibration，后续再生成holdout，并继续独立累积趋势/ETF/龙头观察；3）三分区及后续5交易日标签成熟后组装新`radar-replay-quality-v2`报告，再进入阶段10正式总门；期间继续做不依赖交易时段的产品与工程完善。
+
+> 保存时间：2026-09-07 18:16 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07本地服务加载、16:9运行验收与雷达长列表卡顿修复
+
+- 用户明确授权后，8001按既有 `leader-stage6-enabled` LaunchAgent完成受控重载，旧运行资产已归档至 `/Users/linjian/Library/LaunchAgents/stock-monitor-archive/20260907-175115-radar-2b6b2b`；运行plist与仓库配置SHA-256均为 `3450c43591367aad79160cfca55d415ea3d38ffcc135c3ba10457a075edc10f1`，ETF阶段5、龙头阶段6和影子模式保持开启，未打开D8写入。ngrok未停止。4000也已受控重启并在正式build后再次启动。
+- 1920×1080真实浏览器运行验收确认：总览、ETF、龙头、股票详情和行业洞察均加载新代码；`/api/radar/replays/latest/etfs`、`/api/radar/leaders`、`/api/radar/stocks/000725`及相关代理请求均为200。股票000725如实显示未进入最新公开梯队或观察候选；龙头真实来源概况显示当前2/4可用；ETF逐产品研究快照尚未发布时明确等待，没有猜补。
+- 现场发现ETF页一次渲染2278个官方产品、龙头页一次渲染385张观察候选，分别形成约3.2万和更多可访问节点，是切换卡顿的稳定前端原因。按TDD新增共用渐进列表函数：ETF产品主档与未来ETF研究快照首屏各100条、每次继续100条；龙头观察候选首屏50只、每次继续50只。全部真实数据与总数仍保留，只限制当前DOM窗口，不改后端合同或排序。
+- 红灯先由真实浏览器稳定得到 `etf_product_list_not_windowed:2278` 和 `leader_list_not_windowed:385`，再由单元测试证明窗口/增量边界。修复后真实浏览器精确验证ETF `100→200`、龙头 `50→100`，继续显示按钮和计数正确；最终服务重启后再次验证首屏ETF=100、龙头=50，控制台0错误/0警告。
+- 行业联动现场显示“来自主线雷达”及“当前仅携带上下文，资讯未按行业精确过滤”。通过浏览器网络边界分别验证：真实可用100条；503时显示“公开资讯暂不可用”与“重新读取”；撤销故障后恢复100条；`available_empty`显示“来源可用；当前分类下暂无权威资讯”且无重试按钮，没有混淆失败和空结果。
+- 新鲜验证：前端Node测试由5项增至7项并全部通过，`npx tsc --noEmit`、ESLint、Next.js 16.2.10正式build、`git diff --check`全部通过。16:9截图为 `output/playwright/runtime-20260907/radar-leader-1920x1080.png`。18:15前端聚合健康为全组件healthy；4000为node PID29045，8001为Python PID25456，LaunchAgent/ngrok/4040三信号均正常。
+- Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17提交，82个已跟踪修改与137个未跟踪路径全部保留，未暂存、提交或推送。本轮未直接打开或改写生产SQLite，未调用付费AI、修改生产环境变量/依赖/正式状态开关或部署。
+
+下一步：1）下一个有效交易窗口继续阶段9真实cohort登记，成功时由现有发布链自动生成首份ETF逐产品只读快照；2）随后在对应收盘窗口采集精确绑定的客观结果，继续推进development/calibration/holdout；3）趋势/龙头20日与ETF连续5日真实观察独立累积，非交易时段继续做不依赖行情的性能与产品工程。
+
+> 保存时间：2026-09-07 17:38 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07雷达真实来源摘要、ETF逐产品研究投影与行业失败态整包
+
+- 龙头面板新增稳定强类型 `sourceSummary`，将行情、行业、主营、公告四类真实来源分别展示为可用/部分/缺失/未验证；行情与行业只取当前龙头观察快照，主营只取当前公开梯队内版本化引用，公告只有审核队列与当前候选计划精确绑定时才可标为可用。既有 `sources` 合同保持兼容，未用D2队列、跨计划记录或推断补齐来源。
+- 阶段9 ETF逐产品研究状态已从实时ETF观察中独立出来：新增不访问SQLite的内容寻址发布仓和 `GET /api/radar/replays/latest/etfs` 只读接口，公开 `product_ready_for_index_research`、`active_product_separate_track`、`out_of_scope_asset`、`product_evidence_incomplete` 四种真实状态，并显式保留“仅研究、不可排名、不可正式使用、不可触发状态迁移”。正式cohort入口成功时才发布当前真实输出；缺快照、证据不完整、篡改、未来时间和身份不一致均失败关闭，不从产品主档或实时列表猜补。
+- ETF面板新增“逐产品研究分流”及四类计数、逐只监测/排名状态；龙头面板新增“真实来源概况”。行业洞察现在区分加载中、来源不可用与“来源可用但当前分类无权威资讯”，失败时提供明确重试并使用 `no-store`，不会把请求失败伪装成空结果。
+- 新增后端内容身份、篡改、重复证券、缺快照和只读API回归，以及前端来源/ETF/行业可用性合同测试。TDD过程中先发现并修复回放质量响应 `metrics` 字段误挂到ETF响应的合同回归；随后又以红灯证明仅同步替换外层SHA仍可伪装，补上对ETF桥接器内部语义SHA的独立重算。
+- 新鲜验证：相关后端61项 `OK`；精确将 `database.DB_PATH` 定向到自动清理 `/private/tmp` 库后，完整后端2825项全部 `OK`。前端5项Node合同测试、`npx tsc --noEmit`、ESLint与Next.js 16.2.10正式build全部通过；触及Python文件编译、`pip check`、`git diff --check`通过。
+- 17:37只读核对：4000仍为node PID25121，8001仍为Python PID38436；前端聚合健康接口返回 `degraded`，其中FastAPI、隧道和Vercel为healthy、后台任务为degraded。后端实际监控接口要求Token并返回401，根路径及不存在的 `/api/health` 返回404均不是宕机。本批未停止、重启或重载，运行页尚未加载本批源码，因此不宣称页面已现场生效。
+- Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17提交，82个已跟踪修改与136个未跟踪路径全部保留，未暂存、提交或推送。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）单独获得服务变更授权后受控重启8001和4000，完成16:9页面、控制台、行业失败/空态、ETF逐产品状态和龙头来源摘要的运行验收；2）下一次阶段9真实cohort成功登记时由现有发布链生成首份ETF逐产品只读快照，在此之前页面如实显示尚无快照；3）后续有效交易日继续独立积累趋势/龙头20日和ETF连续5日的真实观察，不再阻断非交易时段产品工程。
+
+> 保存时间：2026-09-07 16:08 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07监测产品去审批化与前端可用性收口
+
+- 雷达页已从用户流程中完整移除D8公告人工审核表单、预检、提交状态及两个POST写入请求；官方公告扫描、来源链接、时间、类别和“可能相关不等于确定风险”只读清单继续保留。后端证据校验和旧合同未删除，只是不再要求普通监测用户操作。
+- 候选股“加入监测列表”修复了假成功：现在必须后端返回2xx后才更新React状态和localStorage，失败则保留原列表并显示“本次未更改”；保留`stockCode + stockName`和10只上限。按钮增加“正在保存”状态，已在列表时仍明确禁用。
+- 股票详情的主线雷达状态已纳入手动行情刷新和两分钟慢刷新，不再必须换股或整页刷新；首个否决原因改为统一中文解释，未知内部代码也不再直接暴露。共用雷达页同一翻译函数。
+- 雷达、ETF、历史验证和阶段10页面已删去“人工批准/审批”及诱导用户参与门禁的可见文案，改为“真实数据完整度、规则版本校验、研究数据完整”。内部安全字段名保持兼容，没有改动状态机或生产开关。
+- 浏览器验收发现长请求可使雷达首屏无限停留在“正在读取”，已按TDD给总览请求增加15秒AbortController超时；超时后会显示明确错误并可重试，不再无限转圈。
+- 新增前端静态合同测试`radar-monitoring-usability-contract.test.mjs`；红灯先复现审核写请求、监测列表先乐观更新、雷达不刷新、原因代码直出和首屏无超时，修复后前端4项Node测试、`npx tsc --noEmit`、ESLint、Next.js 16.2.10正式build与`git diff --check`全部通过。本批未改后端行为，因此未借用旧数量声称重跑后端全套。
+- 16:00左右实测4000与8001均HTTP 200，进程仍是8月31日启动的旧node PID25121和既有Python PID38436；本批未停止、重启或重载。既有4000运行页没有加载本批代码，浏览器仍显示旧版无限加载；需受控重启前端后再做16:9运行页、控制台、空态/失败态和按钮交互验收，当前不宣称页面已加载新版。
+- Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，79个已跟踪修改与132个未跟踪路径全部保留，未暂存、提交或推送。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）获得前端服务重启授权后只重启4000，完成本批运行页验收；2）继续补龙头模块级真实来源摘要和ETF逐产品研究状态投影，不增加用户审批流程；3）下一有效盘中窗口只补真实时点数据，非交易时间继续做不依赖行情的产品工程。
+
+> 保存时间：2026-09-07 15:00 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07阶段6主营证据收口、阶段9 ETF四域合同修复与两轮现场验证
+
+- 基于15只午后真实候选只扩充可回放的官方精确句式：年报选择器接受“年度报告全文”，主营章节提取显式主业及标签化业务段，催化事实增加铜箔出货占比、新能源电源需求与酒店业收入下降三类确认句；PDF仅对`requests.RequestException`最多两次请求，HTTP/响应异常仍失败关闭。规则版本升为`radar-leader-business-deterministic-relation-v34`，旧checkpoint不会复用。
+- 真实v3诊断将同一批15只的自动官方主营证据从`ready=1, missing=2, source_failed=1, source_unverified=11`提升到`ready=4, missing=1, source_failed=0, source_unverified=10`；真实通过为000428、301511、301516、002515，其余逐只保持缺失/未验证，没有模糊匹配、AI或Mock补位。诊断包位于`/private/tmp/stage10-business-diagnostic-20260907-v3`。
+- 14:43—14:47的阶段10 v8现场单入口重新采集了新鲜同轮数据：可交易383/383，15只证据候选中000428、002515、600540三只生成官方直接关系资格子计划，阶段6五源为`ready_for_review`（这是旧状态名，不是用户人工审批）。工件`stage6-live-five-source-20260907T144336551890.json` SHA-256为`0b7a9db256dc7dbc9d0d3ff1d800f347532372e191ad77068e6654508aaf1d1f`，顺序状态SHA-256为`f8473c5690d67e3893a8f9aa139c3064f6ff4b11d1a5bef3043689631894bcd4`。
+- v8已真实生成市场、行业、ETF、龙头四域全部`ready`的阶段9输出，但验收器把ETF全市场中的“主动管理/范围外/证据不完整”真实分类错当成非法状态，从而误拒整包。已按TDD修复为接受生产桥接器四类精确状态，同时仍强制请求的ETF全集精确、`product_ready_for_index_research`、监测`ready`且理由为空。v8输出包SHA-256为`35c8bad248a4c8b23d4da7cdd54fdc543211ac9f3fdb7245702585d85826a143`；因修复后已超过该样本实时登记时点，没有倒填时间或冒充登记。
+- 14:50—14:54立即进行v9复验，但尾盘新候选池真实漂移为`ready=0, missing=5, source_failed=0, source_unverified=10`，所以正确停在`leader_business_evidence_qualification_empty`；未用v8旧候选或诊断候选填充。当前正式阶段9活动仍为revision 1/cohort 0，午后attempt-universe已完整记录9次尝试，latest manifest SHA-256为`43fdad65163152cef15bb550adc0db2636d3ec793e5f619f6e9a9f3ce39f29e2`。
+- 验证：本轮红灯先复现年报标题假阴性、官方PDF瞬时请求失败、主营/催化精确事实缺失、ETF全市场状态误拒及规则版本测试问题，修复后主营联合149项、相关链374项均`OK`；实体临时runner中将生产SQLite精确重定向后，完整后端2816项全部`OK`，生产路径护栏命中1次并转到自动清理的`/private/tmp`库。触及Python编译、`pip check`、`git diff --check`通过；两轮独立只读审查未发现P0/P1 fail-open。
+- Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，77个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送。4000仍为既有node PID25121，8001仍为既有Python PID38436，未停止、重启或重载，运行页未加载本轮源码。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）下一有效连续竞价窗口使用`sector-state-20260907T145036572385.json`作为唯一顺序前态，由阶段10单入口验证修复后的阶段9登记；2）非交易时段继续补ETF全市场输出统计/语义SHA防篡改合同和真实桥接器端到端回归；3）只有阶段9第一个cohort真实登记后，才在当日15:05后采集与其精确绑定的收盘基线。
+
+> 保存时间：2026-09-07 13:54 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07阶段10午后真实采集、ETF独立观察首日与时点粒度收口
+
+- 在冻结午后时隙`stage10-20260907-pm-v1/cn-20260907-pm`内保留v1—v7各自不可变尝试。v1完成可交易383/383和15只证据候选，但主营官方证据不足；趋势午后新数据与当日早间已登记观察不同，正确拒绝以同日第二份内容覆盖首份。现场同时暴露交易日历同文档、同截止日仅`fetchedAt`变化被误判冲突，已按TDD改为同SHA/同休市日集幂等，SHA变更、日集变更和截止日倒退仍失败关闭。
+- 已把ETF正式准入/现场观察从龙头主营资格中解耦：阶段9仍保持`failed`且不创建/登记cohort，但只要同轮`radarRunId`和当日已验证趋势日历输入存在，阶段10可在独立`/private/tmp`根收集ETF正式准入，仅`monitoringStatus=ready`才请求实时ETF行情并登记台账。新增准入包`radarRunId == 现场ETF工件runId`强校验，禁止跨运行串用；阶段9成功时的旧cohort路径保持兼容。
+- v2/v3真实命中深交所公开`marketTime`时点误判；现场只读对比为本机13:28:16.574、官方13:28:20，确认深交所该字段按10秒桶向前取整。已将上游、复合POC、生产冻结、官方参考和特征层的“交易所官方状态”容差统一为10秒；腾讯行情、抓取时间和其他来源仍保持5秒，超过10秒仍失败关闭。v4据此越过上游但下游仍暴露旧容差，v5/v6分别如实记录历史成员日期不完整和生产冻结时点未验证，没有放宽数据门或复用旧快照补位。
+- 最终v7（13:45:46—13:49:51）真实完成可交易383/383，六类字段覆盖1.0，`productionCollector=completed`；市场研究状态`ready/strong`，15只证据候选中官方主营自动证据`ready=1, missing=2, source_failed=1, source_unverified=11`，资格计划仍为0，所以阶段9正确`failed/leader_phase6_business_qualification_unverified`，龙头`skipped`，趋势因同日不同内容正确不重复计数。阶段6总装工件`stage6-live-five-source-20260907T134546405250.json` SHA-256为`0d582fb4d9e50b390ed634796100837f26cec426c9b615f488e819927f0181c6`，最新顺序前态`sector-state-20260907T134546405250.json` SHA-256为`44ff93cac0001b71a71346f6f9c04bb7ac6ee53b9b1a8733d09dce8e90bce526`。
+- v7的ETF 515050独立准入已达`monitoringStatus=ready`（排名依旧是`missing`，未冒充正式排名）；现场行情1/1、无缺失/失败/过期，输入SHA-256为`2ea9203965626f7af0062798c073099c8352f9989f77791b36865e8307989513`。官方加载台账为`available`，SHA-256为`ff6f18bd94cedc8b8db1e9cbb741e69be789da859b1764b68a3f95f81296ae35`：ETF真实`1/5`天、趋势`1/20`天、龙头`0/20`天，全部最新连续数与总数一致。正式开关仍为false，阶段9 campaign仍无cohort，没有把部分成功冒充总门通过。
+- 新鲜验证：日历幂等、ETF解耦/跨run防串用、交易所10秒桶粒度均先观测到稳定红灯后转绿；相关最终125项`OK`；完整后端2802项全部`OK`、生产SQLite绝对路径护栏命中0次。触及Python文件编译、`pip check`和`git diff --check`通过；本轮未改前端。
+- 午后attempt-universe经官方加载器复验为7个完整尝试，当前SHA-256为`257ee1d439d1b2262418d54150d32439cbc88eff3b2ea565c4c45e06e16f6d4e`，v7固定结果为阶段9失败、趋势失败、龙头未尝试、ETF成功。Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，73个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送。4000仍为既有node PID25121，8001仍为既有Python PID38436，未停止、重启或重载，运行页尚未加载本轮源码。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）下一有效交易日以`sector-state-20260907T134546405250.json`为唯一顺序前态，继续用阶段10单入口独立累积趋势/龙头/ETF；2）继续收口龙头15只候选的官方主营与催化证据，只有真实资格计划非空才登记阶段9 cohort和龙头观察；3）阶段9首个cohort真实登记后，当日15:05后再采集与该cohort精确绑定的收盘基线，此前不生成空基线。
+
+> 保存时间：2026-09-07 11:26 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07阶段10午后补采准备与历史调度重放修复
+
+- 已绑定早间同一份上交所官方日历原文，发布今日午后冻结调度 `stage10-20260907-pm-v1/cn-20260907-pm`，有效窗口为13:00—14:57，input SHA-256为`be2da2d995c9af88d1ecb5fbe6c4c5f20c14160917f2c39d01a7698424ae8421`，manifest SHA-256为`7d54e0518a9b9c601e75b50288b621606ed9d298a157a4ab9400198515ae59b4`。午后attempt、cohort、影子输入和ETF输入目录现场均不存在，未提前伪造运行产物。
+- 发布PM清单后暴露真实工程缺陷：上午AM manifest仍在内容仓且SHA匹配，但正式运营证据加载器错误地用可变`latest.json`选择内容，导致显式绑定AM SHA的历史证据无法重放。已按TDD最小修复：`latest`继续用于验证调度仓结构及读取期间无漂移，历史运营重放改为由调用方已绑定SHA精确选择不可变manifest。实际已在`latest=PM`时重放AM为`stage10-20260907-am-v1/cn-20260907-am`；现场入口的活动清单门没有放宽。
+- 复核确认AM的`/private/tmp/stage10-attempt-universe-v1`已不可变绑定AM manifest和10个attempt，PM不能写入同一universe。午后将使用全新`/private/tmp/stage10-attempt-universe-20260907-pm-v1`，但继续共享唯一阶段9 campaign和正式影子ledger，以保留真实样本序列与跨日计数。上午趋势已登记当日，PM新内容若与首条不同必须如实失败关闭，不得冒充`unchanged`；龙头和ETF仍按模块独立尝试首日登记。
+- 验证证据：新回归先稳定红灯`operational_evidence_asset_hash_mismatch`后转绿；正式运营收集器31项、阶段10相关73项均`OK`；最终完整后端2798项全部`OK`，生产SQLite绝对路径护栏命中0次；触及Python文件编译、`pip check`和`git diff --check`通过。本轮未改前端。
+- 已建立一次性本任务心跳`10`，计划2026-09-07 13:02 CST在同一任务继续PM真实补采；它显式使用独立PM universe、最新顺序前态`sector-state-20260907T105505094262.json`和共享ledger，完成后重放attempt/universe/ledger并更新本文件。
+- Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，64个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送。4000仍为既有node PID25121，8001仍为既有Python PID38436，未停止、重启或重载。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）13:02后执行PM单次真实协调采集，独立记录阶段9、趋势、龙头和ETF结果；2）若阶段9真实登记development，15:05后只为该不可变cohort采集当日收盘基线；3）将跨schedule/universe运营汇总作为后续v2工程，未完成前不把AM/PM硬拼成总通过。
+
+> 保存时间：2026-09-07 11:08 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07阶段10首个趋势真实观察日及部分输入解耦收口
+
+- 上午10:36—10:58在已冻结`stage10-20260907-am-v1/cn-20260907-am`时隙内连续保留v6—v10五个不可变attempt。v6/v7与v9均在383只候选的交易所官方实时状态层失败关闭；v7后独立逐证券诊断为378/383正常，5只深交所证券的`marketTime`短暂领先本机超过5秒，同一官方接口立即复测偏差回到2.6—4.8秒，确认为真实上游时间戳抖动，没有放宽5秒真实性护栏。
+- v8和v10均完成可交易性383/383、全市场历史5157/5157和81个行业分析，但各自15只证据候选中0只具备完整官方主营/催化确定性证据，所以龙头如实`not_ready/leader_business_evidence_qualification_empty`。v10市场研究状态为`ready/strong`，阶段6工件`stage6-live-five-source-20260907T105505094262.json` SHA-256为`221330587fd7d9bf54013bb10c98cee369c33fdd2c43655412e7bbac25e14f30`，新顺序前态`sector-state-20260907T105505094262.json` SHA-256为`624bd3a0beb36f5d73a025b8fa8c404ad648c5216a9fe67c0624c082267af47b`。
+- 真实v8现场证明阶段6已能在龙头未就绪时只发布趋势输入，但阶段9/阶段10外层丢弃单模块引用。已按TDD最小解耦：阶段9现在保留并验证阶段6未就绪返回中已发布的部分输入和真实`radarRunId`；阶段10接受趋势/龙头的非空真子集，逐个哈希复验和登记，未提供模块明确`skipped/stage10_input_unavailable`；同时把阶段6原先的原因列表收敛为首个稳定原因码，不再被外层折叠为通用失败。
+- v10在新代码下真实命中该分支：趋势`available`，龙头`skipped/stage10_input_unavailable`，ETF`skipped/stage9_etf_admission_unavailable`，仅`trendRotation`记入effects。正式影子台账经官方加载器复验为`available`：趋势1/20个真实交易日、最新连续1日，龙头0/20，ETF 0/5；台账SHA-256为`e7016c6bff510ad22e386770feccd2f841773a20219138130dc24bb36dbd19a6`。阶段9正式活动仍为`revision=1/cohort=0`，没有把龙头缺证据或ETF缺准入伪装成正式样本。
+- 新鲜验证：3个新行为均观测到预期红灯后转绿；影子输入/阶段6/阶段9/阶段10相邻89项`OK`；最终完整后端通过实体临时runner执行2797项，全部`OK`、生产SQLite绝对路径护栏命中0次，临时测试库已清理。触及Python文件已重定向字节码缓存后编译通过，`pip check`通过。本轮未改前端。
+- Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，64个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送。4000仍为既有node PID25121，8001仍为既有Python PID38436，未停止、重启或重载，运行页尚未加载本轮源码。未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）当日午后连续竞价窗口发布新的冻结PM时隙，以`sector-state-20260907T105505094262.json`作为唯一顺序前态运行新attempt；同日趋势只幂等验证`unchanged`，不重复加天数；2）若午后龙头官方证据或中证ETF官方源恢复，分别独立登记当日首日观察，只有阶段9正式cohort真实登记后才在15:05后采集对应收盘基线；3）后续交易日继续并行累积趋势/龙头20日和ETF连续5日，真实门未齐保持关闭，但不阻断其他工程开发。
+
+> 保存时间：2026-09-07 10:17 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07阶段10首个真实交易日采集、失败隔离与编排修复
+
+- 09:36后由上交所官方日历确认2026-09-07为完整交易日，并在上午连续竞价窗口发布冻结调度`stage10-20260907-am-v1/cn-20260907-am`。调度输入SHA-256为`3638fc0ba0d64aa9ce8f6911183d1e701e5a674fc82ae4e8492ee33b6c6d4ccc`，内容寻址manifest SHA-256为`1224e6c5787cbcf5dfac616801d23199959405708b01270914aa2b6220aa7f7c`，官方日历原文SHA-256为`7fa7752f421d2651ea5075dad9bed8a5f6253e9e581022dc2f3ada71926c84cb`。旧正式活动目录现场只剩三个空锁文件、没有`latest.json`或state，不能猜补；已保留失败证据并用官方入口新建独立空活动`/private/tmp/stage9-replay-campaign-formal-20260907-v2`，强类型复验为`stage9-formal-forward-20260907-v2/formal_sequence/revision=1/cohort=0`。
+- 共记录5个不可变attempt，均未伪装成功。v1暴露`startedAt`误用10:00冻结时隙而晚于09:41结束时间；TDD后v2起真实记录调用瞬间，冻结时隙仍独立保存在attempt-universe。v2因行业历史预冻结跨越09:45→09:50刻度，三只稀疏成交证券缺新刻度证明而失败关闭；v3在09:55:48—10:01:29完成真实阶段6：全市场历史5157/5157、21个已完成交易日、81个行业分析、可交易性383/383、15只证据候选中1只通过五源，阶段6总装`ready_for_review`。工件`stage6-live-five-source-20260907T095548366173.json` SHA-256为`3cfc0f4b34dfa355fb3cadc84732698360d534f9467a3eb432d745d231184cc5`，顺序状态`sector-state-20260907T095548366173.json` SHA-256为`2b06078c1d7fdce1ceb70abc85b0be616360cb2e4206b11b59b8fb34ef22d53c`。
+- v3阶段9只在ETF 515050正式监测准入停止：产品身份、生命周期、行业范围、基金—指数关系均`ready`，但中证931079方法与成分官方对象存储请求失败，导致方法、成分、行业暴露和排名输入缺失；隔离直连及限定重试均真实命中`oss-ch.csindex.com.cn`读取20秒超时。准入工件SHA-256为`e583a3955683d92144f261f2b8510249ed988229bdfcd89b52823d7f0cf7efb2`，活动仍为cohort 0。v4交易所可交易性官方请求失败；v5因官方源时间相对本机出现未来偏移而被真实性护栏拒绝。没有使用9月4日旧准入、Mock、复制工件或放宽规则补位；今日阶段9 development未登记，趋势/龙头/ETF真实台账仍为0日。
+- 已按TDD修复两个确定性工程问题：单次协调器的`startedAt`改用真实调用时间，同时attempt-universe继续保存冻结`scheduleSlot`；阶段9若在阶段6成功后因ETF/正式cohort失败，会返回已验证的阶段6工件、run ID及趋势/龙头输入引用，协调器据此独立登记趋势和龙头，ETF明确`skipped/stage9_etf_admission_unavailable`，不再一处上游失败拖死三模块。另修复调度测试把2026-09-04绑定与系统当前日期混用导致9月7日后自然过期的问题，测试改用自身冻结时钟。
+- 新鲜验证：新增行为先红后绿；阶段9/阶段10/调度相关53项`OK`。最终完整后端在测试发现前把`database.DB_PATH`重定向到自动清理的`/private/tmp/codex-stage10-fulltest-final-*`，2794项全部`OK`、0失败/0错误，生产SQLite绝对路径护栏命中0次；触及Python文件`py_compile`、`pip check`和`git diff --check`通过。本轮未修改前端。4000仍为既有node PID25121，8001仍为既有Python PID38436，未停止、重启或重载，运行页面未加载本轮源码。Git仍为`main@4e2c7ca`、相对`origin/main`领先17提交，64个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送；未读写生产SQLite、调用付费AI、修改环境/依赖/正式开关或部署。
+
+下一步：1）后续有效连续竞价窗口使用本轮新代码和最新成功顺序前态`sector-state-20260907T095548366173.json`执行新attempt，优先验证“阶段9失败但趋势/龙头独立登记”真实分支；2）中证931079官方源恢复时重新生成当日ETF准入并登记development，成功后当日15:05后采集首日收盘基线；3）继续并行积累阶段9三分区与趋势/龙头20日、ETF连续5日，真实门未齐保持关闭，但非交易时段继续做不依赖现场数据的工程。
+
+> 保存时间：2026-09-07 09:37 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-07过期阶段6自动任务失败关闭并停用
+
+- 09:36 CST 通过上交所官方休市日历确认当天为完整交易日且项目状态为 `trading/交易中`，只读进程核验也确认没有阶段6、阶段9或阶段10现场采集进程。但旧自动任务仍强制绑定 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json`；该文件现场已不存在，且项目最新检查点已经把唯一顺序前态推进到 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260904T110745783071.json`。后者存在、权限0600、文件大小21772字节、SHA-256为 `8c5671c2fd2fcb6cf753cde6b359367dd424317143550e1b07ca914d5769c063`。
+- 因旧前态缺失且阶段已推进到阶段10单次现场协调器，继续执行旧阶段6命令会分叉顺序状态链，也违反该任务自身“不进入阶段7/8/9”的范围。因此本轮没有启动任何公开来源采集、没有生成候选或五源工件，并已删除一次性自动任务 `6-2`（名称“阶段6交易窗口现场复跑”，原计划周一09:35、COUNT=1）；没有擅自把原阶段6授权扩大为阶段10现场采集授权。
+- 当前阶段10冻结调度、单次现场协调器、阶段9正式入口相关58项测试通过。只读服务状态为4000既有node PID25121、8001既有Python PID38436，FastAPI/ngrok LaunchAgent均已加载，ngrok进程与4040端口身份一致为 `running|identity_verified`；未停止、重启或重载服务。Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17个提交，64个已跟踪修改与130个未跟踪路径全部保留，未暂存、提交或推送。本轮未读取或写入生产SQLite，未调用付费AI，未修改环境变量、依赖、正式开关或部署。
+
+下一步：1）若要继续当天现场采集，必须以顶部阶段10最新检查点、9月4日唯一顺序前态和阶段10单次协调器为准，由用户另行授权或建立新的准确自动任务；2）旧8月28日前态不得恢复、复制或用于分叉采集；3）任何真实来源、D8/D9、正式风险覆盖政策、龙头行业门政策或可信审批不齐仍继续失败关闭。
+
+## 2026-09-05阶段10连续工程整包收口
+
+- 非交易日可完成的阶段10工程已经连续收口，没有用等待交易日作为停工理由。新增单次现场协调器和可执行冻结调度发布入口：冻结 schedule 绑定上交所官方日历原文、规则版本、有效窗口、唯一 `slotId` 和四模块范围；现场协调器在一个 invocation 内串联阶段9、趋势、龙头和ETF，且不再接受调用方自报调度时间。
+- 每次现场调用在任何外部来源前先发布不可变 `pending` 检查点和 attempt-universe 条目，结束后只原子升级同一条记录。固定全局锁阻止不同 attempt 根并发，per-attempt 锁和 owner 身份阻止同根污染；失败、锁竞争、同一时隙的额外调用、最终发布异常和恢复都不能被隐藏。恢复按 universe 固定的 checkpoint SHA-256 重放，已经完成的阶段9/行情请求不会重复执行。
+- 运营证据已经从手工状态改为自动重放：冻结 schedule、实际 invocation 全集、每次固定检查点、版本递进的趋势/龙头/ETF台账、官方日历原文、性能/安全/回退/手册策略和项目静态资产都必须逐项核验。旧手工输入即使自报全绿，也只能得到`rehearsal/collecting`；正式运营报告必须来自内容寻址 collector input，正式就绪服务会从固定`/private/tmp`快照根和固定项目资产根重新运行收集器，并要求重算报告与提交报告的规范SHA和全部字段完全一致。
+- 正式执行部分完成默认关闭的暗骨架：固定模块/job/executor/config身份，注册与每次执行都重验正式就绪有效期、binding内容身份和跨进程锁，结果只能返回安全候选引用。离线输入最高为`ready_to_enable`且`formalEnabled=false`；当前没有真实executor、binding、job实例或`main.py`/launchd/AI接线，没有改变任何生产开关。
+- 内容与文件安全统一收口：跨入口JSON递归拒绝重复键、`NaN/Infinity`和非法UTF-8；checkpoint、schedule、universe和运营输入均使用内容寻址、目录FD、`O_NOFOLLOW`、大小/权限限制和读前后身份复验。冻结调度publisher/loader的第二、第三次复读后换目录反证均已关闭，旧`latest`不会被坏指针覆盖，空仓也不会生成无效指针。
+- 新鲜验证：阶段10聚焦17个后端模块331项`OK`；完整后端在测试发现前把`database.DB_PATH`精确重定向并初始化到`/private/tmp/codex-stage10-continuous-full-final2-20260905.sqlite`，2792项`OK`、0失败/0错误。Python`compileall`、`pip check`、前端请求代次守卫、TypeScript、ESLint、Next.js正式build及`git diff --check`全部通过。最终独立只读审查为`0 Critical / 0 Important / 0 Minor / PASS`。
+- 真实边界没有伪装：2026-09-05为周六，本批没有联网采集、没有增加任何真实观察日，也没有读取或写入生产SQLite、调用付费AI、修改环境/依赖、重载服务或执行Git写操作。4000仍为既有node PID25121，8001仍为既有Python PID38436；运行页面未加载本批源码。Git为`main@4e2c7ca`、相对`origin/main`领先17提交，完整保留64个已跟踪修改和130个未跟踪路径，未暂存、提交或推送。
+
+下一步：1）2026-09-07有效A股连续竞价窗口，先用`run_radar_stage10_frozen_schedule.py`发布当日冻结时隙，再只运行`run_radar_stage10_single_live_collection.py`完成阶段9及三模块同轮采集/登记；2）当日15:05后采集阶段9首日真实收盘基线，后续交易日继续积累阶段9三分区及趋势/龙头20日、ETF连续5日；3）真实样本成熟后生成正式运营报告并复核各模块`ready_to_enable`，只有另行获得生产接线授权才实现真实executor/binding/main/launchd接线与受控重载。
+
+> 保存时间：2026-09-05 11:03 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-05阶段10真实runner回执与单次登记工程收口
+
+- 已把上一检查点的“下一工程批”完整落地。阶段6五源入口新增显式`--formal-shadow-input-root`：同一进程使用当轮真实阶段6工件、完整市场特征快照、顺序行业状态、真实锁结果和单调时钟耗时，发布趋势/龙头强类型运行回执及原子输入目录；默认不请求时保持原合同兼容。上交所日历从HTTP原始字节贯穿到输入包，GB18030等非UTF-8内容按原字节哈希，URL、交易日、抓取时间、prepared时间和当轮截止时间全部绑定。
+- 新增ETF一次性入口`run_radar_etf_live_shadow_capture.py`：显式ETF集合只调用一次腾讯行情，逐证券按实际完成时间重算90秒过期与5秒未来边界，保留真实0、部分缺失、失败和来源健康；同日独立ETF准入只证明产品身份/生命周期，不替代现场行情。捕获成功后把行情、回执、准入、日历和冻结策略单目录原子发布，再调用既有离线入口登记同一内容寻址影子台账。
+- 真实性和并发边界已闭合：ETF来源健康字段必须显式存在；只把明确的网络请求异常记为来源失败，合同/类型/时钟错误继续抛出供工程修复；`sourceReady=false`真实失败日会登记为`failed`并打断连续计数。捕获锁`contended`时不请求行情、不发布、不登记、不占用当日，随后同日真实成功仍可登记。两个入口都限制到`/private/tmp`，采用逐段目录FD、`O_NOFOLLOW`、文件身份前后复验、0700目录/0600文件、2MiB官方日历上限和原子rename，拒绝祖先链接、换件、半包和异内容覆盖。
+- 运行手册已新增可直接执行的“真实交易日单次采集与登记”章节，明确阶段6发布后按返回的趋势/龙头目录登记，以及ETF捕获—发布—登记的一次性命令。2026-09-05为非交易日，本轮只完成工程和本地隔离E2E，没有联网采集或伪增观察天数；趋势、龙头、ETF真实台账仍均从0日开始，正式executor、`main.py`/生产调度和任何正式开关仍未接入。
+- 新鲜验证：主Agent聚焦11个后端模块201项`OK`；完整后端在测试发现前将`database.DB_PATH`精确重定向并初始化到`/private/tmp/codex-stage10-runner-receipt-final4.sqlite`，2657项`OK`、0失败/0错误。触及Python文件`py_compile`、`pip check`和`git diff --check`均通过；两个独立只读审查均为`0 Critical / 0 Important / PASS`，分别复跑ETF链111项和阶段6/日历/回执链90项。本批未修改前端行为，因此未借用旧构建结果宣称前端已重跑。
+- 运行/Git只读核对：4000仍为既有node PID25121，8001仍为既有Python PID38436，本批未重载，运行页面尚未加载本批源码。Git为`main@4e2c7ca`、相对`origin/main`领先17提交，保留64个已跟踪修改和112个未跟踪路径；未暂存、提交或推送。本批未读写生产SQLite、未联网或调用付费AI、未改环境/依赖/生产开关、未操作服务或部署。
+
+下一步：1）2026-09-07有效连续竞价时段先按下方已冻结阶段9命令采集新的development，同时给阶段6五源入口增加运行手册中的`--formal-shadow-input-root`，只在返回`published`后把趋势与龙头登记到专用真实台账；2）复用当日趋势目录里的官方日历与冻结策略、同日ETF准入包，运行一次ETF入口，只有`available/unchanged`且观察为`ready`才计首日；3）15:05后采集阶段9首日收盘基线，随后让阶段9分区与阶段10趋势/龙头20日、ETF连续5日并行累积，期间继续做不依赖交易日的运营证据和正式executor设计，但未经独立生产授权不接服务。
+
+> 保存时间：2026-09-05 02:22 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-05阶段10真实影子台账离线采集工程收口
+
+- 已完成`radar-formal-shadow-ledger-v2`、三模块强类型运行回执/适配器、上交所官方休市原文重解析、安全内容寻址仓和`run_radar_formal_shadow_observation.py`离线入口。趋势、龙头各需20个不同有效A股交易日，ETF需最新连续5个真实现场交易日；截止交易日的`missing/failed/stale`会关闭对应模块，同日同内容只幂等重放，异内容拒绝覆盖。
+- 真实性闭环已补齐：阶段6五源生成器会从当轮`tradability.runtime_inputs.market_snapshot`原生落盘完整`radar-market-feature-snapshot-evidence-v1`及独立SHA-256；趋势采集器重建正式`MarketFeatureSnapshot`、校验时间/批次/完整度/单位，并调用冻结默认策略重算市场状态。任何自报状态、指标、批次、策略或哈希不一致都失败关闭。龙头嵌套来源失败、ETF产品身份/生命周期不就绪也均不计观察日，ETF排名缺口不冒充现场行情失败。
+- 官方日历采用强类型封套+原始HTML双文件，store持久化原文并在每次加载时重解析；重复年份区块、无法识别业务行、跨越两年及超过31日异常区间均拒绝。影子台账与正式就绪store均校验严格小写64位SHA、读取上限、普通文件身份及内容一致性。正式就绪CLI只从显式影子store重放，三个目录参数均限经规范化的`/private/tmp`，输入JSON自报台账/hash/ref不能通过。
+- 真实现状未被伪装：2026-09-04旧趋势工件产生于新快照证据合同之前，稳定返回`trend_market_snapshot_unverified`，不计观察日；同轮龙头工件可在内存适配为`ready/coverage=1.0`，但没有生产运行回执便没有登记台账；ETF也没有用准入包补成当日观察。本轮没有登记真实观察台账；测试中的`/private/tmp`临时仓只是自动清理的Fixture，不计真实天数。三模块真实计日仍从0开始。
+- 新鲜验证：根Agent聚焦后端247项`OK`；完整后端在测试发现前将生产SQLite绝对路径精确重定向至自动清理的`/private/tmp`临时库，2598项全部`OK`，护栏命中1次。Python `compileall`、`pip check`、已跟踪与本轮未跟踪文件的空白差异检查全部通过；最终独立只读审查为`0 Critical / 0 Important / PASS`。本轮未修改前端源码，因此未借用旧证据宣称重跑前端构建。
+- 运行/Git只读核对：4000仍为既有node PID25121，8001仍为既有Python PID38436，未重载且运行页未加载本轮源码。`manage.sh validate`通过；ngrok三信号仍为`1/0/1 => degraded|identity_unverified`。Git为`main@4e2c7ca`、相对`origin/main`领先17提交，保留62个已跟踪改动与106个未跟踪路径，未暂存、提交或推送。本轮未读写生产SQLite，未联网、调用付费AI、改环境/依赖/正式开关或操作服务。
+
+下一步：1）2026-09-07有效A股连续竞价时段按顶部已冻结命令采集新的阶段9 development，并在同日15:05后采集首日收盘基线；2）下一工程批把三模块真实runner回执接到本离线采集入口，先做单次`/private/tmp`演练，不接`main.py`/生产调度；3）接线经独立审查后，在后续真实交易日与阶段9并行累积趋势20日、龙头20日和ETF连续5日；九门未齐前不接正式executor、不开任何生产功能。
+
+> 保存时间：2026-09-04 22:10 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-04下一交易日正式采集预检
+
+- 上交所2026年休市安排显示9月休市从25日开始；2026-09-07为周一且不在已公告休市区间，仍须由唯一顶层入口在运行时重新调用项目官方日历确认。当前正式活动仓经强类型加载复验为`stage9-formal-forward-v1/formal_sequence/revision=1/cohort=0`，下一角色仍为`development`，无夜间、诊断或旧工件污染。
+- 最新顺序行业前态`/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260904T110745783071.json`已用正式加载器复验：81个行业、81条状态、内容SHA-256、分类文档、规则、阈值及状态转换版本身份一致。候选输出目录`/private/tmp/stage9-formal-cohort-development-20260907-v1`当前不存在；阶段6输出目录和已有巨潮PDF缓存目录均可用。正式ETF参数沿用9月4日真实监测准入已`ready`的`515050`；不将当轮未稳定的`515790`混入新正式样本。
+- 2026-09-07有效A股连续竞价窗口仅在`backend/`执行：`PYTHONPYCACHEPREFIX=/private/tmp/codex-stage9-live-pycache ./venv/bin/python run_radar_replay_formal_live_acceptance.py --confirm-live-formal-sequence --campaign-dir /private/tmp/stage9-replay-campaign-formal-v1 --stage6-output-dir /private/tmp/stage6-live-prefreeze-resume-20260825 --cohort-output-dir /private/tmp/stage9-formal-cohort-development-20260907-v1 --previous-sector-state /private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260904T110745783071.json --cninfo-pdf-cache-dir /private/tmp/stage9-cninfo-pdf-cache-v1 --formal-etf 515050`。只有返回`registered`才算development登记成功；任一真实来源不足继续失败关闭，不改门槛、不换旧快照。
+- 若盘中登记成功，同日15:05后在`backend/`执行：`PYTHONPYCACHEPREFIX=/private/tmp/codex-stage9-live-pycache ./venv/bin/python run_radar_replay_campaign.py --campaign-dir /private/tmp/stage9-replay-campaign-formal-v1 --confirm-live-close-capture`，只接受当日15:00后原始时间的真实收盘事实。本次只读预检没有执行采集、生产SQLite、服务、环境、AI或Git写操作。
+
+下一步：1）2026-09-07盘中按上述唯一命令采集development，成功后当日15:05后立即采集首日收盘基线；2）非交易时间实施“阶段10真实影子台账采集入口”，把已有三模块真实影子输出映射为显式`/private/tmp`内容寻址台账，不读写生产SQLite；3）之后让阶段9样本和阶段10趋势/龙头20日、ETF 5日台账在后续真实交易日并行累积。
+
+> 保存时间：2026-09-04 21:12 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-04阶段10最终审查Important修复：运行状态口径与证据有效期
+
+- 最终审查的两个 Important 已修复，随后全阶段独立复审以 `0 Critical / 0 Important / 0 Minor` 通过且无新增回归。README不再因LaunchAgent已加载就声称运行均正常；只读现场仍是 `loaded=1,pid=0,4040=1 => degraded|identity_unverified`，不把当前PID写成长期保证。新增不可变 `radar-formal-freshness-policy-v1`，由输入显式给出报告、普通证据和运营证据的正数最大年龄，无任何默认放行值。
+- 构建器在缺策略时至少关闭 `data_quality` 门，普通证据、运营包及其逐条证据超期均转 `failed`；已验证运营包自动形成唯一 `formal_operational_checks` 引用，绑定 v1 合同、内容 SHA-256、主体与 `checkedAt`，输入伪造/重复被拒绝。API与 scheduler 在每次读取、注册和执行前共用 aware-clock 纯函数重验；精确达最大年龄有效，超过1微秒失效，时钟异常失败关闭。页面只读展示策略版本和三个期限，过期API响应不保留旧模块结果。
+- 新鲜验证：阶段10聚焦10个模块190项 `OK`；完整后端在测试发现前将生产SQLite绝对路径精确重定向到自动清理的 `/private/tmp`，2501项 `OK`，护栏实际命中17次。前端 request guard、TypeScript、ESLint、Next.js build、Python `compileall`、`pip check`、`zsh -n`和 `git diff --check` 均通过。
+- 运行/Git只读核对：4000仍为既有 node PID25121，8001仍为既有 Python PID38436，本轮未重载，运行服务未加载本轮源码。Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17提交，61个已跟踪改动与97个未跟踪路径全部保留，未暂存、提交或推送。本轮未读写生产SQLite，未改环境变量、依赖、服务、正式开关、AI或 `main.py` executor接线。
+
+下一步：1）继续按真实交易日积累阶段9 development/calibration/holdout与后续5个收盘日；2）分模块完成趋势/龙头20日、ETF连续5日真实影子观察及版本化freshness阈值冻结；3）真实证据全部成熟后，再单独申请生产配置、服务变更、正式executor和回退演练授权。
+
+## 2026-09-04阶段10双轨正式启用准备度工程收口
+
+- 阶段10工程控制面已完成：新增强类型`radar-formal-readiness-v1`、内容寻址只读证据仓、分模块影子台账、`GET /api/radar/formal-readiness`、默认关闭的正式请求守卫、离线正式就绪/运营检查CLI、三信号ngrok只读状态、雷达历史页正式就绪面板，以及阶段10运行与用户手册。趋势轮动和龙头观察各需20个不同有效A股交易日，ETF监测需连续5个真实现场交易日；三个模块分别计算，九项门为阶段9质量、规则版本、校准、影子台账、数据质量、性能、安全、回退、运行手册。
+- 当前交付的是只读控制面，不是正式executor：没有正式job ID或`main.py`接线，未改生产环境变量、未生成生产就绪报告、未开启任何模块。`ready_to_enable`仅代表自动证据就绪，仍需对生产配置、服务变更和部署另行授权；用户不审批股票。
+- 新鲜验证：阶段10聚焦后端10个测试模块共176项`OK`；完整后端`unittest discover`在测试发现前将生产SQLite绝对路径精确重定向到新建`/private/tmp`临时库，2487项`OK`、护栏命中17次；Python `compileall`、`pip check`、前端请求代次守卫、TypeScript、ESLint、Next.js build和`git diff --check`均通过。
+- 本轮手册与路线更新：`docs/阶段10正式启用运行手册.md`、`docs/用户使用手册.md`、`README.md`、`PRD.md`、`docs/股票监测助手V5.0升级规划书.md`；阶段10实现/复审记录位于`docs/superpowers/`和`.superpowers/sdd/2026-09-04-stage10-parallel-formal-readiness/`。未触碰生产SQLite、服务生命周期、环境变量、网络、付费AI或Git写操作。
+- 只读审计：Git为`main@4e2c7ca`、相对`origin/main`领先17提交，工作树保留61个已跟踪修改和97个未跟踪路径；4000 PID25121、8001 PID38436均为未重载原进程，运行页面尚未加载阶段10源码。`manage.sh validate`通过；status显示FastAPI/ngrok LaunchAgent loaded、8001和4040监听，但ngrok PID信号缺失，三信号为`degraded|identity_unverified`；preflight以同名服务已加载按预期拒绝（75），未进行安装/重载。
+
+下一步：1）在后续真实交易日继续按唯一阶段9入口顺序积累development、calibration、holdout及样本日后5个收盘事实；2）独立积累趋势/龙头20日与ETF连续5日的真实影子台账、版本化性能/安全/回退证据；3）只在所有模块自己的真实门为`ready_to_enable`后，再单独评估并授权正式executor、生产配置与受控服务变更。
+
+> 保存时间：2026-09-04 16:09 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-04阶段9正式前向公司行为来源收口
+
+- 10:57 CST在有效A股上午连续竞价窗口运行唯一顶层正式入口。首轮因阶段6预冻结行业重建只返回通用`sector_rebuild_status_not_ready`停止；TDD将底层稳定原因透传后，第二轮取得新的真实阶段6工件`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260904T110745783071.json`及顺序状态`/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260904T110745783071.json`。该轮历史证券5157条/21个交易日、81个行业分析、可交易性383/383，15只证据候选中1只`000560`通过主营资格，五类冻结输入在该资格范围内全部就绪，阶段6总装为`ready_for_review`；其余14只按真实主营/催化证据原因排除，没有补值或放宽规则。
+- 同轮阶段9 development在前向来源质量门停止，原因精确定位为公司行为`unverifiable`：原始275项中4个深市对象公告时间为空。官方巨潮逐项核对后，300750和002611属于“2026年中期分红A股实施公告”，300176的“配股发行结果公告”明确写出2026-08-21为发行成功的除权基准日；200429为B股且不属于本轮A股证券全集。随后TDD补齐中期分红标题、配股发行结果精确除权日解析，以及公司行为按同轮A股证券主档收敛的适配器合同；原始快照仍完整保留，范围外证券以具名计数披露，不静默删除。
+- 修复后使用同一官方证券主档与公开来源现场只读复验：公司行为原始`expectedCount=275`，A股范围内`recordCount=273`，范围外2项`200429/900929`均为B股，A股范围内公告时间缺失为0，来源状态为`ready`，非阻断理由为`corporate_action_objects_out_of_scope`。质量报告的范围排除总数同步计入`excludedOutOfScopeCount`，不会把B股当作A股来源失败，也不会混入正式A股回放。
+- 新增/受影响的公司行为、前向适配、质量服务和阶段6诊断联合140项通过；新增配股月度回填集成测试单独通过。精确隔离生产SQLite的完整后端2367项全部`OK`，生产库绝对路径护栏命中1次并重定向到自动清理的`/private/tmp`临时库；Python全量编译、`pip check`和`git diff --check`通过。
+- 今日失败的development目录`/private/tmp/stage9-formal-cohort-development-20260904-v1`只保留失败审计工件，没有登记为正式cohort；正式活动`/private/tmp/stage9-replay-campaign-formal-v1`仍为`revision=1/cohort=0`，没有覆盖或伪造样本。修复完成时已是16:09 CST，超过正式盘中冻结窗口，因此没有夜间重跑冒充新样本。
+- 本批没有读写生产SQLite、调用付费AI、修改依赖/迁移/环境变量/正式开关、停止或重载服务，也没有Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交并保留全部既有未提交改动；4000 PID25121和8001 PID38436仍为原进程，当前页面尚未通过服务重载加载本批代码。
+
+下一步：1）下一个有效A股连续竞价窗口使用唯一顶层入口和最新顺序状态`sector-state-20260904T110745783071.json`创建全新development目录并登记正式样本；2）同一交易日15:05后立即采集该样本日`ready`收盘基线；3）后续不同交易日顺序采集calibration、holdout及每个样本后续5个收盘日，最终只以真实重放总质量报告`ready`判定阶段9完成。
+
+> 保存时间：2026-09-03 03:04 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-03阶段9日终快照抓取时间因果闭环
+
+- 阶段9活动清单的日终引用此前只保存交易日、快照ID、状态和工件哈希，没有保存原始快照的`capturedAt`。因此即使单份日终工件内部时间合法，活动状态仍无法独立证明本次revision确实生成于快照抓取之后。现在`CampaignDailySnapshot`强制绑定带时区的`capturedAt`，`_snapshot_ref`从已重放的原始日终合同精确复制该值；`ReplayCampaignState`统一拒绝任一`capturedAt > updatedAt`的状态，诊断与正式活动均不能形成“活动先更新、快照后抓取”的时间倒置。
+- TDD红灯先证明旧登记会接受比快照抓取时间早1分钟的`updatedAt`并写成revision 2；修复后该调用稳定报`replay_campaign_updatedAt_before_snapshot`，活动保持revision 1、cohort 0。随后继续审计发现真实续采把命令启动时刻直接写成revision时间，而全市场公开来源请求的完成时间通常更晚，会被新增门正确拒绝却导致合法收盘采集无法登记；第二个红灯复现后，恢复入口现在把revision时间提升为命令时间与全部快照`capturedAt`的最大值。既有成熟三cohort夹具同步改用最后一份真实快照之后的登记时间，没有放宽生产门槛。阶段9活动、日终、正式cohort和顶层入口联合109项通过。
+- 精确隔离生产SQLite的完整后端2,363项全部通过；生产库绝对路径护栏实际命中1次并重定向至`/private/tmp/codex-stage9-snapshot-causality-fulltest-v2/test.db`。受影响Python编译、`pip check`和`git diff --check`通过。真实正式活动由新合同重放仍为`stage9-formal-forward-v1`、`formal_sequence`、revision 1、cohort 0、`updatedAt=2026-09-02T20:15:09.839712+08:00`，没有用测试、旧诊断或夜间数据填充。
+- 既有`/private/tmp/stage9-replay-campaign-diagnostic-20260902-v1`没有被原地迁移：其状态引用缺少新字段只是表层现象，引用的旧日终工件按当前强类型合同重放还会报`daily_outcome_snapshot_identity_mismatch`。为旧诊断补字段或特判接纳会绕过当前内容身份门，因此该旧证据继续只作历史记录、不参与正式质量门；空正式活动不存在兼容问题。
+- 当前时间03:04 CST，不在A股连续竞价窗口，因此没有违规启动正式公开来源整链。未读写生产SQLite，未调用付费AI，未修改依赖/迁移/环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留131个工作树路径（55个已跟踪修改、76个未跟踪）；4000 PID25121和8001 PID38436仍为原进程。
+
+下一步：1）2026-09-03 09:30—11:30或13:00—14:57内运行唯一顶层正式命令，获取同一连续竞价会话的阶段6五源与阶段9 development；2）当日15:05后对该正式cohort采集样本日`ready`收盘基线，使后续calibration不被前序基线门拒绝；3）后续不同交易日由同一入口顺序登记calibration、holdout并逐日续采，三个cohort各满样本日加后续5个交易日后只以重放所得真实总质量报告`ready`判定阶段9通过。
+
+> 保存时间：2026-09-03 02:32 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-03阶段9日终真实性与成熟产物闭环
+
+- 日终客观快照原先只要在15:05后运行且上源日期为当日，就可能把上午或14:30等盘中价当作收盘事实。现在活跃证券和四个市场指数的逐条上源时间必须达到当日15:00；早于收盘的数据显式进入缺失/失败，不生成假收盘标签。停牌、退市和未上市证券仅在上源明确给出非交易状态时允许保留真实旧时点。
+- 正式活动对已生成的客观结果和总质量组装从“路径+SHA-256”提升为内容层重放：客观结果、独立标签、最终回放输入和质量报告必须通过强类型合同、子清单哈希、样本/运行/时点身份、日快照全集、标签目标与指标内容、质量状态复核。单独替换内容并同步改外层哈希不再能通过。
+- 新到期结果和新总质量产物现在会在修改正式campaign之前立即读回落盘文件完成上述复核；不再先把破损或错身份的结果登记进活动，然后等下次执行才发现。已登记结果在每次续采时仍会重新复核。
+- TDD先证明旧实现会接受落盘为`{}`但哈希一致的结果/质量文件，并会先登记新产物而不立即重放；修复后活动专项26项、日终与活动联合35项、上下游联合84项全部通过。精确隔离生产SQLite的完整后端2,326项通过，生产库绝对路径护栏命中1次并重定向至`/private/tmp/codex-stage9-close-integrity-fulltest-v1/test.db`。
+- 跨日入口新增“前序样本日基线”硬门：从calibration起，在阶段6联网前必须重放已登记cohort，并确认每个前序角色均有样本当日的`ready`收盘快照。缺失、部分、失败或文件被改写会在新来源请求之前停止，避免在已经不可通过的正式序列上继续浪费交易日。日终续采对过去漏快照或已登记非`ready`快照显式返回`history_incomplete`，不再被`incomplete_partitions`掩盖。
+- 新增4项可恢复性红/绿测试：前序基线缺失拒绝下一角色、真实`ready`基线允许进入calibration、基线哈希漂移在新来源前拒绝、过去漏采公开`history_incomplete`。本轮相关联合61项、阶段9上下游联合88项通过；重新精确隔离生产SQLite的完整后端2,330项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-recovery-fulltest-v1/test.db`。
+- 日终快照的15:00/15:05时间门已从采集函数下沉到`radar-replay-outcome-daily-snapshot-v1`合同本身：活跃证券、四个指数和逐条抓取时间都要求精确当日收盘语义，直接构造JSON也不能绕过。证券点、指数点和冻结行业成员关系的内容哈希与任务/输出ID、交易日共同决定`snapshotId`，任一内容漂移都要生成不同身份。
+- 只重算上述内容哈希和`snapshotId`仍不足以换成员口径：活动登记与重放会重新读取标签任务引用的原始行业快照，推导应有行业成员、ETF和龙头证券全集，与日终快照精确比对。新增8项合同/篡改红绿测试，本批阶段9相关链98项通过；精确隔离生产SQLite的完整后端2,338项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-daily-contract-fulltest-v1/test.db`。
+- 同一正式样本的冻结行业成员关系现在还必须在六个日终交易日之间完全一致；任一日增删或换成员即报`objective_daily_membership_drift`，不能用漂移后的行业池计算跨日相对收益。
+- 客观结果验证已从“结果与标签相互一致”升级为独立重算：活动每次重放都按四域冻结输出目标加载六份日终快照，重新计算每个市场、行业、ETF和龙头观察值、成熟日期、状态、缺失理由及来源集合，再与客观结果和自动标签逐条精确比对。即使同步修改结果、标签和外层哈希也会被拒绝。
+- 最终质量报告同样不再作为自报结果接受：活动会从最终回放输入重新调用唯一质量构建器并比较完整强类型内容。TDD新增“跨日成员漂移”“结果与标签同步改指标”“质量报告改计数”3项红/绿用例；本批阶段9相关链120项通过，精确隔离生产SQLite的完整后端2,342项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-outcome-recompute-fulltest-v1/test.db`。
+- 最终回放输入进一步改为可独立重建：新增无落盘副作用的纯组装器，活动从三个正式cohort引用的前向基线、四域输出和自动客观标签重新生成完整回放，并同时精确比对组装清单的输入记录。成熟三样本用例已升级为真实组装，并先证明“协调修改回放证据+重建质量报告+更新清单及活动哈希”会被旧验证遗漏；修复后组装/活动/正式入口等相关100项通过，隔离生产SQLite的完整后端2,342项再次全部通过，临时库为`/private/tmp/codex-stage9-assembly-rebuild-fulltest-v1/test.db`，生产库护栏命中1次。
+- 已审计合法空龙头榜的到期结果：现有合同要求`__empty__ + correctEmpty`，但项目尚未冻结可由后续日终事实独立重算的`correctEmpty`判定口径；当前日终提供方保持`missing`是正确失败关闭。没有把“规则输出为空”循环写成`true`，也没有临时发明涨幅阈值。该口径应在真实development证据成熟后形成版本化候选，并在calibration/holdout前冻结；若正式样本有真实龙头目标，则既有3日/5日相对行业与最大不利波动链可直接成熟，不受此空榜分支影响。
+- 完成质量门因果时间审计：强类型合同现在拒绝早于样本`asOf`形成的标签、早于样本创建的标签/输出包，以及同一样本内重复的同域同目标标签。TDD新增3项红/绿测试，阶段9合同及上下游138项通过；精确隔离生产SQLite的完整后端2,345项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-contract-time-fulltest-v1/test.db`。
+- 进一步拒绝证据和日终点位`sourceTime > fetchedAt`的时间倒置；日终指数点必须精确匹配上证综指`sh000001`、深证成指`sz399001`、创业板指`sz399006`、科创50`sh000688`四个身份，不能用四个任意唯一指数通过数量门。新增3项红/绿测试，阶段9相关134项通过；隔离生产SQLite的完整后端2,348项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-time-index-fulltest-v1/test.db`。
+- 用真实只读工件做了新合同复验：`/private/tmp/stage9-forward-industry-cninfo-live-20260902-v1/replay-input.json`仍通过因果时间合同（1样本、6历史证据），旧日终`/private/tmp/stage9-objective-daily-close-20260902-v5/daily-outcome-snapshot.json`的7087个证券点和四个固定指数点均有效，但其声明`snapshotId=stage9-outcome-daily-db3d8626ee4c9e569f9ae89e`不等于当前内容寻址合同重算的`stage9-outcome-daily-0b7469e3213e9b90c18f8e76`，因此整体按`daily_outcome_snapshot_identity_mismatch`拒绝。该旧诊断快照不会改写、重新编号或登记进正式campaign；下一次正式收盘必须由当前代码新采。
+- 修复5日客观收益的除权失真：证券序列改为逐日使用真实`price / previousClose`收益因子复合，不再以末日未复权名义价格直接除以基线价格。TDD用“ETF名义价格因拆分减半、每日真实收益仍为1.5%”证明旧实现误报约−46.14%，修复后正确得到`1.015^5-1`且最大回撤为0；相关日终/结果/活动/质量83项通过。真实9月2日日终7087个证券点的`previousClose`缺失数为0，当前来源具备执行新口径的字段覆盖。精确隔离生产SQLite的完整后端2,350项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-adjusted-return-fulltest-v1/test.db`。
+- 关闭非交易状态的任意文本绕过：日终证券点的`tradingStatus`改为只接受`suspended/delisted/unlisted`三种强类型值；`active/unknown`、空字符串或其他任意字符串不能再绕过当日15:00收盘原始时间门。红测先证明旧合同三种非法值均可通过，修复后与合法停牌、真实0值及日内高低价边界联合3项通过。
+- 四域正式输出新增业务身份白名单：市场目标必须精确为`a-share`且状态只允许`strong/oscillation/retreat/risk`，行业只允许版本化生命周期状态，ETF只允许`product_ready_for_index_research`，龙头非空目标必须为六位证券代码且状态只允许`research_qualified`。红测证明错误市场目标、错误市场状态、行业`buy`、ETF`buy`和龙头`candidate`五类旧实现都会放行；修复后输出桥/正式cohort/campaign/客观结果/服务相关98项通过。
+- 上述两项收紧后的精确隔离生产SQLite完整后端2,352项全部通过，生产库绝对路径护栏命中1次并定向至`/private/tmp/codex-stage9-output-domain-fulltest-v1/test.db`。
+- 正式活动登记旁路已关闭：此前通用`register_cohort`可以直接向`formal_sequence`写入任务包和输出包，从而跳过唯一正式cohort入口的ETF准入、四域业务身份及九项工件复核。红测证明旧实现会把该直接调用登记为revision 2；现在正式活动只接受正式入口持有的进程内能力令牌，通用campaign CLI直接登记会失败且活动保持revision 1/cohort 0，`standalone_diagnostic`仍保留低层登记能力。活动/正式入口/命令行相关70项通过；精确隔离生产SQLite的完整后端2,353项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-formal-entry-fulltest-v1/test.db`。
+- 正式活动创建也改为先校验、后落盘：空白活动ID等非法状态不再先建目录再报错；通用campaign CLI若在创建`formal_sequence`的同一命令携带任务/输出包，会在调用`create_campaign`前直接拒绝，不留下空活动阻塞重试。两项红测分别证明旧实现会残留目录、会先执行创建；修复后campaign/正式入口/CLI相关72项通过，完整后端2,355项通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-campaign-create-fulltest-v1/test.db`。
+- 02:14 CST使用上交所官方交易日历和唯一真实顶层命令做非交易时段预检，精确返回`replay_formal_cohort_continuous_session_required`。阶段6五源链未启动，`/private/tmp/stage9-formal-cohort-development-20260903-v1`未创建，正式活动仍为原`revision=1/cohort=0`；证明同一命令会在时段门前失败关闭，不会用夜间数据或失败重试污染今天的development。
+- 顶层入口三目录隔离已补齐：此前只拒绝阶段6输出与cohort输出互相嵌套，却会接受阶段6输出直接等于正式campaign目录，或把cohort输出建在campaign树内。两组红测证明旧行为；现在campaign、阶段6输出和cohort输出必须两两不相等且不互为父子目录，相关73项通过。精确隔离生产SQLite的完整后端2,356项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-live-dir-isolation-fulltest-v1/test.db`。
+- 可写巨潮PDF缓存也纳入同一隔离门：缓存目录不能位于campaign、阶段6输出或cohort输出内部，也不能包含这三棵目录；解析后的安全绝对路径才传给正式cohort入口。三组红测证明旧入口完全未检查缓存重叠，修复后顶层入口8项、上下游相关74项通过；完整后端2,357项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-live-cache-isolation-fulltest-v1/test.db`。随后用上交所官方日历再次运行今天盘中将使用的唯一真实命令，四个实际目录通过新隔离门，只因当前非连续竞价返回`replay_formal_cohort_continuous_session_required`；development目录未创建，campaign仍为revision 1/cohort 0。
+- campaign修订时间新增单调门：此前正式登记可用早于当前revision的`updatedAt`生成新revision，恢复入口也接受倒退的`now`。红测证明旧登记会成功；现在两条变更入口均统一报`replay_campaign_time_regression`并保持原revision、时间与空cohort不变。相关75项通过，精确隔离生产SQLite的完整后端2,358项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-campaign-time-fulltest-v1/test.db`。
+- 登记时间因果门进一步绑定本轮工件：仅晚于旧revision仍不够，`updatedAt`还必须不早于样本`asOf`、标签任务包`createdAt`和四域输出包`createdAt`。红测证明旧实现会登记“活动更新时间早于本轮证据生成时间”的revision 2；修复后报`replay_campaign_registration_time_before_artifact`且活动不变。相关76项通过，精确隔离生产SQLite的完整后端2,359项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-registration-causality-fulltest-v1/test.db`。
+- campaign加载身份再收紧两层：外层`latest.json`的`updatedAt`现在必须与内容寻址状态文件精确一致，不能只匹配活动ID和revision；`ReplayCampaignState`强类型合同自身也拒绝`updatedAt`早于任一cohort样本`asOf`。两项红测证明旧加载器/模型都会接受错配；修复后相关78项通过，真实空campaign由新加载器复验为`stage9-formal-forward-v1/revision=1/cohort=0`。精确隔离生产SQLite的完整后端2,361项全部通过，生产库护栏命中1次并定向至`/private/tmp/codex-stage9-campaign-load-integrity-fulltest-v1/test.db`。
+- Python编译、`pip check`和`git diff --check`均通过。本批没有读写生产SQLite、调用付费AI、改依赖/迁移/环境变量/正式开关，也没有停止或重载服务。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留131个工作树路径（55个已跟踪修改、76个未跟踪）；4000 PID25121、8001 PID38436仍为原进程。正式活动仍为`revision=1/cohort=0`，没有用夜间数据或测试数据填充。
+
+下一步：1）2026-09-03有效A股连续竞价时段使用已记录的唯一顶层命令采集development；2）当日15:05后对正式campaign执行`run_radar_replay_campaign.py --confirm-live-close-capture`，采集经15:00原始时间门验证的样本日收盘基线；3）若development含真实龙头目标，后续不同交易日继续calibration/holdout并逐日幂等续采；若development为合法空榜，则先让该样本成熟并形成版本化`correctEmpty`候选口径，在进入calibration/holdout评估前冻结。最终只以三角色真实总质量报告`ready`判定通过。
+
+## 2026-09-02阶段9正式cohort四域输出准入闭环
+
+- 正式单入口在来源质量和ETF正式准入通过后新增第三层输出准入：四域输出必须恰好包含同一`sampleId/radarRunId/asOf`的市场、行业、ETF和龙头证据，每域状态为`ready`，目标身份和状态必填且不得重复。市场、行业和ETF必须有真实状态；龙头允许显式空`states`表示规则已运行后的合法空榜，但缺少龙头证据仍失败关闭。入口现在重新解析真正落盘的强类型输出包及其清单，复核文件SHA-256、清单身份和内存返回值；文件截断、丢失或两者不一致都会在生成标签前停止。
+- ETF输出必须来自`radar-etf-product-research-output-v2`。带监测/排名正式状态的证券集合必须与本轮显式ETF请求全集完全相等，再从逐证券状态和理由反算正式准入、监测与排名五项汇总计数；额外证券、遗漏证券或声明计数不一致均失败关闭。排名权重尚未由独立样本校准时仍可如实保持`rankingStatus=missing`，没有拿监测就绪冒充加权排名就绪。
+- 六域前向基线也改为落盘重放：正式入口会重新读取清单绑定的源快照、回放输入、质量报告和ETF准入文件，逐项核对路径、SHA-256、`sampleId/radarRunId/asOf/role`和内存返回值。内存报告正常但回放文件被截断或清单哈希不一致时，会在四域输出之前终止。
+- 四域输出不完整会在生成盲化标签任务之前终止，因此错误工件不会进入标签链，更不会登记为不可变正式cohort。既有活动清单仍为revision 1、cohort 0；夜间没有创建正式样本，没有用9月2日旧会话工件或测试夹具冒充下一个交易日development。
+- TDD新增“四域缺一不得生成任务”“内存输出正确但落盘文件无效不得生成任务”“额外ETF不得取得未请求的正式状态”和“前向基线落盘不一致不得进入输出”，并把成功夹具改成真正带哈希清单的六域基线。正式入口15项、相邻采集/导出/标签/活动联合69项通过；精确隔离生产SQLite的完整后端2,305项全部通过，生产库绝对路径护栏命中1次并重定向至`/private/tmp/codex-stage9-baseline-artifact-fulltest-v1/test.db`。
+- 今晚真实工件`/private/tmp/stage9-forward-industry-cninfo-live-20260902-v1`通过新增的基线落盘重放、六域来源质量和ETF准入门禁：样本`forward-development-20260902T221604061929`、来源质量`ready`、具名排除1项，真实ETF全集为515050且`monitoringStatus=ready/rankingStatus=missing`。该工件仍只是同日晚间诊断证据，没有登记进正式跨交易日活动。
+- 正式入口交易时段边界已按沪深交易所现行规则修正：股票下午连续竞价只到14:57之前，14:57—15:00是收盘集合竞价。旧实现错误接受到15:00，现已TDD证明14:57整点拒绝、14:56:59仍允许；避免下一交易日尾盘集合竞价被误登记为正式盘中样本。入口17项、上下游联合71项、隔离生产库的完整后端2,307项通过，测试库为`/private/tmp/codex-stage9-session-boundary-fulltest-v1/test.db`，生产库路径护栏命中1次。
+- 正式cohort总运行清单现在完整绑定源快照、回放输入、质量报告、ETF准入、四域输出、标签任务以及基线/输出/标签三份子清单共九项路径与SHA-256。所有引用会在调用活动登记前一次性解析；标签清单缺失时直接返回`replay_formal_cohort_run_artifact_unverified`，不会先修改正式活动再因总清单缺失留下半套状态。入口18项、上下游联合72项、隔离生产库的完整后端2,308项通过，测试库为`/private/tmp/codex-stage9-run-artifact-fulltest-v1/test.db`，生产库路径护栏命中1次。
+- 活动登记完成后新增返回状态反证：活动ID、`formal_sequence`模式、修订号恰好递增一次、更新时间、角色对应的cohort总数、本轮`sampleId/radarRunId/asOf`以及任务/输出路径和SHA-256必须全部一致；旧状态或没有本轮cohort的返回值会报`replay_formal_cohort_registration_unverified`，CLI不能误报`registered`。入口19项、上下游联合73项、隔离生产库的完整后端2,309项通过，测试库为`/private/tmp/codex-stage9-registration-fulltest-v1/test.db`，生产库路径护栏命中1次。
+- 正式入口最外层现在会在任何来源采集前拒绝重复ETF、非六位数字代码和超过10只的请求，不再依赖内层采集器恰好实现相同校验。TDD先证明旧实现会进入禁止采集器，修复后正式入口20项、上下游联合74项、隔离生产库的完整后端2,310项通过；新测试库为`/private/tmp/codex-stage9-formal-etf-input-fulltest-v1/test.db`，生产库绝对路径护栏命中1次并重定向到临时库。
+- 正式总运行清单原先在活动登记之后才写入，磁盘异常可能留下“已登记、无总清单”的半套状态。新红灯用例准确复现后，已调整为先原子落盘含预期修订号的完整清单，活动登记最后执行，登记返回再做反向验证。
+- 活动的cohort登记和日终续采/客观结果/总质量组装现在共用同一跨进程非阻塞锁；竞争时返回`replay_campaign_mutation_locked`，不重复采集或并发改清单。正式登记额外携带入口规划时的`expected_revision`，锁内发现期间已有合法更新就在改状态前返回`replay_campaign_revision_conflict`。并发专项2项和入口/活动等上下游联合76项通过；隔离生产库的完整后端2,312项通过，测试库为`/private/tmp/codex-stage9-campaign-concurrency-fulltest-v1/test.db`，生产库路径护栏命中1次并重定向到临时库。
+- 正式盘中采集新增独立全程非阻塞锁，在读取阶段6工件和请求任何公开来源前阻止同一活动第二条采集链，避免重复网络消耗和同目录并发写。该锁不阻断日终续采；期间活动变更仍由登记时的修订号门安全识别。
+- 标签任务链已从“文件存在”升级为落盘强类型重放：重新解析任务包和子清单，核对哈希、创建时间、单样本身份、四域、盲化状态以及它引用的本轮来源快照/回放输入。清单哈希被改写的红灯用例已证明旧缺口，修复后在登记前明确拒绝。
+- 前向原始来源快照现在必须在内容层与本轮`radarRunId/sampleRole/sampleAsOf`一致，且证券池、行业、指数、ETF、公司行为、ETF正式采集六域齐全为结构化对象；“错身份内容+同步重算清单哈希”也不再能通过。阶段6总工件和行业快照还在整链开始与登记前两次比对路径/SHA-256，中途漂移失败关闭。本轮正式入口24项、上下游联合80项、精确隔离生产库的完整后端2,316项全部通过，测试库为`/private/tmp/codex-stage9-formal-audit-fulltest-v1/test.db`，生产库绝对路径护栏命中1次并重定向到临时库。
+- 新增`backend/run_radar_replay_formal_live_acceptance.py`作为下一交易窗口的唯一顶层命令：先预检官方交易日/连续竞价和下一角色，再运行阶段6同会话五源链，只对`ready_for_review`或合法`empty`继续阶段9。`ready_for_review`在这里是旧程序状态名，已由程序自动消费，不是用户审批。入口记录调用前已有阶段6工件，仅接受本次在指定目录新增的`stage6-live-five-source-*.json`，旧工件、目录外路径、非正式命名均不进入阶段9。
+- 顶层命令6项专项、阶段6/阶段9联合98项及精确隔离生产库的完整后端2,322项全部通过；新测试库为`/private/tmp/codex-stage9-formal-live-wrapper-fulltest-v1/test.db`，生产库绝对路径护栏命中1次并重定向。真实午夜预演因官方日历在受限网络下不可验证而安全退出，未创建阶段6/cohort输出目录，正式活动仍为revision 1、cohort 0。
+- 已确认当前最新可用行业状态断点为`/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260902T133743207000.json`：合同`radar-sector-state-snapshot-v1`，81个行业代码/81条状态，观测时间`2026-09-02T05:38:58.083774+00:00`，文件SHA-256为`3dd1cff79ab3ccdb859fa8e113ba3173e26b8d1dd01f7e3b071e456ab39793d3`。下一窗口显式传入它，不初始化空状态。
+- 本批未修改前端；未调用外部AI，未读取或写入生产SQLite，未改依赖、迁移、环境变量或正式开关，未停止或重载服务，未Git暂存、提交、推送或部署。Python编译、`pip check`和`git diff --check`均通过。Git保持`main@4e2c7ca`、领先`origin/main`17个提交，完整保留131个工作树路径（55个已跟踪修改、76个未跟踪）；正式活动仍为revision 1、cohort 0，未被夜间预演污染；4000 PID25121、8001 PID38436仍为原进程监听，运行服务尚未加载本批源码。
+
+下一步：1）2026-09-03有效A股连续竞价时段在`backend/`仅执行新顶层入口：`PYTHONPYCACHEPREFIX=/private/tmp/codex-stage9-live-pycache ./venv/bin/python run_radar_replay_formal_live_acceptance.py --confirm-live-formal-sequence --campaign-dir /private/tmp/stage9-replay-campaign-formal-v1 --stage6-output-dir /private/tmp/stage6-live-prefreeze-resume-20260825 --cohort-output-dir /private/tmp/stage9-formal-cohort-development-20260903-v1 --previous-sector-state /private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260902T133743207000.json --cninfo-pdf-cache-dir /private/tmp/stage9-cninfo-pdf-cache-v1 --formal-etf 515050`；2）安全收盘后采集该cohort样本日基线，随后每日幂等补充已发生交易日；3）后续不同交易日由同一入口自动推导calibration、holdout，三份样本各满5个后续交易日后自动组装总质量报告，只有真实报告`ready`才通过阶段9正式门。
+
+> 保存时间：2026-09-02 22:57 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9正式cohort来源质量准入加固
+
+- 在22:47的一次性编排基础上，正式登记前新增第二层质量准入：本轮前向质量报告必须恰好只有当前角色一个样本，证券池、交易规则、行业、指数、ETF和公司行为六域齐全，`missingCount/unverifiableCount/failedCount/futureViolationCount/duplicateStateViolationCount/multiStateViolationCount`全部为0。来源问题不能再等登记为不可变cohort后才发现。
+- ETF正式准入包会重新从JSON构建并校验语义SHA-256、`sampleId/radarRunId/asOf`、请求证券全集和逐只状态。所有显式ETF都必须`monitoringStatus=ready`才允许生成四域输出；`rankingStatus=missing`仍按真实语义允许，因为规则权重和独立校准样本正是本轮后续要验证的内容，不会被误写成排名已就绪。
+- `scopedExclusionCount`不被删除或改写。具名逐文档排除继续进入每份样本和最终质量报告；它表示该对象没有被纳入，不等于整个官方来源失败。今晚真实工件`/private/tmp/stage9-forward-industry-cninfo-live-20260902-v1`通过新增门禁：来源质量ready、ETF监测ready，同时真实保留002115一项具名排除。
+- TDD新增来源失败不得进入输出、ETF监测缺口不得进入输出，并把成功用例改为真实的“监测ready、排名missing”状态。新入口11项通过；精确隔离生产SQLite的完整后端2,301项全部通过，生产库绝对路径护栏命中1次并转到`/private/tmp/codex-stage9-formal-quality-fulltest-v1/test.db`。未调用外部AI或写生产库。
+- Python编译、依赖检查和`git diff --check`最终复核通过。4000 PID25121与8001 PID38436仍为原进程监听；本批没有修改前端、服务、环境变量、依赖、迁移或正式开关，没有重载服务，也没有Git暂存、提交、推送或部署。
+
+下一步：1）下一有效A股连续交易时段生成新的同会话阶段6真实工件，并通过单入口采集、质量复核、导出和登记development；2）收盘后从活动清单采集该cohort首日基线，随后每日幂等续采；3）后续不同交易日自动推导calibration、holdout，三份样本各满5个后续交易日后自动组装总质量报告。
+
+> 保存时间：2026-09-02 22:47 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9正式cohort单入口与下一交易日安全预演
+
+- 新增`backend/radar/replay_formal_cohort.py`和`backend/run_radar_replay_formal_cohort.py`，把下一份正式样本原来需要人工串联的前向基线、ETF正式准入、市场/行业/ETF/龙头四域输出、盲化客观标签任务及活动清单登记收敛为一个入口。角色不再由调用者猜测，而是根据`stage9-formal-forward-v1`现有cohort数自动推导development→calibration→holdout。
+- 入口在任何真实来源调用前检查官方A股交易日和连续竞价窗口，并要求阶段6市场研究状态来自同一上海交易日、同一上午或下午连续交易时段；未来、隔夜、午前跨到午后、非`ready/researchUsable`或伪造`formalUsable=true`全部拒绝。至少必须显式提供一只ETF且采集结果确实产生正式准入包，避免把缺ETF v2的不可变样本误登进正式清单。
+- 只有前向来源、四域输出和标签任务全部成功后才调用既有`register_cohort`；身份、角色、运行ID、样本日期或会话不一致均失败关闭。新运行清单`radar-replay-formal-cohort-run-v1`保存阶段6工件、行业状态、回放输入、ETF准入、输出包、标签任务的绝对路径和SHA-256，以及活动清单修订号，不访问SQLite、不生成标签、不补历史收盘。
+- 22:42使用真实空清单、当日下午阶段6工件和515790/515050执行夜间安全预演，真实返回`replay_formal_cohort_continuous_session_required`；`/private/tmp/stage9-formal-cohort-preflight-20260902-v1`没有创建，活动清单仍为revision 1、cohort 0、SHA-256 `c2610e49cf8c8c05209b98af62597364a0a26a01f649cf9d11167d883097011b`。这不是失败待修，而是证明非交易时段不会采集或污染正式序列。
+- 002115继续通过巨潮官方股本变动接口复核：同期仅返回2026-04-27“其他”记录，以及公告日2026-08-18、变动日2026-06-30的“股份回购,定期报告”记录。2026-06-30早于债权申报期届满，不能作为注销手续完成日；7月7日完成公告仍只写“近日”，所以唯一具名排除保持不变，没有拿公告日期或第三方股本页补值。
+- TDD先观察新模块/CLI不存在、非连续时段、同日角色、旧会话阶段6、空ETF和ETF包缺失等失败，再最小实现。新入口9项、相邻前向/输出/标签/活动联合63项通过；精确重定向生产SQLite的完整后端2,299项全部通过，生产库绝对路径护栏实际命中1次并转到`/private/tmp/codex-stage9-formal-cohort-fulltest-v1/test.db`。新模块Python编译、`pip check`和`git diff --check`通过；本批未改前端，沿用上一检查点已通过的TypeScript、ESLint和Next.js build证据。
+- 未读写生产SQLite，未调用付费AI，未改依赖/迁移/生产环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。当前运行服务仍未加载本批源码。
+
+下一步：1）下一个有效A股连续交易时段先运行既有阶段6真实五源入口取得同会话新工件，再用`run_radar_replay_formal_cohort.py --confirm-live-cohort`携带515790和515050一次性生成并登记development；2）当日安全收盘后对活动清单运行既有`--confirm-live-close-capture`，以后每天幂等续采；3）后续不同交易日由同一入口自动推导calibration和holdout，三份样本各满后续5个交易日后自动组装总质量报告。
+
+> 保存时间：2026-09-02 22:28 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9当前行业官方补充与全市场映射收口
+
+- 阶段9前向行业源新增严格官方当前补充：中上协2025年下半年5,463条原表仍是基础版本；原表发布后上市的北交所证券只用交易所主档精确行业大类名称与中上协表做唯一名称交叉映射，沪深证券只接受巨潮行业变更接口中标准代码`008001`的最新非未来记录，并按代码和名称与中上协表唯一精确核对。上交所主档缺失、深交所仅有门类以及模糊名称均不参与推断。
+- 合同为每条补充记录保存`recordProvenance`、`knowledgeEffectiveFrom`、`evidenceUrl`和原始字段，既有SQLite结构只通过`source_fields_json`兼容持久化，没有迁移。补充证据只能用于实际取得时间之后的当前/前向样本；回放适配器会拒绝晚于样本时点的补充记录，不能倒填历史。
+- 新鲜工件`/private/tmp/stage9-forward-industry-cninfo-live-20260902-v1`的样本为`forward-development-20260902T221604061929`，`asOf=2026-09-02T22:16:04.061929+08:00`。行业记录5,578条（基础5,463+补充115），当前证券映射5,554/5,554，行业缺口由115降为0；证券、交易规则、行业、指数、ETF和公司行为六域全部`ready`，`unverifiableCount=0`、`failedCount=0`。
+- 同轮只剩1个具名排除：002115回购注销官方公告只写“近日办理完成”，巨潮股本变动记录的2026-06-30又早于公告披露的债权申报期届满，不能当精确注销完成日。因此继续排除，没有拿公告日或冲突日期猜测。质量报告剩余理由是三分区、四域输出、客观标签尚未跨交易日齐备以及这个具名排除；不是来源不可用或人工审批。
+- 工件SHA-256：ETF准入`39bbabe8eab65ed4d2837f05ed0bdc5f410d12fcb8f798cd63cd15b61e0f4ebf`、回放输入`b35598cbee5c56e28b2f410706db6ebd731d8d08956f9efd9e706289c3f932db`、质量`26cdc372427ad89d3055ef630f60ddd7ede49c63c9a3bd955b21caf8dd3d36f5`、清单`aa9a60353045d93be3255a8ba399efd4712553ebb38448784e3ddae349dfe1dbf`。
+- TDD已覆盖北交所精确映射、沪深巨潮精确记录、粗粒度/未知拒绝、未来或身份冲突拒绝、持久化往返和样本知识时间边界。相关80项及精确隔离生产SQLite的完整后端2,290项已通过；最后的小型来源命名/计数调整后又从正确后端目录重跑定向54项并通过。Python编译、`pip check`、TypeScript、ESLint、Next.js生产build（9路由）和`git diff --check`均通过。一次从项目根目录误启动定向测试只因缺少`radar`模块路径，在任何用例导入前退出，不是代码失败，已由正确命令替代。
+- 未读写生产SQLite，未调用付费AI，未改依赖/迁移/生产环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留125个工作树路径（55个已跟踪修改、70个未跟踪）；4000 PID25121和8001 PID38436保持原进程监听，因此运行服务尚未加载本批源码。
+
+下一步：1）下一个有效A股交易日从空的正式活动清单生成并登记全新的development，同轮保存四域输出、标签任务和收盘基线；2）再在严格递增的不同交易日登记calibration与holdout，并每日幂等采集所有活动cohort的收盘事实；3）三份样本各满5个后续交易日后由唯一入口自动组装质量报告，只有真实报告`ready`才记为阶段9正式门通过，同时继续寻找002115可确定的官方精确实施日而不让单一排除阻塞数据展示。
+
+> 保存时间：2026-09-02 21:40 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9华夏ETF官方净值扩展与515050真实监测链收口
+
+- 新增华夏基金官方净值合同`chinaamc-official-fund-nav-history-v1`：先在`https://fund.chinaamc.com/fund/{symbol}/index.shtml`精确核对`codetext`，再读取同产品`zoust_all.js`的单位/累计净值全序列。精确日期覆盖、长度、重复、非交易日、非法值或产品代码冲突全部失败关闭；语义哈希同时绑定产品页和净值响应。管理人路由当前只显式支持华泰柏瑞和华夏基金，其他管理人继续报`fund_nav_provider_not_supported`，未放宽。
+- 官方原文证明两个旧缺口都是解析句式不完整，已先TDD观察红灯再最小修复：515050招募说明书明确写有“其他所载内容截止日为2026年5月15日”，中证931079方法明确写有“选取排名前50的证券”。新解析只接受这些等价官方字段，不用公告日代替内容截止日，不从当前成分数猜测方法上限。
+- 官方直连复核：515050基金—指数关系`verified/formalReady=true`，有效日`2026-05-15`；中证指数唯一解析为931079；方法`V1.3@2023-12`、上限50和带权成分50/50均为`ready`。515050的61个交易日净值与指数序列各为61/61，60日跟踪差异`0.00026577028767249544`、年化跟踪误差`0.047714255853073755`、相关性`0.9985698319103082`，全部来自公开官方只读请求。
+- 同轮又定位并TDD修复中证000300方法文件的第二个稳定死门：官方PDF用顶层“2、样本空间 / 3、选样方法 / 4、指数计算”，目录和后文普通编号会干扰旧通用解析。新解析只在精确标题边界之间取正文。现场复核已取得真实样本空间、选样规则、调整市值计算和300/300完整权重；回放指数域由`unverifiable`转为`ready/forwardReady=true`。文件历史生效日仍缺时只禁止历史倒填，不再误伤当前/前向样本。
+- 新鲜整链工件为`/private/tmp/stage9-forward-etf-chinaamc-theme-live-20260902-v2`，样本时间`2026-09-02T21:04:34.100093+08:00`。准入包中产品身份、生命周期、主题范围、指数关系、方法、成分、行业暴露和五项排名原始输入全部`ready`，`monitoringStatus=ready`；唯一余项为排名规则/校准样本尚未冻结，`rankingStatus=missing`。文件SHA-256：准入`39e35acf3718e11a0733752b2b70f03b62e6a2742034756a314837526d2daf55`、回放输入`c8ea0ae7a9af87d151dc807e6566017b9220c394dba569645123bb08488415cd`、质量`94c56b819e3451a7d29ca37738312c9a0010eff437035ce7db2548d834901aa5`、清单`93da1084a3751e3ab840a1dbcafe5c336103d5f7fe05c32fe43adc31c4151de7`。该样本为同日诊断证据，未拿旧市场/行业/龙头输出倒灌，因此没有强行登记到空的正式活动清单。
+- 最新双管理人工件为`/private/tmp/stage9-forward-etf-two-manager-live-20260902-v1`，样本时间`2026-09-02T21:24:39.602835+08:00`。证券、交易规则、行业、指数、ETF和公司行为六域全部`ready`，`unverifiableCount=0`。明确排除并披露115只尚无当期中上协分类的新股和3份无法确定性解析的公司行为原文，未猜测填充。515050继续`monitoringStatus=ready`；515790在该冻结轮次的排名输入短暂未验证，随后用同轮官方主档单股复核时五项字段全部`verified/formalReady=true`，已如实保留冻结差异，没有改写工件。四文件SHA-256：准入`9938cf63b3f2be8963ae255aa517cc82cf2e8f14012032d9eef39fd49e6e1954`、回放输入`6d52916cb634603f37c6ae57564576681037e63bf1cdcaea3f1e68f2be2dbe93`、质量`9c5da435f69744e39dc62600f7e68e149b0522195ae1c71c15107624fe78257c`、清单`68cb5241a5f89d4c94a3b022ccca3115d561686ebbe69692eff18300ea696a38`。该轮`not_ready`因正式分区、四域输出和后续客观结果尚未跨交易日齐备，并且还披露118个具名排除；不是六域来源失败。
+- 公司行为的3份具名排除中，603268与688072官方上市公告书实际含有“（本次）新增股份登记日”，分别为`2026-07-29`和`2026-07-01`。解析器现把该明文日期作为新增股本登记实施日，不把限售期届满后尚未确定的流通日当实施日。002115回购注销只写“近日”、没有精确完成日，继续报`cninfo_repurchase_cancellation_action_unverified`，未用公告日推测。
+- 最新最终工件为`/private/tmp/stage9-forward-etf-chinaamc-final-live-20260902-v1`，样本时间`2026-09-02T21:38:58.843960+08:00`。六个回放来源全部`ready`、`unverifiableCount=0`、`failedCount=0`；具名排除由118降为116（行业115、公司行为1）。515050仍为`monitoringStatus=ready/rankingStatus=missing`，后者只因排名规则和校准样本未冻结。四文件SHA-256：准入`08bbd4358c809435776e8e6fc481d1b742db1bfd97b297213df172ff78ee738c`、回放输入`f5a2b6e872d24feac741ec90d7e931b6f3ad6f6dd2ede45830ce8b92496530bc`、质量`62632069a0f1dfa3b8cdfcd6546c57d5367d6d89e1783c15e8f29fde75a286c3`、清单`e3f4639982e8bc3a630f4f14dccfa68693dfa1ae0db54b33e6b969225488d3ab`。质量仍`not_ready`的真实理由是缺calibration/holdout、四域输出、后续客观结果，以及116个已披露排除；不是来源失败。
+- 验证：公司行为文件65项、相关ETF/前向链61项、指数证据+回放适配59项通过；精确隔离生产SQLite的完整后端2284项全部通过，生产库绝对路径护栏实际命中1次并重定向至`/private/tmp/codex-stage9-etf-collector-fulltest-v1/test-v9.db`。Python编译、`pip check`、TypeScript、ESLint和Next.js 16.2.10生产build（9路由）通过。未读写生产SQLite，未调用付费AI，未改依赖/迁移/环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留120个工作树路径（50个已跟踪修改、70个未跟踪）。4000 PID25121与8001 PID38436仍监听；4000聚合健康为`degraded`，Vercel/隧道/FastAPI为`healthy`、后台任务为`degraded`。本轮未重载，运行页面与后端仍未加载本轮新源码。
+
+下一步：1）下一有效A股交易日在市场时点同轮采集新development、市场/行业/ETF v2/龙头四域输出和客观任务，ETF同时携带515790与515050，并当日登记正式活动清单；2）随后不同交易日依次登记calibration和holdout，并对活动cohort每日幂等采集收盘事实；3）三个样本各满5个后续交易日后直接使用同一入口自动组装四域标签和总质量报告，只有报告`ready`才宣告阶段9正式门通过。
+
+> 保存时间：2026-09-02 20:29 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9跨交易日活动清单和幂等续跑单入口
+
+- 新增`backend/radar/replay_campaign.py`和`backend/run_radar_replay_campaign.py`。每个前向样本独立绑定内容校验的标签任务包、四域输出包和自己的6份日终快照，不再等三分区都建完后才事后补早期基线。清单使用不可变修订文件加SHA-256指针，任一状态、任务、输出、日终、客观结果或最终质量工件被改写都失败关闭。
+- 单入口按官方A股交易日历只计算“截至今天已经发生”的日期，不要求官方提前发布未来五日。安全收盘后如当日应采且缺失，只在显式`--confirm-live-close-capture`时读取公开行情；已有同日快照时只重新校验，不重复联网。样本日加后续5个已收盘交易日齐备后，自动调用已有客观结果提供方和标签生成器；三个正式cohort都为`ready`后，还会自动调用唯一`assemble_replay_artifacts`入口，保存联合输入哈希、最终回放文件和质量报告。相同输入重复运行只校验报告，报告`not_ready`继续原样返回，不伪装通过；历史漏采明确报缺失，不回填。
+- 正式模式只接受development→calibration→holdout前缀顺序，并要求三者所在上海交易日严格递增；同日、逆序、身份冲突或改包均拒绝。现有9月2日calibration只登记到`/private/tmp/stage9-replay-campaign-diagnostic-20260902-v1`独立诊断清单，状态`pending_maturity`、revision=2，真实基线快照校验为`ready`；它不参与正式分区门。已新建空的`/private/tmp/stage9-replay-campaign-formal-v1`，状态`empty`、revision=1，下一有效交易日只能首先登记新development。
+- 真实诊断清单状态SHA-256为`ab808ada42acd759475ad4b0b3ce2df8facd8258c7c49fdad8c57343f7dddd4c`，正式空清单状态SHA-256为`c2610e49cf8c8c05209b98af62597364a0a26a01f649cf9d11167d883097011b`。官方日历在受限沙箱内曾真实返回`unknown`，使用已授权的只读公网复核后成功识别9月2日并验证现有快照；该复跑没有发起行情请求。
+- TDD先观察活动清单/入口缺失、正式角色逆序、同日分区、重复采集、未来日历尚未发布以及三队列自动总装等红灯；修复后回放相关131项、活动清单/CLI定向25项和总装/质量相关46项通过。完整后端最终新鲜运行2276项全部通过，生产SQLite精确路径护栏实际命中1次并重定向到`/private/tmp/codex-stage9-etf-collector-fulltest-v1/test-v6.db`；新模块Python编译、`pip check`、TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`通过。未读写生产SQLite，未调用付费AI，未改依赖/迁移/环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留120个工作树路径（50个已跟踪修改、70个未跟踪）。4000 PID25121与8001 PID38436仍监听；4000聚合健康为`degraded`，Vercel/隧道/FastAPI为`healthy`、后台任务为`degraded`。本轮没有重载，运行页面和后端仍未加载本轮新源码。
+
+下一步：1）下一有效交易日生成新development的前向基线、ETF v2/市场/行业/龙头同轮输出和客观任务，当日就登记正式清单并采集收盘基线；2）后续不同交易日依次登记calibration和holdout，每日对所有活动cohort运行同一入口；3）三份样本各满5个后续交易日后直接读取同一入口自动产生的总质量报告，只有该报告`ready`才记为阶段9正式质量门通过。
+
+> 保存时间：2026-09-02 19:58 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9自动客观结果回收与首日全市场收盘基线
+
+- 阶段9质量门新增两项必须失败关闭的真实性校验：development、calibration、holdout除不得落在同一上海交易日外，还必须严格按开发早于校准、校准早于留出排列；每份样本的每一个冻结输出目标都必须取得可比较客观结果，不能只标1/81个行业或少数ETF就冒充全覆盖。报告/API/前端新增`partitionChronologyValid`、`unlabeledOutputTargetCount(s)`及对应理由；合法空龙头榜用显式`__empty__ + correctEmpty`验证。
+- 新增`replay_objective_outcomes.py`及安全CLI。它用上交所官方交易日历计算样本之后的5个完整交易日，未到期时不调用结果源、不生成标签；到期后逐样本、逐域、逐目标回收真实结果，未来观察、规则来源重用、非法指标和身份错配全部拒绝。`ready`事实自动生成现有`radar-replay-label-bundle-v1`，`missing/unverifiable/failed`只进入结果账本，不制造标签。
+- 新增`replay_outcome_daily_capture.py`、`replay_outcome_daily_provider.py`和日终CLI：样本日收盘保存基线，之后每日冻结目标证券、四个市场指数和该样本自己的行业成员关系；第5日后计算市场五日指数/市场宽度、行业三日/五日相对市场、ETF五日收益/回撤/成交额、龙头三日/五日相对行业与最大不利幅度。成员关系按`sampleId`隔离，规则状态/分数不交给结果提供方；每日行情内容SHA-256进入来源ID和快照ID，同日不同内容不会再共用身份。
+- 真实首跑先后暴露并修复两个稳定缺陷：请求开始时间早于真实`fetchedAt`导致7087只行情和4个指数被全部误拒；停牌证券真实`high/low=0`被新合同错误当非法。两项均先补失败测试，再改为以全部请求完成后的最晚时间冻结，并保留停牌/未交易的真实0，不放宽收盘价必须为正、时区、未来时间和来源完整性约束。
+- 最终真实日终工件为`/private/tmp/stage9-objective-daily-close-20260902-v5`：绑定任务`stage9-label-tasks-495265ab13807dcafccfdfbe`和输出`stage9-sector-output-1958ea9650cb421d78a2a833`，证券`7087/7087`、指数`4/4`、81个行业、5437条样本内成员关系，缺失0、理由0、状态`ready`。快照SHA-256为`1cdaf5cceeebe064f1ad3adff8c38e7eceff02445c86cacca4da4569ea908fe8`，清单SHA-256为`7a2eab96a4d19b1ec7fcf645f3d83fb5bf02f83f103e5de59620a81fe50341ef`。
+- 日终工件已接入真实结果入口`/private/tmp/stage9-objective-outcome-collection-20260902-v4`。当前真实状态为`pending_maturity`、成熟交易日0、结果观察0、标签包不存在；`dailySnapshotIds`明确记录首日快照。结果文件SHA-256为`79a689aa46f6a558f397d88df9deb15e0f2493f061fbf1a2764637041787f1dc`，清单SHA-256为`304615077007aed3945eccb017c9886a98c3d06e8bbb97530febccfeba39e414`。这是未来日期尚未发生，不是人工审批或工程阻塞。
+- 验证：回放专项110项、完整后端2251项全部通过；生产SQLite绝对路径护栏实际命中1次并重定向到`/private/tmp/codex-stage9-etf-collector-fulltest-v1/test-v3.db`。TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、Python相关模块编译、`pip check`和`git diff --check`均通过。未调用付费AI，未改依赖/迁移/生产环境变量/正式开关，未读写生产SQLite，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，完整保留116个工作树路径（50个已跟踪修改、66个未跟踪）。4000 PID25121、8001 PID38436仍监听；4000聚合健康`degraded`，其中Vercel/隧道/FastAPI为`healthy`、后台任务为`degraded`。本轮未重载，因此运行页面/后端尚未加载本批源码。
+
+下一步：1）下一个有效交易日从新的development开始一组严格按日期递增的前向序列，同轮生成市场/行业/ETF v2/龙头输出、客观任务及当日收盘基线，不用9月2日同日角色凑分区；2）后续不同交易日依次冻结calibration和holdout，同时继续每日只读收盘事实采集，阶段10影子观察可并行累计而不等待标签成熟；3）每份样本满5个后用`run_radar_replay_objective_outcomes.py --daily-snapshot ...`自动生成四域标签包，再交给唯一组装入口，只有分区顺序、全目标覆盖和真实指标全齐才通过阶段9总门。
+
+> 保存时间：2026-09-02 19:07 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9 ETF前向正式准入采集器与中证时序死门修复
+
+- 前向基线新增ETF准入双阶段链：`ForwardEtfFormalAdmissionHooks.collect`必须在样本冻结前完成全部公开来源请求，`finalize`只能把已抓取的当前观察绑定到更晚的`sampleId/radarRunId/asOf`。新模块`etf_formal_admission_collector.py`有界支持最多10只ETF，只读组装交易所产品/份额/规模、基金文件、中证身份/方法/权重、行业分类、20日成交额、61点净值/指数和行情；不读写SQLite、不计分、不排名、不开正式门。
+- `run_radar_replay_forward_baseline.py`新增可重复`--formal-etf`参数；未指定时旧行为完全兼容，指定时在原有`source-snapshots/replay-input/quality-report/manifest`外原子写出`etf-formal-admission.json`，清单记录文件SHA-256和语义SHA-256。采集器不可用、重复/非法代码、产品不在同轮官方主档或材料时间晚于样本时都会在任何来源请求/落盘前拒绝。
+- 18:55首次整链现场运行成功落盘到`/private/tmp/stage9-forward-etf-formal-live-20260902-v1`，也真实暴露了稳定工程死门：中证方法和成分经过多次网络请求后才取得，旧适配器却用“请求开始时间”作为`asOf`、用更晚的完成时间作为`fetchedAt`，导致本轮真实官方文件被自己误判为未来数据，进而误伤方法、成分、暴露和排名输入。
+- 已按TDD修复`fetch_csindex_index_poc`：先完成方法PDF、成分表和收盘权重表的真实下载/解析，再记录最终抓取完成时间；`current_official_observation.asOf=max(调用时点,最终完成时间)`，随后只允许绑定到更晚前向样本。新红灯用例确认“网络抓取晚2秒”时旧代码错误，修复后方法和权重均真实`formalReady=true`。
+- 18:59复用同晚已校验产品/行业主档并重新只读请求受影响链，515790准入包在`/private/tmp/stage9-etf-formal-live-20260902-v2.json`强类型重放通过：`monitoringStatus=ready`、`rankingStatus=missing`，监测项无理由码，唯一剩余理由为`etf_rule_not_frozen`和`ranking_calibration_sample_missing`。文件SHA-256为`155ff26bf4c03304ccafdffde645c5d2a6623ca450af237bbbdbc4732d38c695`，语义SHA-256为`0d342e4fd5896aeeefbc27c16e709877b31c24ef61840cc4d809331f3fad1838`；未倒灌到18:55或更早样本。
+- 最终相关94项、精确隔离生产SQLite后的完整后端2224项全部通过；生产库绝对路径护栏命中1次并重定向到`/private/tmp/codex-stage9-etf-collector-fulltest-v1/test-v2.db`。Python编译、`pip check`、TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`全部通过。未调用付费AI，未改依赖/迁移/环境变量/正式开关，未读写生产SQLite，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，保留106个工作树路径（50个已跟踪修改、56个未跟踪）。4000 PID25121、8001 PID38436仍监听；4000聚合健康为`degraded`，Vercel/隧道/FastAPI为`healthy`、后台任务为`degraded`。本轮未重载，运行页面/后端尚未加载本批源码。
+
+下一步：1）下一个不同A股交易日由同一前向入口显式携带`--formal-etf 515790`，与同轮行业/市场/龙头输出一起生成ETF v2样本，分配尚缺的development或holdout而不用同日相邻时点凑分区；2）将基金管理人净值适配从当前已验证的华泰柏瑞扩展到有界行业/主题ETF池，每只仍须通过同样九项门；3）各样本到5个交易日后由已有无人工审批的客观结果任务回收市场/行业/ETF/龙头四域真实指标，三分区与四域成熟后用唯一组装入口通过阶段9总质量门。
+
+> 保存时间：2026-09-02 18:33 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9 ETF监测/排名双状态输出与质量页贯通
+
+- 在18:16的515790真实监测链收口基础上，新增强类型`radar-etf-formal-admission-bundle-v1`。证据包绑定`sampleId`、`radarRunId`、`asOf`、逐ETF九项准入明细和语义SHA-256；构建与重放都会重新核对项目顺序、状态—理由一致性、监测状态、排名状态、整体状态、重复证券、时点和哈希。篡改`monitoringStatus`或使用不同`asOf`均被测试明确拒绝。
+- 阶段9输出桥新增可选`--etf-formal-admission`输入。只有该文件位于`/private/tmp`、自身哈希可重放、与ETF产品快照属于同一`sampleId/radarRunId/asOf`且证券确实是已通过产品层研究的ETF时，才生成`radar-etf-product-research-output-v2`。v2逐证券公开`monitoringStatus/rankingStatus/monitoringReasons/rankingReasons`，汇总`formalAdmissionCount/monitoringReadyCount/monitoringMissingCount/rankingPolicyReadyCount/rankingPolicyMissingCount`；仍固定`rankingReady=false/formalUsable=false/stateTransitionAllowed=false`，因为政策就绪不等于已经产生排名。未提供正式准入证据时继续生成原v1合同，保持旧调用兼容。
+- 阶段9质量报告新增`etfReadinessCounts`，只统计内容自洽的v2确定性ETF输出。报告会从逐证券状态反算五项计数；声明计数与逐项状态不一致、SHA格式错误、ready状态携带否决原因或missing状态没有原因时，该ETF输出直接进入`unverifiable`，不会显示虚假就绪数。只提供产品研究v1时五项计数保持真实0，不把699只可继续指数研究的产品冒充完整监测。
+- `/api/radar/replays/latest`与前端`RadarReplayQualityPanel`已贯通上述计数。质量页增加“ETF监测就绪”指标和“ETF真实监测 / 加权排名”独立里程碑；有同轮准入包时分别显示监测就绪/输入缺失与排名政策就绪/仍在校准，没有时明确写“产品研究输出不冒充完整监测或排名”。前端对尚未重载的旧后端缺少新字段提供0值兼容，避免开发服务热更新后页面崩溃。
+- TDD逐层完成：正式准入包2项红绿、输出桥显式双状态与篡改拒绝2项红绿、CLI参数1项红绿、质量报告计数/篡改2项红绿、前端合同先红后绿。最终相关46项、精确隔离生产SQLite后的完整后端2219项全部通过，生产库绝对路径被护栏拦截并重定向到`/private/tmp/codex-stage9-index-identity-fulltest-v1/test.db` 1次；TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、Python编译、`pip check`和`git diff --check`全部通过。
+- 本轮没有用测试证据替代真实数据：双状态数值仍以18:08的515790公开真实来源验收为事实基础；当前14:35阶段9样本早于18:08验收，按未来数据禁令没有把后来的准入包塞回旧样本。下一份同轮前向样本可直接携带v2证据。未调用付费AI，未改依赖/迁移/环境变量/正式开关，未读写生产SQLite，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，保留104个工作树路径（50个已跟踪修改、54个未跟踪）。4000 PID25121与8001 PID38436继续监听；本轮未重载服务，因此运行后端尚未加载新API字段，当前已发布的旧阶段9报告也不会伪造新增计数。
+
+下一步：1）把515790同轮真实提供方收敛为可复用的只读准入采集入口，在下一有效前向样本中直接写出正式准入包并生成ETF输出v2；2）后续不同交易日分别冻结development和holdout，自动生成四域输出及无人工审批的客观结果任务；3）把同一入口扩展到有界行业/主题ETF池，形成真实排名校准分布后再冻结权重和阈值。
+
+> 保存时间：2026-09-02 18:16 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9行业/主题ETF真实监测链收口
+
+- 本轮不再把“真实监测输入是否可用”和“加权排名是否已校准”捆成同一个死门。`EtfFormalAdmissionEvidence`新增`monitoringStatus`与`rankingStatus`：前者只核对产品身份、当前上市状态、行业/主题范围、基金—指数关系、指数方法、完整权重成分、100%行业映射和五项排名原始输入；后者单独表示排名政策/权重/阈值是否冻结。监测链真实齐全时可先继续展示和积累数据，排名未校准只关闭加权排名，不再反向阻塞整个ETF模块。
+- 中证指数材料改为从官网`index-details-data`材料目录按精确指数代码动态发现，严格校验官方HTTPS域名、路径、文件类型、文件名和唯一性，不再依赖已404的旧固定文件名。新增`EvidenceTemporalBasis`区分`current_official_observation`和`exact_effective_interval`：官网当前方法/成分只能从首次观察时点向前使用，不得冒充历史生效期倒填阶段9回放。中文编号章节已支持；最终差异复核又发现“样本空间”误取为“指数基日”并按TDD修复，现在931151样本空间真实解析为“同中证全指指数的样本空间”，选样规则与调整市值加权规则分别保存。
+- 新增由沪深交易所当前官方产品主档构建的在市生命周期证据，不从后续缺席推断终止；新增中证官方`indexClassify`到行业/主题/宽基的精确分类，未知分类失败关闭。行业暴露只审计目标指数的完整成分：历史首次观察之前继续拒绝回填；当前向前计算在50/50成分全部唯一映射时，不再被全市场其他证券的无关主档缺口拖死。盘中展示用成交额单位未核验也不再阻塞已经通过官方20日窗口核验的`averageTurnover20d`，二者仍保持独立字段。
+- 2026-09-02 18:08 CST完成515790光伏ETF只读实测。正式准入9个项目中，前8个真实监测项目全部`ready`：产品光伏ETF、当前在市、主题ETF、基金—中证光伏产业指数931151关系、方法V1.2@2023-12、2026-08-31权重成分50/50、权重合计100.002%、行业映射覆盖1.0，以及五项排名输入全部可用。基金规模`4,924,190,000 CNY`，20日平均成交额`187,196,690 CNY`，60日跟踪差异`0.006287798331193861`、年化跟踪误差`0.009513607498504767`、相关性`0.9996785670108749`；各官方来源理由列表均为空。`monitoringStatus=ready`，`rankingStatus=missing`，整体仍`missing`的唯一原因是`etf_rule_not_frozen`和`ranking_calibration_sample_missing`，没有再携带虚假的`formal_source_inputs_incomplete`。
+- 中证方法文件第一次两次20秒读取均超时；随后限定重试直接取得官方文件`/private/tmp/931151-methodology-live-20260902.pdf`，SHA-256为`8ee83d45fac58214629adbd87c5a1b7aff09bf3db97e3a1351046eb89cf8018e`，与当天早先官方文件完全一致。最终验收仅用该刚取得的官方原文避免重复慢传输，其余材料目录、基础信息、成分权重、基金公告、交易所份额/规模/成交额、管理人净值、中证指数序列和腾讯交叉行情均为本轮公开只读请求；未用Fixture/Mock补生产证据。
+- TDD红灯准确复现“样本空间被基日替代”，修复后专项转绿；最终ETF测试133项、阶段9回放测试102项、精确隔离生产SQLite后的完整后端2213项全部通过，生产库绝对路径被护栏拦截并重定向到`/private/tmp/codex-stage9-index-identity-fulltest-v1/test.db` 1次。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`均通过。本轮未调用付费AI，未改依赖/迁移/环境变量/正式开关，未读写生产SQLite，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git为`main@4e2c7ca`、领先`origin/main`17个提交，保留104个工作树路径（50个已跟踪修改、54个未跟踪）。4000 PID25121与8001 PID38436仍在原端口监听；4000聚合健康为`degraded`，Vercel/隧道/FastAPI为`healthy`、后台任务为`degraded`；8001直访`/health`仍返回404。本轮未重载服务，因此运行页面尚未加载本批源码。
+
+下一步：1）把`monitoringStatus=ready/rankingStatus=missing`接入阶段9 ETF输出与页面，让真实成分、行业暴露和跟踪质量先可见但不显示虚构排名；2）在后续不同A股交易日自动冻结development与holdout，并在到期后自动生成3日/5日客观结果，继续不要求用户审批股票；3）扩大到有界行业/主题ETF研究池，复用同一官方链积累真实排名校准样本，样本足够后再冻结权重与阈值。
+
+> 保存时间：2026-09-02 17:23 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9工程完整性与自动客观结果拆分、ETF官方跟踪链
+
+- 阶段9不再把“回放工程是否完整”与“未来3日/5日效果是否成熟”混成一个阻塞。质量报告新增`pipelineStatus=ready/not_ready/failed`和`effectivenessStatus=ready/collecting`；API的`engineeringState`严格由工程完整性映射，不再因“只要有报告”就误写工程完成。整体`status`仍只在工程和真实效果均就绪时为`ready`，未放宽未来数据、分区隔离或来源真实性。
+- 独立比较合同新增`comparisonMode=objective_outcome`：不需要人工批准`expectedState`，但必须提供允许口径内至少一个非空、有限、真实的事后指标，且来源与规则输出隔离。自动任务包显式固定`evaluationMode=automatic_objective_outcome`、`manualApprovalRequired=false`和`minimumMaturityTradingDays=5`；前端和产品文档统一改为“独立客观结果”，用户人工查看不再是审批门。
+- 2026-09-02已由真实校准样本`forward-calibration-20260902T143533961045`生成无人工审批任务包`/private/tmp/stage9-objective-outcome-tasks-20260902-v1`；`label-tasks.json` SHA-256为`c13962d5cc3da5f0754c05c5ebbf6902d56da00911c114fdff4277f4af56ce15`，清单SHA-256为`e8be176f52235cbed59e4c71c1ceb9cd8063999e1a8cb33749db02f333dbd97f`，四域均要求真实客观结果。
+- 新质量组装位于`/private/tmp/stage9-assembly-20260902-pipeline-split-v2`：四个输出域全部`ready`，可用样本1，明确范围排除118项；但真实状态仍为`pipelineStatus=not_ready/effectivenessStatus=collecting`，因为只有一个9月2日calibration，尚缺不同交易日的development和holdout，5交易日客观结果也尚未到期。质量报告SHA-256为`3fd2b962a9242faffa6936c7386697ac3179c060df85dfab6b35f325dd8a8142`，清单SHA-256为`94be12a13489b295c197df0b0612321373db44ad56da0591f463a11eb48860e3`。这是真实日期约束，不是人工审批或工程停工；后续开发可继续。
+- ETF官方链已从宽基扩展到行业/主题真实样本。新增上交所基金招募说明书关系提取与中证官方身份三方核验，并以基金管理人官方单位/累计净值、中证官方价格指数和上交所交易日历计算60日跟踪差异、年化跟踪误差和相关性；IOPV、ETF价格和净值仍严格分开。旧版PDF的“所载其余内容\n截止日”版式已TDD修复。
+- 510300现场真实链：基金—指数关系、中证`000300`身份和61/61净值/指数点均通过，60日跟踪差异`0.010886766498441003`、跟踪误差`0.040283581106697164`、相关性`0.9998129612795991`。515790光伏ETF现场真实链也通过：官方标的指数“中证光伏产业指数”、指数代码`931151`、关系证据保守生效日`2025-10-31`，2026-06-08至2026-09-01净值与指数61/61，60日跟踪差异`0.006287798331193861`、跟踪误差`0.009513607498504767`、相关性`0.9996785670108749`，无理由码。ETF正式行业排名仍须补齐当时生效的指数方法、成分权重、100%行业暴露、产品生命周期和冻结排名政策，本轮未伪造这些字段。
+- 本轮ETF官方与阶段9相关109项、质量核心41项及整库后端2202项全部通过；整库在解释器启动前精确拦截生产SQLite绝对路径，重定向到`/private/tmp/codex-stage9-objective-fulltest-v1/db/test.db`，护栏实际命中1次，未打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`均通过。本轮未调用付费AI，未改依赖/迁移/环境变量/正式开关，未读写生产SQLite，未停止或重载服务，未Git暂存/提交/推送/部署。
+- Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，保留99个工作树路径（45个已跟踪修改、54个未跟踪）。4000 PID25121与8001 PID38436仍在原端口监听；4000聚合健康为`degraded`，其中Vercel/隧道/FastAPI均`healthy`、后台任务`degraded`。8001直访`/health`返回404但进程仍监听，本轮未改服务。运行页面尚未加载本批源码。
+
+下一步：1）在后续两个不同A股交易日用同一版本各冻结development与holdout，同轮生成市场/行业/ETF/龙头四域输出；2）样本满5个交易日后，由自动客观结果生成器写入后续官方事实和真实行情指标，不需要用户审批；3）并行继续补齐515790的指数方法/成分权重/行业暴露/生命周期与冻结政策，不因日期积累停止后续开发。
+
+> 保存时间：2026-09-02 16:02 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9 ETF官方日频输入与跨日分区真实性收口
+
+- 阶段9没有停在“质量门未过”。已修复ETF排名审计的确定性死门：旧实现即使全部必需字段均为`VERIFIED`且非空，也会无条件追加`ranking_input_source_unverified`，导致`formalReady=true`不可达；现在只在真实字段不完整时保留该原因，完整输入可按原门槛正常通过，未降低任何排名规则。
+- 新增上交所官方按日基金规模只读合同`sse-etf-fund-size-history-cny-v1`，只接受上交所ETF、精确代码、精确交易日、非未来日期和非负有限值，将官方亿元口径用十进制定点换算为人民币元并保留真实0。510300在2026-09-01真实结果为`107,731,940,000 CNY`，内容SHA-256为`3a01b55697e8d33316ba37faf3b9e2e268434bff139e4d18e283d571810fb65a`；同日官方份额为`22,999,987,700`份，1/1通过。
+- 20日成交额正式来源改为上交所官方日成交额主值、腾讯已完成日K交叉检查，合同`sse-tencent-etf-turnover-20d-crosscheck-v1`。官方万元口径换算为人民币元；两源最大相对差异随证据保存，超过版本化1%阈值失败关闭。腾讯只返回未复权`day`时，必须通过另一原始请求证明已完成日序列与`qfqday`逐行完全相等才可提升。510300覆盖2026-08-05至2026-09-01的20/20交易日，官方平均成交额`3,908,605,585 CNY/日`、正式可用，SSE内容SHA-256为`fe1e09651bd76d38c3fe4430d29b1f37141fce938ccc566774caafbe1db2a1f1`。
+- 由官方规模选出的上交所境内股票被动ETF前10只没有换序或补位：规模10/10、份额10/10、行情10/10；20日成交额7/10通过（510300、588000、512880、510310、588200、588080、515880），588170、510500、510330因两源实际最大差异超过1%继续排除。完整510300日频事实已有`fundShares/fundSize/averageTurnover20d`三项验证输入，仍缺产品—指数代码及生效证据、跟踪差异、跟踪误差和指数相关性，因此没有伪造ETF正式排名。
+- 新增中证官方指数身份解析合同`csindex-official-full-name-resolution-v1`：使用上交所官方`INDEX_NAME`发现候选，再逐一用中证官方基础信息或官方事实表核对代码与完整中文名称，只允许唯一精确匹配；无命中、重名、来源不完整和请求失败分别关闭。前10只涉及的7个不同指数已现场7/7验证：沪深300`000300`、中证500`000905`、中证全指证券公司`399975`、中证全指通信设备`931160`、科创50`000688`、科创半导体材料设备`950125`、科创芯片`000685`。指数自己的发布日期只作为指数描述证据，绝不冒充ETF关系公告日/生效日；因此代码和提供方缺口已工程化解决，ETF关系生效证据仍按真实基金文件继续补。
+- 回放质量门新增A股交易日分区完整性校验：development/calibration/holdout任意角色落在同一上海交易日即返回`replay_partition_trade_date_overlap`，不能再用同日09:26、09:30、09:31三个相邻时点冒充跨日独立验证。阶段9工程链可持续采集，但正式质量通过必须等待后续真实交易日样本和独立客观标签/结果。
+- TDD红灯确认后，ETF规模、成交额、排名审计、ETF影子/产品映射和阶段9回放相关78项全部通过；新增指数身份专项17项通过。精确拦截生产SQLite绝对路径后的最终完整后端2178项在11.764秒全部通过，生产路径请求重定向到`/private/tmp/codex-stage9-index-identity-fulltest-v1/test.db`，未打开生产库；测试AI日志均为Mock。本轮未改迁移、依赖、环境变量或正式开关，未调用付费AI，未停止或重载服务，未Git暂存/提交/推送/部署。Git为`main@4e2c7ca`、领先`origin/main`17个提交，保留96个路径（44个已跟踪修改、52个未跟踪）；4000 PID25121、8001 PID38436继续监听，运行页面尚未加载本轮源码。
+
+下一步：1）继续从基金管理人和交易所官方材料自动提取ETF—指数关系公告日/生效期，再以官方基金净值与指数序列计算跟踪差异、跟踪误差和相关性；2）在后续不同交易日冻结development与holdout样本，并用独立官方事实和后续行情生成客观标签/结果，不要求用户审批股票；3）三分区、四域标签和真实结果齐备后用唯一聚合入口重算阶段9总质量门，通过后进入阶段10的20交易日影子验收。
+
+> 保存时间：2026-09-02 14:48 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9四域真实输出补齐与ETF双源20日成交额打通
+
+- 阶段9规则输出的最后一个工程缺口已补齐。ETF产品分类映射从`radar-etf-product-classification-v1`升级为`v2`：依据沪深交易所2026-06-17生效的主动ETF命名规则，官方场内简称明确含“主动”才归为`active`；上交所ETF只有在非主动且官方结构化`INDEX_NAME`非空时归为`passive_index`；深交所普通ETF因名册没有标的指数字段继续保持`unknown`，不按产品名猜被动。新鲜真实名册2269/2269、来源问题0，其中ETF1650只，`passive_index=891、unknown=759、active=0`，管理方式确认覆盖54%；上交所境内股票被动ETF699只。
+- 新增ETF产品研究输出`radar-etf-product-research-output-v1`并接入阶段9输出桥。它只读取调用方指定且哈希、样本身份、运行身份、时点、完整度和v2映射全部重新校验的前向ETF快照；逐只输出`product_ready_for_index_research/active_product_separate_track/out_of_scope_asset/product_evidence_incomplete`，固定`researchOnly=true、rankingReady=false、formalUsable=false、stateTransitionAllowed=false`，不把产品分类冒充行业ETF排名。输出包身份继续纳入全部输出语义哈希，旧的不带ETF参数调用保持兼容。
+- 新鲜官方前向样本位于`/private/tmp/stage9-forward-20260902-etf-v4`，样本`forward-calibration-20260902T143533961045`，`asOf=2026-09-02T14:35:33.961045+08:00`，六个历史域全部`ready`，缺失/不可验证/失败均为0；回放输入SHA-256为`07f51fc83936efa7b80c51067d26b10ec56a7250c419d917bb0f0b8891fe3bd4`。同轮四域输出在`/private/tmp/stage9-market-sector-etf-leader-output-20260902-v1`，ETF语义SHA-256为`5f4d70d458d265db7d7c6c08efe20b58dce7f891ee40b69090071292e0e3b5c4`，输出包SHA-256为`dc66e27b81de46cd6515260eee46173a611361b09343343ad244c83cafe08d24`。
+- 最终聚合报告位于`/private/tmp/stage9-assembly-20260902-all-four-v1`，质量报告SHA-256为`3fab980f0fae9326b7cb961c876855d548f4b86e6505bc84f6624b49a66fe1cb`、清单SHA-256为`48775c43b7107ac9ff4c0974f6c74bd8ffd061ab748dcb1098c9ff6bd8a30133`。四个输出域现在全部`ready`：市场1、行业81、ETF1650、龙头1；`missingOutputDomains/unverifiableOutputDomains/failedOutputDomains`均为空。ETF状态中699只产品层可继续指数研究、120只资产范围外、831只产品证据不完整、主动单列0只，排名就绪数仍为0。阶段9总状态继续为`not_ready`的真实原因只剩不同交易日的development/calibration/holdout样本和独立标签/结果指标；118项有完整身份与原因的范围排除只做披露，不阻断其余样本。
+- 成交额工程缺口同步前推：ETF影子和排名审计现在会使用`QuoteSnapshot.turnoverAmountCny + VERIFIED`，不再把已经通过同响应交叉校验的人民币元成交额一律误标“单位未知”。新增`etf_turnover_history.py`，只在腾讯日K万元字段乘10,000后与东方财富日K人民币元字段逐日一致、20个官方完整交易日日期全集齐全时输出`averageTurnover20d`。510300真实只读验收覆盖2026-08-05至2026-09-01，20/20通过，平均成交额`3,906,162,165.3 CNY/日`，合同`...crosscheck-v1`，两源内容SHA-256分别为`93f67dbfa3e76c18c20775ebaa587b5dab2d33695b400c5b811061d95c686ad9`和`fe42481615dac8e6f28dcedecafe8b234e72a9aa5b4f412e8d15e8b5ecc357d7`。该字段可作为已验证日频事实输入，但不会自动补基金规模、跟踪差异、跟踪误差或相关性。
+- TDD过程确认了成交额旧标记、分类v2、ETF输出桥和双源20日窗口的预期红灯；ETF/阶段9相关112项通过。精确拦截生产SQLite绝对路径后的完整后端2158项在12.352秒全部通过，17次生产路径请求均重定向到`/private/tmp/codex-stage9-etf-output-fulltest-v1/test.db`，未打开生产库；测试AI日志均为Mock。未改迁移/依赖/环境变量/正式开关，未调用付费AI，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，当前保留93个路径；4000 PID25121、8001 PID38436继续监听，运行页面未加载本批后端源码。
+
+下一步：1）在后续不同交易日自动冻结development与holdout前向样本，并生成独立于规则输出的客观事实标签/后续行情指标；不能把今天已有的同日角色样本冒充跨日验证；2）把双源20日成交额扩展到由官方规模先筛出的有界ETF研究池，并继续补产品—指数代码/提供方、基金规模与跟踪序列，输入不全时排名保持0；3）三分区、四域独立标签和真实后续结果齐备后用唯一聚合入口重算阶段9总门，再进入阶段10的20交易日影子验收。
+
+## 2026-09-02阶段9市场/行业/龙头真实输出、阶段6五源穿透与质量门语义收口
+
+- 阶段9继续执行“工程问题修到可用、真实证据不足不伪造”。质量报告已把规则输出的`missing`、`unverifiable`、`failed`和`ready`四种语义彻底拆开，新增`readyOutputDomains/unverifiableOutputDomains/failedOutputDomains`；同一输出域必须覆盖报告中的每一份样本才算域级就绪，不能再由一份方便样本替代其他样本。`etf`历史证据也不再被误认作ETF规则输出，只有包含`states`的输出证据才参与规则输出统计；API、前端类型、质量面板和契约样例已同步。
+- 新增确定性市场研究状态生产器`radar-market-research-state-v1`，只接受同轮完整、单位已验证的四指数、涨跌家数和成交额快照，失败时关闭。规则`radar-market-research-rule-v1`按固定版本阈值输出`strong/oscillation/retreat/risk`，明确`researchUsable=true、formalUsable=false`，不修改正式市场开关。阶段6真实入口已从同一冻结运行上下文生成该状态；阶段9输出桥在重新校验文件、语义SHA-256、运行身份和时间后，可同时导出市场、81个行业和阶段6证据资格候选。龙头输出只使用`research_qualified`，固定`formalUsable=false/stateTransitionAllowed=false`，不会把资格候选冒充预备、候选或已确认龙头；原行业/市场用法保持兼容。
+- 13:34第一轮真实盘中复跑稳定失败于`sector_rebuild_result_mismatch`。已按TDD把该模糊原因拆成合同、状态、证据合同、运行身份、时点、分类、分析集合、可比时间和候选行业九类原子原因，方便继续修复而不是反复盲跑。13:37第二轮真实运行`stage6-prefreeze-20260902T133743207000`成功穿透：历史5157、81个行业、初筛383、证据候选15、资格候选1（`000628`），五源总装和状态决策审查均为`ready_for_review`。这只表示五类真实来源同轮可审计，不等于已经生成龙头状态；其正式状态仍因行业正式规则合同和流动性证据缺失而关闭，也不要求用户人工审批股票。
+- 同轮市场状态真实为`retreat`：上涨占比`0.2828555976203353`、下跌占比`0.6994771948801154`、四指数全部下跌、平均涨跌`-1.46%`；市场快照语义SHA-256为`f2e05cc7f00f878061b2b9b5c6e28944cbcc1184cb3297c5ac63e003db8a6ee2`。阶段6工件位于`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260902T133743207000.json`，文件SHA-256为`94025224f22adb19d7919987b429c3975ae68c800dadffa369da4e7360b87562`；同轮行业状态文件SHA-256为`3dd1cff79ab3ccdb859fa8e113ba3173e26b8d1dd01f7e3b071e456ab39793d3`，输出桥校验后的行业语义SHA-256为`736cbd87acb7cab9509da3fb5acdd629b0a8d0ba5b9eb0298add448859df9120`。
+- 新鲜校准样本位于`/private/tmp/stage9-forward-20260902-133743-market-v1`，样本`forward-calibration-20260902T134613006141`，六个历史域全部`ready`，缺失/不可验证/失败均为0，显式范围排除118项；来源快照与回放输入SHA-256分别为`a0a86f5748ae5fbfec248239aca489b363ed0abbf6999632e37aad6cd37180c0`、`e5bef956f44d446f868db634dce2793d871d9cac2b962561d580600aca55a8b3`。最终同轮三域输出包位于`/private/tmp/stage9-market-sector-leader-output-20260902-133743-v2`，龙头语义SHA-256为`b693763922448a80b26e9cfe82959410f66a9b4bec266d8508afdae08198197d`，输出包文件SHA-256为`3302f7d3c4374614908818c8bbae6f00ff145e90b79132d66f4e1fccb7d47c1c`。输出包身份现在纳入全部输出语义哈希，避免同一来源文件在生产器升级前后产生“同ID不同内容”。
+- 当前单样本严格报告位于`/private/tmp/stage9-assembly-20260902-market-sector-leader-v2`，质量报告SHA-256为`41aa2e497773ab32d0ad87873c939da040ae1c46a93a4e0918cf7f047c78e354`：市场1、行业81、龙头1均为`ready`，只剩ETF输出为`missing`，没有规则输出`unverifiable/failed`。独立标签和development/holdout样本尚未形成，因此阶段9总质量门继续如实为`not_ready`。盲化标签任务位于`/private/tmp/stage9-label-tasks-20260902-133743-v1`，文件SHA-256为`0fe89d958357ef3c25f2007f99c3f4886f0781625f8e4d21c3342c801c13ada8`，其中不含规则输出，也没有自动制造答案。
+- ETF正式输入已再次现场核验上交所/深交所公开名录：2269个上市基金、1650个ETF、699个官方可确认境内股票类、891个带目标指数名称，来源问题0；但2269个产品的主动/被动属性仍全部为`unknown`，正式产品—指数版本、基金规模、20日同阶段成交、跟踪差异、跟踪误差和指数相关性仍不完整。当前不能诚实冻结行业ETF排名，更不能用目标指数名称或当天成交额拍权重补位。未来收益可以自动记录为客观指标，但按规划书不能用后来涨跌反向改写当时事实标签。
+- 最终相关测试、精确隔离生产SQLite的完整后端2147项（11.677秒）、Python编译、`pip check`和`git diff --check`全部通过，生产库绝对路径被拦截17次并重定向到`/private/tmp/codex-stage9-leader-output-fulltest/test.db`，未打开生产SQLite。本批没有前端改动；同一轮稍早的前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）仍为新鲜通过证据。未调用付费AI，未改依赖/迁移/生产环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git为`main@4e2c7ca`、领先`origin/main`17个提交，共85个保留路径；4000 PID 25121、8001 PID 38436继续监听，当前运行页面尚未加载本批源码。
+
+下一步：1）优先补ETF官方主动/被动与产品—指数版本化关系来源，再补20日/60日排名指标；输入未齐前不造行业ETF榜；2）不同交易日继续自动冻结development/calibration/holdout样本，并把后续官方事实与客观行情形成独立标签/结果指标，不要求用户审批股票，也不用后来涨跌改写当时标签；3）四域输出和三分区标签齐备后用唯一入口重算阶段9质量门，市场、行业、ETF和龙头保持分域披露，不让单一模块遮挡另外三个已就绪域。
+
+> 保存时间：2026-09-02 13:15 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9六域来源收口、同轮行业输出与阶段6必失败校验修复
+
+- 阶段9继续按“能工程化修复就修、真实证据不足不伪造”的方向推进。行业当前正式半年分类对115只分类期后新上市证券没有记录，现按规划书既有规则将这些证券明确列入本样本排除范围；公司行为3份已确认官方公告本身没有精确生效日，也按逐文档显式排除。只有原因、证券/公告身份、官方URL、原文SHA-256和时间边界完整时才能范围内排除；未知原因、无证券、无公告号或无原文哈希仍保持`unverifiable`。质量报告/API/前端新增`scopedExclusionCount/scopedExclusionCounts`，不再因为已解释的局部排除让整份真实样本失败，也不把排除对象伪造成已验证。
+- 阶段9新增只读行业规则输出桥`backend/radar/replay_output_bridge.py`和安全CLI，只接受调用方显式指定的`/private/tmp`行业状态快照，重新校验文件、语义SHA-256、规则身份、`radarRunId`、行情批次及未来时间，然后导出`radar-replay-output-bundle-v1`；不访问SQLite、不联网、不生成市场、ETF或龙头状态。前向基线CLI新增可选`--radar-run-id`，因此新样本可以在采集前绑定同轮确定性输出，不需要事后篡改身份。质量报告新增四域`outputCounts/missingOutputDomains`，页面现在能区分“历史来源齐全”和“规则输出缺失”。
+- 13:00经上交所官方日历确认2026-09-02为完整交易日且进入连续竞价。第一轮真实运行稳定报告`industry_scope_mismatch`；根因是长耗时预冻结正确保存全市场83个行业，而候选运行上下文按383只观察候选只保留相关行业，旧代码却错误要求两者行业键完全相等并用候选行业收窄全市场重放。已按TDD增加“预冻结全行业、运行时候选行业子集”失败用例，修复为只校验候选行业是预冻结范围的精确子集，同时继续使用预冻结全市场行业重放；集合、成员和顺序错配仍分别失败关闭。
+- 修复后真实复跑`stage6-prefreeze-20260902T130449881548`已穿透预冻结和可交易性：历史5157条、行业历史81项、初筛383只、证据候选15只；`tradability.status=completed`、`productionCollector=completed`，六项可交易字段覆盖率均为1.0，并生成同轮行业状态`/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260902T130449881548.json`，语义SHA-256为`89efd5bfd80e9ce0d23d20ae4e15dc1d8167c43e6013591240566fc098f90b9d`。本轮阶段6总状态仍为`not_ready`，真实原因仅为15只当前候选主营/催化确定性关系均未达到资格，`ready=0、missing=8、source_unverified=7、source_failed=0`；没有为凑龙头状态降低规则。
+- 与该运行身份绑定的阶段9前向样本首次采集遇到北交所公司行为瞬时失败；有限重试后的有效工件为`/private/tmp/stage9-forward-20260902-130449-sector-v2`，六个历史域全部`ready`、缺失0、不可验证0、来源失败0，明确范围内排除118项（行业115、公司行为3）。样本`forward-development-20260902T131257948802`、`asOf=2026-09-02T13:12:57.948802+08:00`；来源快照与回放输入SHA-256分别为`80849dc6db9ddcad93815b8051e8ff0756b1ada2b750b1e449c952427c59e5b5`、`bcef1a22b04c621ce3007bd8782e10d8e1b79e5ba4bed7579c35c26ce34f5985`。
+- 同轮行业输出包位于`/private/tmp/stage9-sector-output-20260902-130449-v1`，包含81个真实行业状态，文件SHA-256为`be0c7fb8c942f4e7e3310a8c9513b6c333963185098981bdd91f3b575e0d9806`；聚合报告位于`/private/tmp/stage9-assembly-20260902-130449-sector-v1`，报告SHA-256为`77bb517eef96e863b4172b92f22b84e4ee1abaff59e7f59448d38f0ba29be501`。当前质量门仍诚实为`not_ready`：development=1、calibration=0、holdout=0；规则输出`market=0、sector=81、etf=0、leader=0`；四域独立标签均为0。盲化标签任务已生成到`/private/tmp/stage9-label-tasks-20260902-130449-v1`，不含规则输出也不自动制造答案。
+- 质量门进一步修正了“真实空榜”语义：`outputCounts=0`现在只表示该域输出条目为0；只要存在已校验、状态为`ready`且带空`states`的确定性输出包，该域不再被误报为“规则未输出”。没有输出、输出不可验证和已验证空榜继续严格分开；今天主营证据`missing/source_unverified`的15只候选不会因此被冒充成合格空榜。
+- 相关72项与阶段6预冻结18项通过；精确重定向生产SQLite路径后的最终完整后端2137项在11.664秒全部通过，护栏重定向1次到`/private/tmp/codex-stage9-scoped-full-4fvsmm5c/test.db`。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`通过。未读取或写入生产SQLite、未调用付费AI、未改依赖/迁移/生产环境变量/正式开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git为`main@4e2c7ca`、领先17，共82个保留路径；4000 PID 25121、8001 PID 38436继续监听，运行页面尚未加载本批源码。
+
+下一步：1）先补齐市场、ETF、龙头三个真实确定性输出生产链，输出不存在时不以`shadow_only`或空榜冒充；2）把今天的盲化任务交给独立官方后续事实/客观行情结果流程，持续形成跨日development、calibration、holdout标签，不要求用户审批股票；3）四域输出和独立标签齐备后用唯一聚合入口重算质量门，任何真实缺口只影响对应域，不再把无关域整体卡死。
+
+> 保存时间：2026-09-02 11:34 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9正式质量门输出桥接现场诊断
+
+- 阶段9工程完成后继续推进正式质量门本身，没有把工程态`complete`当作最终质量通过。已盘点现有三角色冻结样本：development、calibration、holdout各1份，六个历史证据域齐全但行业/公司行为各为`unverifiable`；四个规则输出域和独立标签仍为空。旧三角色样本不能事后挂接8月31日或其他时点规则输出，必须从新轮次开始在同一真实观察链内生成。
+- 官方上交所交易日历确认2026-09-02 11:14为完整交易日且状态`trading`。随后从`backend`真实执行同轮五源入口，沿用8月31日连续行业状态；全市场历史5157条、81个行业分析、383只初筛候选以及证券身份、交易所可交易性、新浪生命周期和交易日历均完成，但最终预冻结绑定连续两轮稳定失败。首轮工件为`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260902T111500242815.json`，第二轮为`.../stage6-live-five-source-20260902T112159631137.json`；两轮均未生成候选来源包或新行业状态，未把失败半轮挂接到阶段9。
+- 第二轮使用只读异常追踪准确取得原代码吞掉的内部原因：`ValueError: leader_phase6_prepared_binding_unverified`。这证明故障位于“长耗时历史准备结果”与“最终行情候选计划”绑定校验，不是网络、行情、公告或可交易性来源失败。额外两次独立官方证券/行业加载均为证券5554、行业记录5463、83个行业、同一文档哈希；行业代码集合、每行业稳定证券集合及顺序完全一致，已排除简单的官方成员顺序漂移。
+- 已按TDD把原先七处同名绑定异常拆成稳定子原因：运行/时间、批次身份、分类哈希、行业成员、候选成员范围、历史序列范围、行业重放范围、未来抓取时间和行业重建结果分别表达；确定性绑定不一致现在返回`source_unverified`及原子原因，不再误报瞬时`source_failed`。专项先红后绿，相关18项和Python编译、`git diff --check`通过。午后标准CLI无需只读追踪器即可直接报告精确子原因。
+- 11:30后进入午休，不再用午休行情继续试跑。两次现场运行与三次小型官方集合探测都只访问公开来源并写`/private/tmp`；本批仅修改预冻结绑定、可交易性验收、对应测试和本交接文件，未读写生产SQLite、未调用付费AI、未改依赖/环境变量/开关，未重载服务，未Git暂存/提交/推送。Git和服务状态保持：78个未提交路径，`main@4e2c7ca`领先17，4000 PID 25121、8001 PID 38436。
+
+下一步：1）按TDD把预冻结绑定的7类校验拆成稳定诊断，确认是时间、身份、成员、历史范围还是行业重放结果不一致；2）只在午后连续交易窗口用同一断点有限复跑，取得真实确定性规则输出后再生成阶段9输出包；3）输出包可比后接独立官方后续结果标签和成熟期门禁，三分区任一缺真实证据时继续不通过。
+
+## 2026-09-02阶段9工程完成态与真实验证态解耦
+
+- 阶段9不再把“采集/冻结/回放/校验/质量页是否已经开发完成”和“研究效果是否已经被足量跨日样本验证”混成一个状态。只读质量API保持原有`state/quality`兼容语义，并新增`engineeringState`、`validationState`、`shadowCollectionAllowed`和`stage9QualityGatePassed`：存在通过内容哈希校验的真实报告时，工程态为`complete`，`not_ready`只表示验证仍在积累；报告缺失或存储被篡改仍分别失败关闭。前端据此明确显示“阶段9工程链路已完成，可进入阶段10影子采集”，但质量门未过时不显示已验证，也不自动打开任何正式开关。
+- 深交所公司行为继续按TDD补齐三类真实官方文案：`送红股`、`A股派息实施公告`和`每10股派发现金人民币`。通用股票目录回连使月报事件缺公告时间由29条降为0；新鲜整轮`replay-stage9-forward-20260902T105759054053`位于`/private/tmp/stage9-forward-20260902-symbol-backfill-v2`，公司行为结构化1014/1017（沪477、深510、北27）。仅剩3份官方PDF本身没有精确实施日：603268、688072两份定增公告只写将尽快登记，002115回购注销只写“近日”；同事项其他官方发行报告也没有精确日期，继续作为逐文档不可验证，未拿公告日冒充生效日。
+- 同轮六域真实结果为证券、交易规则、中证000300、ETF均`ready`，行业和公司行为`unverifiable`，来源失败0；中上协最新仍为2025年下半年正式分类，当前新股115只尚未进入该半年版。质量报告仍真实为`not_ready`：development=1、calibration=0、holdout=0、独立可比较标签0。这些是验证积累和官方发布周期限制，不再冒充阶段9工程未完成，也不阻止阶段10开始影子采集；阶段9质量门仍为false。
+- 四工件SHA-256依次为source`cca1ee38efe79cb9e8c429150f0b497ef89e741fcb3324efc15c8809b27daf28`、input`f340fe0a28986f3efb9bb4e84d10cc9959c155216bf03f0ad8bbf420f47c9a37`、quality`b130060aaab75365850298c17b51a99e5625003ce0bcd3cf99c8c3db405b75e0`、manifest`20676e134c152fe11e005ddcf40bea2b23330ce63ee34e33f2efd81559444150`。公司行为专项64项、阶段9状态相关39项、API专项5项通过；隔离生产库的完整后端2125项在11.429秒全部通过，精确生产SQLite路径被保护器重定向9次到`/private/tmp/codex-stage9-20260902-final-fulltest/test.db`。Python全量编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`通过。
+- 本批修改阶段9公司行为来源/测试、质量API合同/路由/测试、前端类型/契约样例/质量面板及本交接文件；全部既有阶段6~9未提交工作树继续保留。未读写生产SQLite、未调用付费AI、未改依赖/迁移/生产环境变量/雷达开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，共75个保留路径；4000仍为PID 25121、8001仍为PID 38436，运行页面尚未加载本批源码。
+
+下一步：1）进入阶段10影子采集工程，复用`shadowCollectionAllowed`持续生成跨交易日不可变样本，但不自动启用正式状态；2）用独立的官方后续结果和价格结果自动形成可比较标签，开发/校准/留出分区继续隔离，不再要求用户审批股票；3）中上协发布新正式版本或剩余3份公司行为出现带精确日期的官方补充公告时增量补证，未出现前保留明确排除，不伪造日期。
+
+## 2026-09-02阶段9深市原公告时间回连与B股双代码收口
+
+- 阶段9继续工程收口，正式质量门仍未通过。新增只读`cninfo-szse-monthly-announcement-backfill-v1`：仅查询深交所月表前一自然月的巨潮官方权益分派实施公告，先用月表中的证券、行为类型、实施日建立缺口集合，再要求官方元数据、PDF正文和三字段完全一致才补原公司公告时间；前一月其他公告不会扩入7月覆盖窗口，解析失败、近似匹配或不同类型不会补值。
+- 深市A/B双代码公告现确定性支持`、`、`；`、`/`、圆括号、代码直接相连以及PDF换行后的第二证券代码；B股事件独立读取B股除息日，不再误用A股日期。另补齐“除权除息及红利发放日”官方文案。所有B股事件仍保留自己的证券代码、官方PDF、SHA-256和公告时间，没有用A股行情或月表发布时间代替。
+- 真实公司行动缺公告时间从上一轮124条降至29条，共精确补齐95条；最终29条为23条月表`bonus_share`与公告正文“转增/送股”无法同口径确定的事件，以及6条巨潮分类窗口未返回可精确挂接公告的现金分红。没有把送股和转增互换，也没有保留无真实命中的数字全文搜索兜底。公司行动当前为`1021/1028`，沪473、深522、北26，仍有此前5份定增无首个上市日及2份回购无精确注销日，共7份逐文档缺口，因此继续`unverifiable`。
+- 最终公司行动实证来自`replay-stage9-forward-20260902T100901780768`，目录`/private/tmp/stage9-forward-20260902-announcement-backfill-v3`，四工件SHA-256依次为source`e2230ba9c83514b4be43fb25594963d4cda3e5d86d4092613f24b015dbb9b0d9`、input`7720bc2576b9ac719d157ba5cb6215941331391dafcebbe638a35cd988571787`、quality`f13d32604efb4db1a16acb0caac87d803eac034cba1ad7539506af125e58ce91`、manifest`2f68eed65ddf4ccb27f9da471ce3debed45ffa3ccb3ab7cc45b4a2b821846f15`。该整轮总状态为`failed`而非`not_ready`，唯一新增失败域是中证000300官方指数源；证券5554/5554、交易规则、ETF2269/2269仍`ready`，行业和公司行动仍`unverifiable`。
+- 中证上游已单独只读定位：基础信息接口返回HTTP 200和1088字节，但`000300_Index_Methodology_cn.pdf`连续多轮请求及最终25秒探测均为HTTP 000、0字节超时；因此停止继续重试，未用旧方法论PDF、旧指数快照或其他指数替代。09:47同日较早真实轮次该指数域曾`ready`，但不拿旧成功冒充10点后的新鲜整轮通过。
+- TDD新增前月精确回连、前向装配、B股代码布局、A/B独立日期及真实公告文案测试；阶段9相关83项通过，完整后端2117项在12.238秒全部通过，生产SQLite绝对路径被保护器重定向18次到`/private/tmp/codex-stage9-20260902-fulltest-cache-label-v4/db/test.db`，未打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、`git diff --check`及本批未跟踪文件空白检查均通过。
+- 本批继续只修改`backend/radar/sources/corporate_actions.py`、`backend/tests/test_radar_corporate_action_source.py`和本交接文件，既有未提交工作树全部保留。未调用付费AI，未改依赖/迁移/生产环境变量/雷达开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，共75个保留路径（33个已跟踪修改、42个未跟踪）；4000仍为PID 25121、8001仍为PID 38436，运行页面没有加载本轮新代码。
+
+下一步：1）中证方法论官方URL恢复后只做一次完整真实复跑；若仍失败继续失败关闭，不用旧快照补位；2）29条公告时间缺口只接受公告PDF能确定同证券、同类型、同实施日的证据，23条送股/转增口径不一致在官方月表无法区分前保持缺失；3）行业115只官方分类缺口和四域独立标签仍分别补证，跨后续交易日积累真实预冻结样本，任一未齐阶段9继续不进入阶段10正式启用。
+
+> 保存时间：2026-09-02 09:50 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9公司行动逐公告确定性解析收口
+
+- 阶段9继续工程收口，真实质量门仍为`not_ready`，没有把来源缺口、相邻时点或空标签写成通过。逐份复核此前33份未解析巨潮官方PDF，按TDD补齐上交所四列日期表/普通股表、每股现金股息，深交所多种明确除息日文案、PDF换页页码插入标题、现金分红文案、非法抽取日期的双重同日运营事实回退，以及三种带精确日期的回购注销完成格式；所有新增规则都要求标题、证券、官方PDF、正文事实和日期确定性一致。
+- 本地对33份已校验原文重放后，26份现可确定性解析，仅剩7份继续失败关闭：5份向特定对象发行上市公告只写锁定期后上市、没有首个生效上市日；`002115`和`301071`两份回购注销公告只写“近日”或未给精确完成日。没有用公告日、下载日、推测锁定期或其他证券日期补值。
+- 新鲜真实前向运行为`replay-stage9-forward-20260902T094610993528`，样本时点`2026-09-02T09:47:22.095543+08:00`，目录`/private/tmp/stage9-forward-20260902-parser-v1`。证券`ready 5554/5554`、交易规则`ready`、中证000300指数`ready`、ETF`ready 2269/2269`；公司行动从上一轮`996/1029、33份未解析`提升为`1020/1027、7份未解析`，分所为沪473、深521、北26，但仍有124条深市月表事件缺原公司公告时间，因此继续`unverifiable`。行业仍为`unverifiable`：中上协正式记录5463条，当前证券主档5554只中115只缺该版官方分类，另有24条来源记录不属于当前A股主档。
+- 本轮质量报告仍为`not_ready`：development=1、calibration=0、holdout=0，行业和公司行动两域不可验证，四域独立真实标签仍为空。四工件SHA-256依次为source`f4057118c1fe2736a65f616da11fc289390d179835a329b7acacec03a7a46ab7`、input`89697c1cc276eda6676695eadccbb5add9a2bb61f8bb678f1e35aed75c8bdaea`、quality`944c53234689a7d7447d157f4cdbfebac63c30f0e88ccd405916900c7792c868`、manifest`0d036153001e1837c9a5da68e0458c2f5cdc0b624d3e28181d5a8763e4f0df5f`。
+- 新增解析专项相关78项通过；完整后端2112项在11.821秒全部通过，生产SQLite绝对路径被保护器重定向18次到`/private/tmp/codex-stage9-20260902-fulltest-cache-label-v3/db/test.db`，未打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）及`git diff --check`均通过。
+- 本批只修改`backend/radar/sources/corporate_actions.py`、`backend/tests/test_radar_corporate_action_source.py`和本交接文件，全部既有未提交工作树继续保留。未调用付费AI，未改依赖/迁移/生产环境变量/雷达开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，共75个保留路径（33个已跟踪修改、42个未跟踪）；4000仍为PID 25121、8001仍为PID 38436，运行页面没有加载本轮新代码。
+
+下一步：1）以官方公告号为键补齐深市月表124条缺失的原公司公告时间，同时保持送股/转增类型不确定时失败关闭；2）对115只行业缺口只接纳后续中上协正式版本或发行人官方证据，不用名称猜测和其他行业口径补齐；3）跨后续真实交易日按预冻结角色继续积累样本，并通过盲化任务形成独立官方标签包，再用唯一聚合入口计算可比较质量指标，标签或来源不足时继续`not_ready`。
+
+> 保存时间：2026-09-02 09:36 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-02阶段9官方PDF断点缓存、盲化评测任务与三角色真实样本
+
+- 阶段9继续工程收口，但真实质量门仍为`not_ready`。新增巨潮官方PDF断点缓存，只允许调用方显式使用`/private/tmp`子目录；缓存键绑定完整`https://static.cninfo.com.cn/finalpage/...PDF`官方URL，命中时重新验证PDF SHA-256，损坏文件会按同一URL重新下载，官方内容哈希变化则失败关闭。公告目录、时间窗口和分页每轮仍实时请求，不缓存旧查询结果冒充当前数据。
+- PDF抽取正文也绑定PDF哈希与pypdf版本并保存独立文本哈希；缓存写入均为原子0600文件。真实缓存现有865份PDF和865份抽取文本。预热前同轮耗时`real 140.68s/user 66.47s`，预热后真实复跑为`real 97.11s/user 8.57s`，CPU解析时间下降约87%，墙钟时间仍受官方实时分页约束；真实性合同没有为提速而放宽。
+- 新增`radar-replay-label-task-v1`盲化独立评测任务及只读CLI。它只接受已校验的前向工件，复核清单、回放输入和来源快照SHA-256，保留原始`sampleId/radarRunId/asOf/role`，只引用当时官方来源快照，明确`ruleOutputIncluded=false`；它不生成标签、不把系统输出当答案，也不是让用户审批股票。
+- 本轮按采集前冻结角色形成三个不同真实时点：development `09:26:00`、calibration `09:30:07`、holdout `09:31:58`。聚合工件为`replay-assembly-4d4c30d6bfaf475756db27c7`，目录`/private/tmp/stage9-assembly-20260902-three-role-v1`，三分区各1份、`missingPartitions=[]`；盲化任务包为`stage9-label-tasks-65c8d53f541edafd5b8a1c5a`，目录`/private/tmp/stage9-label-tasks-20260902-three-role-v1`。三份样本都来自同一交易日上午相邻时点，只证明分区链路可运行，不能冒充多日、多环境质量样本。
+- 最新单轮真实来源为证券`ready 5554/5554`、交易规则`ready`、中证000300指数`ready`、ETF`ready 2269/2269`；中上协行业仍`unverifiable 5463`，因当前证券新增至115只缺官方分类且来源另有24条非当前A股记录；公司行动仍`unverifiable 996/1029`，沪455、深515、北26，33份逐公告未解析，深交所月表仍有134条缺原公司公告时间。33份原因分别为权益分派实施日缺失21、权益行为不确定1、非法日期1、定增上市日缺失5、回购注销行为不确定5。
+- 三角色聚合质量为`not_ready`：不可验证证据6、失败0、四域真实标签仍全部为0，`missingLabelDomains=[market,sector,etf,leader]`、三个分区均缺标签。没有因为三分区各有1份样本就宣称阶段9通过，也没有复制标签、自动生成正确答案或调用AI补门。
+- TDD先观察PDF缓存模块、缓存参数、文本缓存、盲化任务模块和CLI缺失红灯；最终回放相关56项、公司行动/缓存/CLI相关57项通过。修正仅用于`/private/tmp`的多进程测试保护器后，完整后端2105项在12.920秒全部通过，生产SQLite绝对路径被重定向18次到`/private/tmp/codex-stage9-20260902-fulltest-cache-label-v2/db/test.db`，未打开生产库；Python编译、`pip check`、前端TypeScript、ESLint和Next.js 16.2.10生产build（9路由）均通过。
+- 本轮新增`backend/radar/sources/cninfo_pdf_cache.py`、`backend/radar/replay_label_tasks.py`、`backend/run_radar_replay_label_tasks.py`及三组测试，修改公司行动、前向采集CLI/编排及对应测试和本交接文件。未调用付费AI、未改依赖/迁移/生产环境变量/雷达开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，现保留75个路径（33个已跟踪修改、42个未跟踪）；4000仍为PID 25121、8001仍为PID 38436，运行页面没有加载本轮新代码。
+
+下一步：1）按预冻结角色在后续不同交易日和不同市场环境继续积累真实时点，不能用今天相邻三份替代样本量和环境覆盖；2）只依据逐份官方正文继续消化33份公司行动，单独补134条原公告时间，并等待中上协新正式分类或发行人官方证据补115只行业缺口；3）由独立官方事实/评测流程形成版本化标签包，同时生成确定性输出包，再用唯一聚合入口计算可比较指标，标签不足时继续`not_ready`。
+
+## 2026-09-02阶段9公司行动诊断、分页上限与真实前向复验
+
+- 阶段9工程继续收口，但真实质量门仍为`not_ready`，不得写成阶段9已正式完成。巨潮股权变动分类在`2026-08-01~2026-09-02`已有3,027条，官方接口超过100页后会把第101页静默重复为第1页并继续返回`hasMore=true`；采集器现按日期递归切分，单日仍超过3,000条则失败关闭，并仅对502/503/504同页重试1次，不再翻到200页后才失败。
+- 公司行动新增逐公告未解析强合同，保存交易所、查询类、证券代码、公告号、标题、公告时间、官方PDF、SHA-256和精确拒绝原因；任何未解析公告都强制`unverifiable`，不会只报一个总数或因计数对上而误报`ready`。按官方PDF实证补齐`A股代码/股票代码/存托凭证代码/A-H双代码`、人民币现金分红、三列和B股四列日期表、深市“除权除息日（红利发放日）”、定增“股票上市时间/将于…上市”及中登注销完成/生效/明确注销日等确定性格式；非法PDF抽取日期如`2026年73月8日`现在稳定报`effective_date_invalid`，绝不猜值。
+- 深交所月表和巨潮同一经济事件改按“证券+交易所+行为类型+生效日+新代码”去重，优先保留有原公告时间的巨潮PDF；不再按文档号把同一事件重复计数。月表与巨潮重叠窗口从月表覆盖起点开始。只读扩大到6月的核验表明，7月月表134条缺公告时间事件可精确匹配83条、仍有51条；其中含B股和月表无法区分送股/转增等口径，证明不能把月表发布时间冒充公司公告时间，也不应继续盲目扩大正则。
+- 最新真实工件为`replay-stage9-forward-20260902T080634655468`，目录`/private/tmp/stage9-forward-20260902-final-v4`。证券名册`ready 5553/5553`、交易规则`ready`、中证000300指数`ready`、ETF名册`ready 2268/2268`；公司行动覆盖沪深北`2026-07-01~2026-09-02`，结构化`996/1029`（沪455、深515、北26），逐公告未解析33份，且深交所月表仍有134条缺原公告时间，因此`unverifiable`。四工件SHA-256依次为source`248632ea7b7e8da32ce09dc1cebd9524713c46019443ea1ef3d1828cb061ce1f`、input`ce998522bc3215424c59500573e53fb55faf5ec1ae7e3ee3fc2bbea83cba50af`、quality`ad01c1e8f52879210000156325194c8e375640a6cca1d56ad8b09570f7cf6402`、manifest`b8180e763217d88e3d513a84f54c4d9c897447d24bcbebe8d4ae41d9199649f4`。
+- 中国上市公司协会官方行业分类索引于本轮重新联网核验，最新仍是`2025年下半年上市公司行业分类结果`，没有2026年上半年版本；行业仍为`unverifiable 5463`，当前114只新上市证券缺官方分类、来源文件另有24条非当前A股记录。这是官方发布周期，不用当前行情、名称猜测或非同口径分类补齐。
+- TDD先后观察逐文档诊断、100页切分、瞬时网关重试、官方正文格式、经济事件去重和未解析硬门的红灯；最终公司行动46项、回放52项通过。解释器启动前将生产SQLite精确路径重定向到`/private/tmp/codex-stage9-20260902-fulltest/db/test.db`并初始化后，完整后端2092项在12.000秒全部通过，保护器重定向1次，未打开生产库；Python全量编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、已跟踪及未跟踪文件空白检查均通过。
+- 本轮只修改阶段9公司行动来源/回放合同及对应测试和本交接文件；未读写生产SQLite、未调用付费AI、未改依赖/迁移/生产环境变量/雷达开关，未停止或重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，69个保留路径（33个已跟踪修改、36个未跟踪）；4000仍为PID 25121、8001仍为PID 38436，运行页面没有加载本轮新代码。
+
+下一步：1）公司行动改为可断点复用官方PDF与分页结果，在不放宽规则的前提下继续消化33份未解析公告，并单独解决月表134条原公告时间/送转口径；2）只等待中上协新正式分类或发行人官方证据补114只行业缺口，不再重复抓同一旧版本；3）按预冻结角色采集后续真实时点，并建立独立黄金标签和确定性输出包，形成development/calibration/holdout三分区后再评估阶段10，不用空标签或复制样本补门。
+
+> 保存时间：2026-09-01 22:49 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9整包工程收口与真实v2验收
+
+- 阶段9工程闭环已补齐，但真实数据门仍为`not_ready`，两者不得混写成“阶段9已正式完成”。公司行动前向装配现在从深交所月表实际覆盖终点的下一日开始补巨潮窗口，不再从采集当天起步漏掉整月；上交所标题日历`rawCount`只保留为诊断，不再冒充结构化事件数。巨潮8类查询完整分页后，真实空窗口可判定为已验证空集；只有精确命中尚无解析器的上市公司股份拆细/分立实施公告才失败关闭，不再因政策目录中存在两类名称而永久阻断所有空窗口。
+- 回放质量合同升为`radar-replay-quality-v2`。空`expectedLabels`不再可能显示`ready`；新增独立黄金标签强合同、标签来源/复核状态/形成时间、规则来源隔离、四模块允许的事后指标、可比较/不可比较/分歧/不可验证计数，以及市场、行业、ETF、龙头逐模块精确状态命中与真实结果均值。旧v1报告会被拒绝，不能绕过新标签门。前端历史验证卡同步显示可比较标签、四模块标签覆盖、缺失标签分区和稳定原因，不展示虚假胜率。
+- 新增不可变回放聚合器`backend/radar/replay_assembly.py`和安全CLI`backend/run_radar_replay_assembly.py`。前向采集必须在网络调用前冻结`development/calibration/holdout`角色并写入清单；聚合器只读取显式`/private/tmp`目录，复核原始清单和SHA-256，精确挂接`radar-replay-label-bundle-v1`独立标签包和`radar-replay-output-bundle-v1`确定性输出包，拒绝错样本、重复身份、未来时间、哈希篡改、来源重合和事后改分区。聚合批次身份同时包含输入、标签和输出哈希，同一前向样本配不同证据不会再共用`replayRunId`。
+- 最终公开真实运行为`replay-stage9-forward-20260901T224809240976`，目录`/private/tmp/stage9-forward-20260901-final-v2`。证券名册`ready 5553/5553`、交易规则`ready`、中证000300指数`ready`、ETF名册`ready 2267/2267`；行业`unverifiable 5463`，因为官方2025H2分类尚未覆盖当前114只新上市股票并含24条非当前A股记录；公司行动完整查询窗口为沪/北`2026-08-01~2026-09-01`、深`2026-07-01~2026-09-01`，结构化`517/555`（沪71、深445、北1），38份候选正文未确定性解析且深交所7月月表缺单份公告时间，因此继续`unverifiable`。报告为`not_ready`：development=1、calibration=0、holdout=0、missing=0、unverifiable=2、failed=0、可比较标签=0。四工件SHA-256依次为source`831fd75a40ac681ab0eebe2cf1a01ac409ae0fd78fcae5095b739a0ae3b204f1`、input`af43e24acffbec4bfacd76a8c5a9ff186b917334ce20014efdad85aede930e14`、quality`60b9506c673ae003a3c30925de2487c66f941f1f052c951987b956a05ed2e1e3`、manifest`fc62d6d9f06b47d371b2858c12f648e05ffe9996c42f327ae3f4727dd9c3b5ff`。
+- TDD过程已逐项观察公司行动4个红灯、标签质量3个红灯、样本角色2个红灯、聚合/标签/输出/身份4组红灯后修复。最终阶段9专项85项通过；生产SQLite精确路径在解释器启动时重定向到`/private/tmp/codex-stage9-final-fulltest.LRbwDA/test.db`后，完整后端2077项在11.146秒全部通过，保护器重定向1次，未打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`均通过。`20条/10日`继续只属于现有提醒历史回放，规划书明确禁止拿它替代雷达阶段9或反向绑门。
+- 本批新增/修改阶段9回放合同、评估、前向采集、聚合器、公司行动、只读API合同、前端质量卡及对应测试；未读写生产SQLite、未调用付费AI、未改依赖/迁移/生产环境变量/雷达开关，未重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，共69个保留路径（33个已跟踪修改、36个未跟踪）；4000仍为PID 25121、8001仍为PID 38436，运行服务没有加载本轮最终代码。
+
+下一步：1）只用更新的中上协正式分类或发行人官方补充证据消化114只行业缺口，不做模糊映射；2）针对38份公司行动候选补确定性解析和原公告时间，找不到可靠正文就保持不可验证；3）在后续不同真实时点预先冻结calibration/holdout并形成独立标签/确定性输出包，再用现有聚合CLI生成可发布质量报告。三项真实证据未齐前不进入阶段10正式启用。
+
+> 保存时间：2026-09-01 22:13 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9公司行为六类官方实施事件收口
+
+- 巨潮公司行为发现策略升为`cninfo-corporate-action-discovery-v2`。权益分派、配股、增发和股权变动继续使用官方分类；现网核验证明证券代码变更和A股缩股样本不在既有股权变动分类内，因此新增“精确搜索词+全分类”查询，调用方不能把搜索词放宽。所有结果仍必须完整分页、公告号唯一、板块可验证，标题只用于筛选候选，不替代PDF正文。
+- 按TDD新增六类确定性解析：配股`rights_issue`、向特定对象发行`placement`、回购注销`repurchase_cancellation`、换股吸收合并`merger`、证券代码变更`code_change`和缩股`reverse_split`。只有“实施/完成/上市公告书”精确标题、当前证券代码、官方PDF、实施事实和明确生效日全部一致才生成事件；预案、议案、提示性公告、进展、批复和风险提示全部拒绝升格。代码变更合同新增可选`newSymbol`，仅`code_change`必须提供且必须与旧代码不同，其他事件不允许携带。
+- 真实非空验收直接读取6份已下载的巨潮原始PDF，全部解析通过：`300176`配股生效`2026-09-02`（SHA-256 `dbf90445a9712175f7aeebf6b2865a0a0b176c97ad4969d84ea6d37b7bb8379b`）；`300083`增发`2026-08-27`（`124070e382a114a5a9f79b4e8124c4674b8bd9cdd5010097dca3cc5544964d59`）；`600690`回购注销`2026-09-01`（`1d07e5c39310e103311c4d5d33d0c77fddc14ebe9d190a5be1a0844aa9c1161a`）；`300277`合并新股上市`2026-02-11`（`f9d7cd44264e73f30c5027d7ba0ad25127ba8390c6a5789b765dc05e13a8ae16`）；`300114→302132`代码切换`2025-02-17`（`dd68049c48df826848f361fd9e7b23dd20b6805144a2e5bc36e54db638611488`）；`600381`缩股`2014-06-25`（`1946a7f10e6fba57ed4954c5cde65c73d32964d215bdd66fb870696f2bff13aa`）。确定性类型由3类增至9类；“股份拆细实施公告”官方全历史搜索为0，“分立实施公告”命中的是项目/子公司/控股股东分立，均不能证明A股上市公司股份行为，因此`stock_split/demerger`继续明确缺失，不用错配样本补门。
+- 新解析、反例、精确查询、采集联动和代码变更合同相关49项通过；生产SQLite精确路径在解释器启动时重定向到`/private/tmp/codex-stage9-company-actions-v2-fulltest/test.db`后，完整后端2063项在10.879秒全部通过，保护器重定向1次，未打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和空白差异检查通过。新鲜巨潮完整窗口采集在工具审批流断线后被平台拒绝，未产出新的六域前向基线；不把该工具故障冒充代码或数据通过。
+- 本批修改`backend/radar/sources/corporate_actions.py`、`backend/radar/replay_source_adapters.py`及对应两个测试文件。未读写生产SQLite、未调用付费AI、未改依赖/迁移/生产环境变量/雷达开关，未重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，65个既有及本批未提交路径全部保留；4000仍为PID 25121，8001仍为PID 38436，运行服务没有加载本批后端代码。
+
+下一步：1）继续查找可证明A股上市股份拆细/分立的交易所或巨潮官方实施样本，找不到就保持缺失；2）官方网络审批链路恢复后，重跑显式日窗口全量采集和新鲜六域前向基线，仍不写SQLite；3）独立解决行业114只当前映射缺口，并按新交易日累积development后再冻结calibration/holdout。两类公司行为、行业映射和三分区任一未齐前，阶段9继续`not_ready`。
+
+> 保存时间：2026-09-01 21:42 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9巨潮全市场公司行为政策与三所权益分派收口
+
+- 巨潮官方公告页的真实业务脚本已核验并固化为`cninfo-corporate-action-discovery-v1`查询政策：权益分派`category_qyfpxzcs_szsh`、配股`category_pg_szsh`、增发`category_zf_szsh`和股权变动`category_gqbd_szsh`在同一轮按显式起止日期完整分页。页数兼容官方现网向下取整语义，但必须依`hasMore`抓到末页、总数一致、公告号唯一且板块仅限`SHZB/SHKCB/SZZB/SZCY/BJS`；官方真实空集`announcements=null`只在`total=0/totalpages=0/hasMore=false`时接受。
+- 权益分派PDF确定性解析已从北交所扩展到沪深北三所。只有精确实施公告、证券代码、官方PDF、正值分配方案和实施日全部一致才生成事件；预案和提示性公告不升格。已覆盖深/北“每10股+中文日期”、深市冒号/四列表/“除权日（除息日）”，以及上交所“每股+三列/五列日期表”官方格式。真实2026-05-19非空验收最终上交所27/27、深交所53/53、北交所10/10，共90条现金分红/转增事件全部有官方正文和实施日，无`document_unverified`。
+- 公司行为合同新增分所`coverageFromByExchange`，与`coverageThroughByExchange`共同验证时间窗口；缺起点、起点晚于样本日、起点晚于终点或多来源窗口断层均失败关闭。生产前向装配现在同时合并上交所日历候选、深交所月报和巨潮当日三所公告，按公告、证券、类型和实施日去重；月报到当日之间窗口断层不会被隐藏。
+- 新鲜六域前向运行为`replay-stage9-forward-20260901T213950706326`，工件目录`/private/tmp/stage9-forward-corporate-policy-20260901`。证券名册`ready 5553/5553`、交易规则`ready`、指数`ready`、ETF`ready 2267/2267`；行业`unverifiable 5463`（当前114只映射缺口），公司行为`unverifiable 361/361`（沪3、深358、北0；深市月报公告时间为空、七月到九月窗口断层且其他8类仍未解析）。六域无`missing`、无`failed`；只有development=1，calibration/holdout=0，总报告继续`not_ready`。`replay-input.json`的SHA-256为`5ec10840ab15d3a52176c5791fa28ae5378877514416ad359178b82705275f62`，`quality-report.json`为`c4f6bc3030d9a77eaba7c517fc705e3ed7e2b0221046ca4f635ff7fc29df6988`，`source-snapshots.json`为`adf858cdfae62923904f9778eefd9e0643cd22e2325c7711e7654cc17b718afb`。
+- TDD相关45项通过；完整后端2054项在11.610秒全通过，测试前将`database.DB_PATH`显式指向`/private/tmp/codex-stage9-corporate-fulltest/test.db`，精确生产SQLite路径护栏触发0次，未尝试打开生产库。Python全量编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`全部通过。本批修改`backend/radar/sources/corporate_actions.py`、`backend/radar/replay_source_adapters.py`及三个对应测试文件；未读写生产SQLite、未调用付费AI、未改依赖/迁移/环境变量/雷达开关，未重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main`17个提交，65个既有及本批未提交路径全部保留；4000仍为PID 25121，8001仍为PID 38436，运行服务未加载本批后端代码。
+
+下一步：1）按官方“实施/完成”正文依次实现配股、增发、回购注销、合并、分拆、代码变更、拆股和缩股确定性解析，每类必须有官方非空样本和反例；2）用巨潮按日完整窗口补齐深市月报到当日的公告时间与窗口断层，只有时间和11类都完整才移除公司行为`unverifiable`；3）独立处理行业114只映射缺口并按新交易日累积development样本，之后才冻结calibration/holdout。
+
+> 保存时间：2026-09-01 20:59 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9深北公司行为接入与新鲜前向基线
+
+- 深交所官方《分红派息配股》月报已接入。采集器从官方统计月报索引定位最新不晚于样本时点的版本，校验`Last-Modified`、文件身份和SHA-256，按GB18030解析证券代码、送股、现金分红、配股及除权除息日。真实0与空值分开；统计月报发布时间不冒充上市公司公告时间。本轮真实解析2026年7月共349条事件，官方文件SHA-256为`c853ebbee874fe14b41957dabfdfd59a6c8668930bee25104e26ac81f9d2b3be`；覆盖只到7月31日且缺单份公告时间，因此继续`unverifiable`。
+- 北交所权益分派实施公告已通过巨潮官方公开接口的`pageColumn=BJS`元数据与原始PDF接入。只有精确实施公告标题、证券代码、公告时间、PDF正文方案和除权除息日全部一致才生成事件，提示性标题和解析不全均失败关闭。真实非空验收使用2026-05-19：8份BJS官方PDF确定性解析为10条现金分红/转增事件，证券、实施日、公告编号、原文URL和SHA-256齐全；其中`920002`原文`1225316970.PDF`的SHA-256为`add3590aba0bac91a4dd68f1e7de5813909ce73af428b37c6b5d48b495064e8a`，PDF首页视觉与文本提取一致。当日权益分派空集可证明，但合并、分拆、回购注销等其他类型未全覆盖，不升格为北交所公司行为全量就绪。
+- 公司行为快照合同新增分所`coverageThroughByExchange`和`coverageReasonsByExchange`，并使用上海市场日判定覆盖边界。任一分所失败只记录该所缺失，不把全市场伪装成真实空集；时间滞后、类型不全、候选未解析、公告时间/实施日缺失均有独立原因码。上交所仍只使用`PL_SCRL_SCRLB/bizType=5`候选计数，非空标题不会被推断成正式事件。
+- 中证OSS恢复后已重新获取沪深300官方方法PDF、成分表和收盘权重表，独立验收为`ready/forwardReady=true`，未伪造的历史公告/生效缺口继续保存在`retrospectiveReasons`。新鲜六域前向运行为`replay-stage9-forward-20260901T205707394895`，工件目录`/private/tmp/stage9-forward-corporate-index-20260901`：证券名册`ready 5553/5553`、交易规则`ready`、中证指数`ready`、ETF`ready 2267/2267`；行业`unverifiable 5463`（当前114只映射缺口），公司行为`unverifiable 349/349`。六域无`missing`、无`failed`，总报告仍因两个不可验证域和`calibration/holdout`样本未累积为`not_ready`。`replay-input.json` SHA-256为`997c5eb911363cb52623caa4038a099f029c4447658d71c77a3396c9b65aff0e`，`quality-report.json`为`bdd9040c25a2f85ed7a6a5b1ac987d5f35a3d1b3ca048ac43ff7dfc90b5573a6`。
+- TDD相关29项通过；完整后端2038项在12.555秒全通过，生产SQLite精确护栏触发0次，本轮没有尝试打开生产库。Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`均通过。本批修改`backend/radar/sources/corporate_actions.py`、`backend/radar/replay_source_adapters.py`及三个对应测试文件；未读写生产SQLite、未调用付费AI、未改依赖/迁移/环境变量/雷达开关，未重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、领先`origin/main` 17个提交，全部既有未提交工作树保留；4000仍为PID 25121，8001仍为PID 38436，本轮代码未加载到运行服务。
+
+下一步：1）继续补齐沪/深/北逐公告全类型公司行为及完整时间窗口，只有全覆盖才移除`unverifiable`；2）处理中上协行业映射的当前114只缺口和非当前A股记录；3）按新交易日继续累积开发样本，再独立冻结`calibration/holdout`，六域和三分区齐备前不声称阶段9完成。
+
+> 保存时间：2026-09-01 19:39 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9北交所规则、指数前向证据与公司行为来源整包
+
+- 北交所交易规则已补入既有版本化目录：`bse-trading-rule-2021`保存北证公告〔2021〕15号、2021-11-15生效；`bse-trading-rule-2026`保存北证公告〔2026〕17号、2026-07-06生效。两版均依官方规则使用30%涨跌幅，并纠正了北交所不能套用沪深“上市前5个交易日不限价”的问题：北交所上市首日不限价，第2日起恢复30%，退市整理首日等显式特殊会话仍独立处理。`2026-09-01`前向回放中沪主板/科创、深主板/创业、北交所五板块全部覆盖，交易规则域已由`unverifiable`升为`ready`。北交所、北证A股、北交所A股与主板别名均可解析。
+- 中证指数证据已区分“正式历史可回溯”和“从本系统首次观测时点起的真实前向快照”。官方基础信息、方法PDF、完整方法字段、成分文件、全权重文件与SHA-256齐备时，可在`firstObservedAt`之后作为`forwardReady=true`的真实证据；代码不伪造`publishedAt/announcedAt/effectiveFrom`，原历史缺口继续放在`retrospectiveReasons`。官方静态文件请求增加了仅1次的有界超时/连接重试，两次失败仍立即关闭。
+- 公司行为从完全`missing`进入可验证的前向来源边界：新增强类型事件和快照合同，要求交易所、公司行为类型、证券代码、公告时间、实施日、官方URL/文号/SHA-256和分所数量自洽。只有沪深北三所全部官方查询成功时，0条才是真实空集。已接入上交所官方市场日历`PL_SCRL_SCRLB/bizType=5`前向查询；因该页面当前隐藏分红区且查询行只提供标题而无完整公告/实施字段，代码不用标题或AI猜事件；深/北官方结构化来源未证明前仍为`unverifiable`。
+- 最新真实公开采集运行为`replay-stage9-forward-20260901T193321524496`，工件目录`/private/tmp/stage9-forward-three-source-20260901-r2`。真实六域结果：证券名册`ready 5553/5553`；交易规则`ready`；ETF名册`ready 2267/2267`；行业`unverifiable 5463`（映射覆盖97.9471%、当前114只缺口）；公司行为`unverifiable 0`（上交所官方查询返回真实0条，深/北未覆盖）；中证指数`failed`。指数独立复查与加入有界重试后的第2次整体运行都在官方`oss-ch.csindex.com.cn`方法PDF发生20秒`ReadTimeout`，属本时段上游稳定失败，未用旧快照补位。报告因development=1、calibration=0、holdout=0且上述真实缺口继续`failed/not_ready`。
+- TDD新增的北交所新旧版、首日/第2日、指数前向/历史边界、公司行为三所真空集/部分覆盖/缺实施日、官方标题不升格、有界重试等最终55项全通过。导入前精确拦截生产SQLite绝对路径到`/private/tmp/codex-stage9-three-source-fulltest/test.db`后，完整后端2032项在11.845秒内全通过，护栏记录重定向17次；Python相关模块编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、`git diff --check`全部通过。
+- 本批修改`backend/radar/leader_tradability_sources.py`、`backend/radar/replay_source_adapters.py`、`backend/radar/replay_forward_baseline.py`、`backend/radar/sources/etf_index_evidence.py`，新增`backend/radar/sources/corporate_actions.py`与对应测试，并保存设计/实施文档。未读写生产SQLite、未调用付费AI、未改依赖/迁移/环境变量/雷达开关，未重载服务，未Git暂存/提交/推送/部署。Git仍为`main@4e2c7ca`、相对`origin/main`领先17个提交，全部既有未提交工作树保留。服务只读核对时4000仍为PID 25121，8001的`lsof`仍显示PID 38436监听，但本轮沙箱`curl 127.0.0.1:8001`返回连接失败；未获得新的重载授权，因此没有动服务，也不声称当前页面已加载本批代码。
+
+下一步：1）继续只接官方可验证来源，定位深交所/北交所结构化公司行为入口并补全三所覆盖；2）中证OSS恢复后再生成一份新鲜前向快照，确认`index.forwardReady=true`，不复用旧快照；3）按新交易日持续累积开发样本，后续独立冻结calibration/holdout，在六域与三分区齐备前不声称阶段9完成。
+
+> 保存时间：2026-09-01 16:58 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9真实前向基线与首份质量报告完成
+
+- 阶段9已从“严格合同基座”进入真实数据收集：新增六域纯适配层和安全前向采集CLI。证券名册、交易规则、行业分类、中证指数证据、ETF产品名册、公司行为均生成稳定`RadarReplayEvidence`；每域保留真实来源、源/抓取/生效时间、覆盖数量、原因码和内容SHA-256，任一顶层或嵌套抓取时间晚于样本`asOf`都拒绝。CLI必须显式确认且只允许写入新建的`/private/tmp`子目录，不连接SQLite、不调用AI、不发布到页面默认报告仓，也不把本轮当前值倒填为历史。
+- 质量门新增开发/校准/独立留出三分区完整度：只有development样本时稳定返回`missingPartitions=[calibration,holdout]`和`replay_partition_missing`，即使单个样本证据完整也不会提前显示回放就绪。后端只读API、前端强类型合同及“严格时点历史回放”面板已同步显示缺失样本分区。行业适配明确移除旧阶段6的`formal_use_not_approved`人工审批阻断；阶段9只读监测只评价真实来源与覆盖，不要求用户审批数据。
+- 最终公开真实采集为`replay-stage9-forward-20260901T163700147901`，样本`asOf=2026-09-01T16:37:18.205102+08:00`，工件目录`/private/tmp/stage9-forward-baseline-20260901-final`。六域真实结果：证券名册`ready 5553/5553`；ETF名册`ready 2267/2267`；交易规则`unverifiable`（缺北交所版本）；行业`unverifiable`（中上协5463条、映射覆盖97.9471%，当前114只未确认并有24条非当前A股记录）；中证000300指数`unverifiable`（正式方法/成分时点证据不完整）；公司行为版本源`missing`。没有来源失败，报告真实为`not_ready`：development=1、calibration=0、holdout=0、missing=1、unverifiable=3、failed=0，未来数据/重复状态/同股多状态均0，所有效果指标继续为`null`。
+- 最终三份工件与清单哈希逐一一致：`source-snapshots.json`为`4a6f89bf97ce819167e5747adabd869bcc94d6d01332113f580b4712d2ebd8d3`，`replay-input.json`为`1e4dd4b071f2cd331dd5fdc549440dd2cd4aefd137565f4588e21b843ab7475e`，`quality-report.json`为`749b2e4164f8c921243191717441ce166725b4f2405eafbf26c9f9a6ca7ff01c`。TDD相关27项通过；解释器启动前将精确生产SQLite路径重定向到新`/private/tmp`测试库后，完整后端2019项通过，护栏实际重定向1次。前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）、Python相关模块编译、`pip check`和`git diff --check`均通过。
+- 本批未读写生产SQLite、未调用付费AI、未改依赖/迁移/环境变量/调度/正式开关，未Git暂存、提交、推送或部署。工程验收完成时未重载服务；随后仅按用户单独授权执行下条所述本地展示操作。Git保持`main@4e2c7ca`且相对`origin/main`领先17个提交，全部既有和本批未提交改动继续保留。
+- 用户随后明确授权重启本地8001用于展示。已核对安装plist与项目`leader-stage6-enabled`资产SHA-256完全一致后，只对现有LaunchAgent执行一次原地`kickstart -k`，未改配置；8001由新PID 38436恢复监听，OpenAPI已包含`/api/radar/replays/latest`和`/api/radar/stocks/{symbol}`。最终真实质量报告已通过内容寻址仓发布到本地`backend/data/radar-replays`（不使用SQLite），运行API返回`not_ready/partial`及上述真实计数。4000开发服务仍为PID 25121并通过热更新加载前端；应用内浏览器已刷新并停留在“历史验证”，报告时间、1个开发样本、0个留出样本及六项真实阻断均正确显示，控制台无错误或警告。该运行生效操作未改任何雷达开关、数据库、Git或外部部署。
+
+下一步：1）接入北交所当前及版本化交易规则、补齐中证指数正式时点证据；2）接入可验证的公司行为前向/历史版本源，并按新交易日持续积累development样本，达到预定数量后冻结独立calibration和holdout分区；3）只有三分区和六域真实证据齐备后才计算行业/ETF/龙头事后指标，阶段10继续保持关闭。
+
+> 保存时间：2026-09-01 16:00 CST
+> 本文件只保存跨对话检查点，不代替真实代码、Git、服务、数据库结构和测试证据。
+
+## 2026-09-01阶段9严格时点回放工程基座与质量页完成
+
+- 阶段9首个完整工程闭环已按TDD实现：回放输入只接受调用方显式传入的版本化历史证据；`sourceTime/fetchedAt/effectiveFrom`任一晚于样本`asOf`都拒绝；开发、校准和独立留出集不得复用同一历史身份。必需证据域固定包含历史证券范围、交易规则、行业、指数、ETF和公司行为；缺失、不可验证、来源失败、未来数据、重复状态和同股多状态分别计数，未提供的效果/收益指标保持`null`，不写成0。
+- 新增内容寻址的原子JSON报告仓和`GET /api/radar/replays/latest`强类型只读接口。接口不访问SQLite、不触发回放、不写库，并设置`Cache-Control: no-store`；无报告稳定返回`not_ready`，清单/身份/哈希/时间或内容损坏时失败关闭。雷达“历史验证”页新增独立质量面板，保留既有行业历史卡；只有真实报告才显示样本分区、纳入/排除和缺口，无报告不显示虚假的0%胜率或0收益，重新进入标签时也会先清除旧报告再用`no-store`读取。
+- 新增回放合同/评估/仓储/API正式测试15项，均观看过预期红灯并转绿。完整后端首轮暴露一个旧测试会读本机真实观察快照的隔离缺陷；根因确认后只让该测试显式提供“无观察快照”，未改业务规则。精确拦截生产SQLite绝对路径并重定向`/private/tmp`后，完整后端`2003`项全通过，护栏实际重定向1次。前端`npx tsc --noEmit`、ESLint、Next.js 16.2.10生产build（9路由）、Python相关模块编译、`pip check`和`git diff --check`全部通过。
+- 本批只完成阶段9的严格合同、评估、发布仓、只读API和质量页工程基座，**不冒充阶段9全部真实数据验收已完成**。当前还没有发布真实的历史时点证券生命周期、当时交易规则/行业/指数/ETF/公司行为同轮样本包，也没有独立黄金标注和真实效果指标；因此运行页面会如实显示等待报告。运行服务未重载：`4000` PID 25121、`8001` PID 4768仍在监听，当前页面还没有加载本批新代码。
+- Git仍为`main@4e2c7ca`，相对`origin/main`领先17个提交；当前49个未提交路径（29个已跟踪修改、20个未跟踪）全部保留，未暂存、提交、推送或部署。本批未读写生产SQLite、未调用付费AI、未改依赖/环境变量/功能开关、未停止或重载服务。
+
+下一步：1）为六个必需历史域实现只读生产来源适配与时点生命周期校验，不用当前值回填历史；2）生成第一批真实开发/校准/留出样本包并发布质量报告，缺域则保持`not_ready`；3）只在有独立标注和事后真实表现数据后计算行业/龙头/ETF指标，阶段10和正式开关继续保持关闭。
+
+## 2026-09-01阶段8复核完成并启动阶段9严格回放
+
+- 重新核对PRD、升级规划、代码、历史检查点和运行API后确认：阶段8提醒与独立雷达AI工程早已于2026-08-14完成、提交并上线，不应重复开发。当前51项阶段8专项测试全部通过；运行健康真实为`disabled/configured=false/storageReady=false`，总览为`not_run/stage8_storage_not_ready`且Token用量0。阶段7观察候选属于非评级数据，按既有合同不触发付费AI或用户强提醒，这是正确安全语义，不是阶段8缺陷。
+- 已直接进入真正未完成的阶段9，实施计划为`docs/superpowers/plans/2026-09-01-stage9-timepoint-replay-quality.md`。新增严格历史输入合同：回放只消费显式历史证据包，来源时间、抓取时间和生效时间任一晚于样本`asOf`即拒绝；开发、校准和最终留出样本不得共享同一历史运行身份；重复证据编号、空来源和无时区时间均失败关闭，真实缺失时间继续为`null`。
+- 新增质量评估核心，固定报告纳入、排除、缺失、不可验证、来源失败、未来违规、重复状态和同股多状态；证券池、交易规则、历史行业、指数、ETF和公司行为任一必需域缺失时返回`not_ready`，未提供的收益或效果指标保持`null`，不写成0。重复/多状态或来源失败返回`failed`。
+- 新增内容寻址原子JSON报告仓，清单与报告身份、语义SHA-256、未来发布时间和路径逃逸均校验；缺报告、损坏、哈希不符和未来报告语义分离。合同、评估和仓储12项TDD测试先红后绿并通过。本批未读写生产SQLite、未调用AI、未改环境/依赖/服务/正式开关，未Git暂存、提交、推送或部署，既有未提交工作树全部保留。
+
+下一步：1）完成`GET /api/radar/replays/latest`强类型只读合同；2）把新质量报告接入现有“历史验证”标签且保留行业历史卡；3）跑完整后端、前端检查和静态页面验收后完成阶段9工程收口。
+
+## 2026-09-01阶段7交易时段运行验收完成
+
+- 用户回复“继续”后已仅对现有 FastAPI LaunchAgent 执行一次 `kickstart -k`，没有改运行资产、环境变量、正式开关、前端或 ngrok。8001由新PID 4768稳定监听，4000仍由PID 25121监听；市场状态继续为上交所完整日历核验的 `trading/交易中`。
+- 首轮真实市场任务已自动发布观察快照；随后周期轮次持续更新。10:10仓储最新证据为 `radarRunId=radar-shadow-market-features-20260901T020736631283Z`、`candidatePlanId=radar-leader-runtime-candidate-plan-v1:1085bbfd7de539fd798ff620df223d55a374149944ca55ff176dcee92b31e2c0`，扫描7490只、映射5155只、真实观察候选385只。清单语义SHA-256为 `597747335e7471665f45e65d5d36e0063ecf2eafbcf52030998f346a42a6a846`，仓储读取校验通过；只读API现场检查时快照未过期，`displayAllowed=true`，`humanApprovalRequired/formalUsable/stateTransitionAllowed`全部为false，未伪造正式评分或三级状态。
+- 交易时段API现场验收通过：`600540`返回 `observed`，真实显示新赛股份、农业、行业内第1名、6.12元、+10.07%和腾讯源时间；`000725`返回 `not_listed`；非法代码 `ABC` 返回HTTP 422。正式研究证据尚未配置只影响正式评级，监控原因中已不再出现 `leader_observation_publish_failed`。
+- 1440×810浏览器现场验收通过：雷达龙头梯队显示385张真实“观察候选（非评级）”卡、7490/5155覆盖和“不需要人工批准”；385个“加入监测列表”按钮均可用且绝不自动加入。当前真实监测列表3只与观察候选无交集，因此本轮未为了制造“已在列表”状态而写入或改动监测列表；该分支继续由既有 `useWatchlist` 合同、禁用按钮实现及TypeScript/ESLint/build保证。股票详情 `/?code=600540`正确显示观察状态、行业、排名、价格、涨跌幅和源时间；雷达行业01与行业洞察双向携带代码/名称，洞察页明确提示公开资讯尚未按该行业精确过滤；页面控制台无错误或警告。
+- 故障根因和修复保持不变：腾讯行情是在任务采集期间产生，允许 `sourceTime` 晚于任务开始但不得晚于 `publishedAt`。新增失败测试先复现旧拒绝，再最小修复，未调整候选规则、评分、正式门或状态机。观察仓/运行时/API相关72项、精确隔离生产SQLite后的完整后端1988项、Python编译、`pip check`、前端TypeScript、ESLint、Next.js 16.2.10生产build（9路由）和`git diff --check`均通过。
+- 阶段7“股票详情、行业洞察和监测列表联动”至此完成代码与真实运行收口。Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17个提交，既有未提交工作树全部保留；本轮未直接读写生产SQLite、未调用付费AI、未改依赖/正式配置，未Git暂存、提交、推送或部署。
+
+下一步：1）进入阶段8，先按PRD/升级规划书核对提醒与雷达AI的剩余范围，保持AI只解释冻结证据且不改状态；2）先TDD补齐阶段8后端合同、失败/关闭/证据不足语义，再做最小前端联动；3）完成阶段8整包后统一运行完整后端、前端检查和真实只读页面验收。
+
+## 2026-08-31运行生效、个股空态修复与阶段7现场验收
+
+- 经用户明确启动下一步后，先确认已安装LaunchAgent的雷达/行业/市场/ETF/阶段6开关全为`true`，D8写入未设置。项目自带受控重载首次在`launchctl bootstrap`遇到系统级`Input/output error`，脚本已自动恢复已备份运行资产并成功重启，未遗留双进程。现场核验项目与安装的`run-backend.sh`、阶段6 plist SHA-256分别完全一致；后续只对已加载且配置未变的LaunchAgent执行最小`kickstart -k`加载空态修复。当前后端PID 25860在`127.0.0.1:8001`正常监听。
+- 前端按既有`screen`运行方式启动，会话`stock-monitor-frontend`、PID 25121在`*:4000`监听。`/api/health`返回全组件`healthy`，`/radar`返回HTTP 200；OpenAPI已真实包含`observationItem/humanApprovalRequired/official_announcement_scan`新合同。当前收市后真实观察状态为`not_ready`、`leader_observation_snapshot_missing`、候选数0，三个正式布尔字段继续全false；没有用旧候选、Mock或缓存补位。
+- 1440×810桌面端现场验收通过：主线雷达显示“人工批准：不需要”、真实公告扫描、“可能相关”和完整性警告；无观察快照时如实显示等待。股票详情页首次现场暴露`not_ready`被错映射为`failed`，已按TDD新增失败测试并最小修复：未就绪现返回`no_snapshot`与“尚无龙头或观察快照，等待真实数据”，真正仓储读取异常仍为`failed`。修复后个股接口HTTP 200，页面无警告或错误日志。
+- 阶段7已有联动做了真实页面验收：雷达行业87“广播、电视、电影和录音制作业”携带明确代码/名称跳到行业洞察；洞察页显示“来自主线雷达”和“仅携带行业上下文，公开资讯尚未按该行业精确过滤”；返回入口保留`industryCode=87/industryName`并激活行业主线页，控制台无错误。观察候选手动加入监测列表的代码/类型/构建验收已通过，但因收市后还没有首份新观察快照，不伪造候选做现场点击验收。
+- 新修复直接测试3项和龙头API文件31项通过；观察仓/API/运行时相关71项通过。解释器启动前将精确指向生产SQLite的连接重定向`/private/tmp/codex-stage6-runtime-qa-fulltest-20260831/`后，完整后端1987项在11.246秒内全通过，护栏实际重定向8次；Python全量编译与`pip check`通过。本轮没有直接打开或写入生产SQLite，仅通过已授权运行服务的正常只读API做现场页面验收；未调用付费AI、未改依赖/生产环境变量/四个正式开关，未Git暂存、提交或推送。
+
+下一步：1）下一个有效A股交易轮次等运行时自动生成首份真实观察快照，核对时间、覆盖、行业排名和过期语义；2）对真实观察候选做手动加入/已在监测列表的现场验收，不自动加入；3）完成上述唯一交易时段验收后，将阶段7标记为完整收口并进入阶段8。
+
+## 2026-08-31阶段6只读监测与人工审批解耦完成（本地代码）
+
+- 本检查点正式取代下方旧检查点中“需人工审批才能继续监测展示”的产品阻塞语义。系统定位为只读监测助手：真实行情与已确认行业映射形成的观察候选可直接展示，不要求用户或其他人做逐条批准。D8人工审核仅保留为未来可选的内部证据研究能力，不再是页面和只读数据的前置门。
+- 新增严格JSON+清单SHA-256校验的观察快照仓`backend/radar/leader_observation_store.py`，只保存同轮真实证券、行业、行业内排名、价格、涨跌幅、源时间和来源合同；不读写SQLite、不生成分数、不生成预备/候选/已确认状态。`humanApprovalRequired/formalUsable/stateTransitionAllowed`在存储、API和前端合同中均固定为`false`。
+- 阶段6运行时现在候选计划`ready`后先原子发布观察快照，再继续原有正式五源研究链；所以主营、D8、风险覆盖或行业正式门未就绪时，真实观察数据仍能用。只读API新增强类型`observation`和个股`observed/observationItem`语义；正式快照缺失、损坏或未就绪时安全回退到观察快照，无快照、空池、过期、失败和未启用均有独立语义。
+- 主线雷达页已改为“观察候选（非评级）”与“官方公告扫描”，展示真实来源时间、覆盖范围、行业内排名和官方原文链接；明示“可能相关”和“关键词发现不等于完整语义审查”。可手动加入现有监测列表，已在列表会禁用按钮，绝不自动加入。首页股票详情可显示观察候选行业、排名、价格、涨跌幅和数据时间，且不冒充龙头评级。
+- TDD验证已完成：新边界测试先在损坏旧正式快照遮挡观察数据时失败，最小修复后通过。观察仓/API/运行时相关`70`项全通过；解释器启动前将精确指向生产SQLite的连接强制重定向到`/private/tmp/codex-stage6-readonly-final-fulltest-20260831/`后，完整后端`1986`项在13.308秒内全通过，护栏实际重定向8次。前端`tsc --noEmit`、ESLint、Next.js 16.2.10生产build（9个路由）、Python全量编译、`pip check`均通过。
+- Git仍为`main@4e2c7ca`，全部既有阶段6未提交改动与本批改动均原样保留，未暂存、提交、推送或部署。`8001`仍由旧PID 791监听，`4000`未监听；按授权边界没有重载服务，因此当前运行页面尚未加载本批新代码，也尚未产生第一份新观察快照。本批未读写生产SQLite、未调用付费AI、未改环境变量、调度、依赖或四个正式开关。
+
+下一步：1）另行授权后受控重载`8001/4000`，让运行服务加载新代码；2）在下一个有效交易轮次生成首份真实观察快照，然后做桌面端页面、空态、过期和失败态现场验收；3）本地运行验收后直接进入阶段7的股票详情、行业洞察和监测列表联动，正式分数/状态迁移继续作为可选内部安全层，不再阻塞只读产品。
+
+## 2026-08-31阶段6主营真实语料修复、资格子计划与D8待办
+
+- 从11:27同轮15只证据候选官方材料逐项复核，没有写入人工审核结论或用AI签名补门。巨潮原始PDF SHA-256与自动正文哈希一致；真实确认解析器遗漏两类明确官方对象：华曙高科年报/业绩预告的`3D打印设备`，潞安环能年报/业绩预告的`煤炭`。德才股份年报虽有房屋建筑工程且公告有学校施工总承包中标，但两文本无精确同值对象，未用行业推断硬配，继续`source_unverified`。
+- 严格TDD固化官方原句及反例，新增年报中显式“生产销售”原子对象和严格`3D打印设备销售量较上年同期增加`规则；“预计增加”、泛化“设备增加”仍失败关闭，只定向排除“挖掘3D打印应用的可能性”对后半句已发生销量的错误作用域。确定性关系规则升为`radar-leader-business-deterministic-relation-v33`，旧断点不会跨版复用。
+- 真实复跑结果为`ready=2/missing=10/source_unverified=3/source_failed=0`，两只ready为`688433`和`601699`。证据包`/private/tmp/stage6-business-review-20260831-v33/evidence-a61c0f3e6da399a0b1657e45a1d20a7a360bcbefb87f642f1c4bb14cf83098b0.json`，文件SHA-256 `510e59c90f54dc8c08e669eba23c14a957d6eed2843e3759bee3dfdc4f18db74`。确定性派生同轮2只资格子计划`radar-leader-runtime-candidate-plan-v1:bc633b0a6c79bea83a5035faee196ebcd2356052dfde321b7114a8dc68bfccca`，来源包`/private/tmp/stage6-business-review-20260831-v33/qualified-candidate-source.json`，包内SHA-256 `c2ca4abba091c8bad3e6205057709da44e017376cf8f2e88f00cc7a85fa01df0`，文件SHA-256 `833e50929d221f18862b457ce4b3b35811358e3a41527f829bb3e59e9c4d2db8`。
+- 已对该2只子计划运行D2七类巨潮官方发现并生成不含结论的D8人工待办：共27份文档，`688433=18`、`601699=9`；源包`/private/tmp/stage6-business-review-20260831-v33/d8/stage6-d8-manual-worklist-20260831T041829-source.json`，复核包`...-review.json`，工作包身份`0d3cdc2cef05c8dd9c5a886dfbbbe407269d9bc0dbe732e84dd65eb8b41f2553`。真实状态为`pending_human_review`、`d8VersionCount=0`，不得将这27份D2公告当成D8结论。D2查询7/7类、7/7页完整但`realPocStatus=partial/deliveryStatus=missing`，因现有关键词发现不能证明发行人上市以来七类语义完整覆盖；这是已明文的正式政策门，不是网络或代码异常。
+- 相关129项、解释器启动前精确拦截生产SQLite并重定向`/private/tmp/codex-stage6-business-v33-fulltest-20260831/stock_monitor_test.sqlite`的完整后端1974项全部通过，保护器实际重定向1次；Python全量编译、`pip check`、`git diff --check`通过。未读写生产SQLite，未调用付费AI，未修改依赖/生产环境/服务/开关，未Git暂存、提交、推送或部署。Git仍为`main@4e2c7ca`；`8001`仍为旧PID 791，`4000`未监听，未重载服务。
+
+下一步：1）由真实人工在上述2只/27份同轮待办上逐条复核并生成首个真实D8版本，AI不得代签；2）单独明文决策正式风险覆盖查询政策、上市日起始的来源能力/上市证据合同及可信批准，当前空政策注册表不得由调用方补门；3）D8、风险覆盖政策和龙头正式行业门数值批准均龗备后，再在连续交易窗口从`sector-state-20260831T112707171097.json`续接新鲜五源总门，四个正式开关仍不自动开启。
+
+## 2026-08-31阶段6行业历史真实收口与五源续跑
+
+- 针对`002214` 2026-08-06缺15:00和`300462` 2026-08-21缺09:35的真实边界稀疏日，按TDD增加新浪分钟成交量保留与腾讯独立日线证明。只有分钟总成交量与腾讯日线按明确单位完全相等、末栏收盘价也精确相等，才证明缺失边界是零成交而非源漏数；无证明、数量/收盘不等、时间越界或非独立源均继续`sector_history_member_dates_incomplete`失败关闭，未补K线、未推算成交额、未放宽21日完整性。全天首尾完整但单个中间5分钟无成交的日期保持既有交易日存在性语义，不再被误当边界漏数。
+- 新断点保存`volume_shares`，三字段旧断点仍可读。自动回填只定向重取需要边界对账但旧断点无成交量的证券；同时修复运行仓旧断点`002274`的真实刷新缺陷：不再因最新日停牌就忽略中间已恢复交易的8月24、25日。现场最终只重取该股，未全市场重抓，未写生产SQLite或修改运行仓。
+- 11:27 CST从唯一合法前态`sector-state-20260828T133853483985.json`续接真实五源入口，`radarRunId=stage6-prefreeze-20260831T112707171097`。行业历史已真实越过：21个完整交易日、`5153/5153`行业成员、81个行业分析，比较时点11:25；长历史`5157/5157`。可交易性`productionCollector=completed`、`383/383`，从383只初筛冻结15只全新证据候选，行业状态为合法`continued`，新顺序前态为`/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260831T112707171097.json`，文件SHA-256 `a8643236aa4a328e6859683b6d3a137de002e9693a2fbf77d326c2ddb8db0d92`。
+- 本轮最终如实`not_ready`，唯一顶层原因`leader_business_evidence_qualification_empty`。新15只官方主营自动证据为`ready=0/missing=10/source_unverified=5/source_failed=0`：10只缺真实主营催化，5只分别存在年报选择歧义、催化事实对象缺失或确定性关系未确认。因资格子计划为空，官方风险与新候选同轮D8均未启动；新候选D8待人工清单当前为0，不得把主营材料队列的15项`pending_review`冒充D8。四个正式开关仍全false，未生成正式龙头状态。
+- 总工件`/private/tmp/stage6-live-prefreeze-resume-20260825/stage6-live-five-source-20260831T112707171097.json`，SHA-256 `9fce1648d836bd7bba1b59915a1aa851c27b1e3a06f4879d6a9a9fad015658b5`；候选源包文件SHA-256 `5600b28585cf4ce68521072ad8ea9b258815422f1cdb5b274525cd08223c70d5`，包内身份`9dcfda11390b766085a0db49234c0b95151d4ef0bbafa7867f0305fae0a18ce2`；主营证据文件SHA-256 `98eed22d46f901667c13716cd8a70b32870c9185a049b2ccfd51c9b84de66220`。相关37项和解释器启动前精确拦截生产SQLite并重定向临时库后的完整后端1970项全部通过，保护器实际重定向1次；额外固化新浪缺成交量失败关闭和腾讯科创板日线成交量为股数的单位分支。
+- 代码仅修改`sector_history_backfill.py`、`sector_history_trading_presence.py`、`sector_history_automatic_backfill.py`及两份对应测试，其他已有未提交改动全部保留。Git仍为`main@4e2c7ca`；`8001`仍由旧PID 791监听，`4000`未监听，未停止、重启或重载服务。本轮未读写生产SQLite、未调用付费AI、未修改依赖/生产环境变量/调度/开关，未Git暂存、提交、推送或部署。
+
+下一步：1）从新顺序前态`sector-state-20260831T112707171097.json`续接，先对15只新候选的官方主营材料做真实人工核验/版本化确认，不用AI或同义词推断补齐；2）只有资格子计划非空后，才对同计划运行官方风险发现和真实人工D8，不复制旧D8版本；3）五源及正式政策/批准任一不齐继续失败关闭，不进入阶段7/8/9。
+
+## 2026-08-31阶段6新交易日行业分钟完整性失败关闭
+
+- 09:31 CST 通过上交所官方休市日历确认今天为完整交易日且项目状态为 `trading`，现场无重复阶段6验收进程；从唯一合法前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json` 启动五源入口。首轮因09:35前尚无完整5分钟比较窗口触发 `sector_comparable_time_unavailable`，原始堆栈确认是既有正确时间门而非代码缺陷；没有从旧状态分叉或写新状态。
+- 09:35后同一合法前态重新执行唯一入口，运行约5分钟后以 `leader_phase6_public_prepare_sector_unverified` 失败关闭。真实行业分钟结果为 `requested=5153/fetched=5149/reused=4/failure=0`，但分析状态 `partial`、原因 `sector_history_member_dates_incomplete`、`historyCoverageReady=false`、行业分析0；因此候选、主营、官方风险、D8和五源总门均未启动，四个正式开关保持false。
+- 逐文件与腾讯公开日线交叉核验把真实交易日缺口缩到两只：`002214`在2026-08-06有09:35至14:55共38栏但缺15:00，`300462`在2026-08-21从09:40开始共41栏、缺09:35。其余缺行均由独立日线证明为非交易日；腾讯日线确认上述两天确有交易。新浪5分钟对两只做第二次小范围重取仍完全复现同样边界缺口；现有东方财富5分钟备用对两只均 `transport_failed`。腾讯公开5分钟能覆盖8月21且同样显示`300462`首栏为09:40，但320栏上限不能回到8月6证明`002214`尾栏语义。现有合同无法证明缺栏是零成交而非源漏数，故没有补零、改写时间、放宽完整性或制造备用值。
+- 本轮证据 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-320ab21f0c85a9f0163cac98352a87e0244873731262e4073b5970f351fe36ec.json`，SHA-256 `ddf74576a7b0eb35afc79695bf18f8c46889e84fe9dd7e2f6cc695171806bfe1`；最新合法顺序前态仍为8月28日13:38文件，SHA-256继续为 `a968f8ad516c97bd68653bf5dc71756705ac780310522943950f105a9eb96a91`。本批未修改代码行为、未读写生产SQLite、未调用付费AI、未改环境变量/依赖/服务/调度/开关，也未Git暂存、提交、推送或部署；`git diff --check`通过，全部既有未提交改动保留。
+- 为直接捕获入口退出码，在连续30秒确认验收进程为0且交接文件当时未变化后，只从同一未污染前态执行一次有限重试。`radarRunId=stage6-prefreeze-20260831T094404943268` 明确退出码3、原因为 `leader_phase6_public_prepare_sector_unverified`；新证据 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-history-checkpoints/sector-history-9cf309753dc9de32/evidence-aa9d540cdf3a616ee1be4602d6da3f0ed6f6d5dd366709270bdab38451191185.json`，SHA-256 `75130dc960fb0bdda84ed1264fb63d4e8aa8715e4efd253654145e20bb3e8f90`。该轮复用5153只、加载失败0只，但仍为相同 `sector_history_member_dates_incomplete/partial`，未生成顶层五源工件、候选包或新行业状态；相同安全条件重复失败后不再重试。
+- 现场入口、预冻结、行业自动回填及行业历史相关49项回归通过，两份失败证据的JSON失败关闭合同复核通过。Git仍为 `main@4e2c7ca`、相对 `origin/main` 领先17个提交，既有11个未暂存文件完整保留；`8001`仍由既有PID 791监听、`4000`未监听，launchd资产验证通过，FastAPI/ngrok LaunchAgent均已加载且ngrok当前进程运行。本轮没有停止、重启或重载任何服务。
+
+下一步：1）只接受能证明稀疏交易日分钟完整性的真实独立字段（例如同日全量成交额/收盘核对）或可覆盖对应日期的第三个公开分钟来源，先冻结来源合同并TDD，不得把缺栏直接当0；2）补齐两只真实完整性后仍从 `sector-state-20260828T133853483985.json` 续接唯一入口，不使用本轮失败输入；3）正式风险覆盖政策与龙头行业门专属数值批准仍独立缺失，任一门不齐继续失败关闭且不进入阶段7/8/9。
+
+## 2026-08-28阶段6官方风险覆盖证明就绪合同收口
+
+- 复核 `PRD.md`、V5升级规划、D1-D9规格和真实代码后，确认证券主档已有上市日期，D2/D8链路也能校验七类关键词、分页、连续窗口及开放事件更正/解除；但项目明文规定关键词发现、搜索空结果和栏目列表都不能证明上市以来七类风险语义完整，且当前没有获批的正式覆盖查询政策、审批身份或能够直接产出 `coverage_proof` 的来源合同。因此没有自创关键词、类别范围或批准记录，正式风险覆盖门继续关闭。
+- 按TDD新增 `backend/radar/leader_risk_official_coverage.py`：以可信同轮候选计划和现有官方生命周期生产者为前置，新增发行人上市证据、版本化覆盖政策审批、逐证券就绪项和整批结果合同。上市证据校验证券/发行人/顺序/唯一性、带时区上市与抓取时间、未来时间、官方HTTPS域名和SHA-256；政策只能精确命中代码内冻结注册表，当前注册表按真实文档保持为空。调用方dataclass、字典、非法类型或篡改结果均不能自批，生产者令牌与验证器阻止 `dataclasses.replace` 冒充可信结果。
+- 当前可信生命周期中的首只已知开放事件可证明结转、更正和解除关系，其余没有真实D8基线的候选仍明确保留 `risk_official_coverage_lifecycle_relationships_incomplete`；即使上市证据结构完整，整批仍返回 `policy_unapproved`、`risk_official_coverage_policy_unapproved` 和 `risk_official_keyword_discovery_not_coverage_proof`。所有 `issuerListingEvidenceApproved/coverageComplete/riskFilterPassed/formalGateReady/formalUsable/stateTransitionAllowed` 固定为false，不生成D1覆盖证明，不用D2、AI、空模板、人工首版复制或推断补齐。
+- 新覆盖合同专项7项、D1/D2/D8/D9及官方生命周期相关173项全部通过；在导入 `database` 前将精确等于生产SQLite绝对路径的连接重定向到 `/private/tmp/codex-stage6-risk-coverage-fulltest-w4wplx8r/isolated-stock-monitor.db`，并将 `database.DB_PATH` 固定为该临时库后，完整后端1963项全部通过，保护器实际重定向1次。Python全量编译、`pip check`、已跟踪 `git diff --check` 及全部未跟踪文件独立空白错误检查通过。测试中的AI重试、公告下载、来源失败和调度文字均为既有Mock分支，本轮未调用付费AI或真实生产任务。
+- Git仍为 `main@4e2c7ca`，相对 `origin/main` 领先17个提交；上一批7个文件与本批4个代码/测试/规格/计划文件共11个文件保留在未暂存工作树，未 `git add/commit/push`。`8001`仍由既有PID 791监听，`4000`未监听；launchd资产验证通过，FastAPI/ngrok LaunchAgent均已加载，ngrok进程未运行，`preflight`因拒绝重复安装既有LaunchAgent按设计返回75。本轮未读写生产SQLite，未改环境变量、依赖、服务、调度、开关、迁移或部署，没有进入阶段7/8/9。
+- 2026-08-29及08-30 13:05 CST 项目交易日门分别确认周六、周日均为 `closed/休市`，因此没有执行仍绑定8月27日11:03旧状态的一次性任务；当前唯一合法顺序前态仍是 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json`（SHA-256 `a968f8ad516c97bd68653bf5dc71756705ac780310522943950f105a9eb96a91`）。两次现场阶段6验收进程均为0，`8001`仍为PID 791，`4000`未监听；任务6删除接口继续无返回并已终止控制调用，尚不能确认已停用，后续触发仍须拒绝其旧命令。
+
+下一步：1）下一个合法A股连续交易窗口从唯一顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json` 继续同一入口，重新冻结真实行情、候选和五源证据；2）正式风险覆盖只有在七类查询政策、来源能力、上市证据来源合同和可信审批均有明文且经真实验证后才能另行TDD启用，当前空政策注册表不得由调用方输入补门；3）龙头正式行业门仍缺专属数值政策与可信批准，任一门不齐继续失败关闭，不进入阶段7/8/9。
+
+## 2026-08-28阶段6官方风险生命周期与正式行业门政策审计收口
+
+- 按TDD新增 `backend/radar/leader_risk_official_lifecycle.py`，以可完整重放的既有D2→D8→D9/E1风险生命周期批次为已知开放事件基线，只接纳现有官方确定性生产者的连续窗口。同一开放事件必须原样结转，或由同证券、同发行人、同目标事件精确版本、同官方文档、正文SHA-256和确定性事实绑定的 `supersedes/resolves` 关系更正或解除。静默丢事件、断窗、未来上市时间、跨窗口发行人漂移、错URL/正文/哈希/事实/目标版本以及解除后状态重开均失败关闭；已解除事件在后续窗口不重复携带解除对象时仍保持关闭，也可合法从后续开放事件集消失。
+- `leader_risk_official_deterministic` 新增生产者绑定的结转、更正和解除完整度字段，并使完成项能进入现有研究运行时风险批次校验。该绑定只移除已真实证明的结转/更正/解除缺口；D2关键词窗口不是从上市日至今的正式覆盖证明，所以 `risk_official_formal_coverage_not_proven` 仍保留，`riskFilterPassed/formalGateReady/formalUsable/stateTransitionAllowed` 继续全为false。本轮没有用D2发现、AI、空模板、人工首版复制或推断生成D8结论，也没有将旧真实D8回填到新候选计划。
+- 复核 `PRD.md` 和V5升级规划后，只定位到升级规划第7.4节的计算合同必需字段、第9.5节的六项定性行业门条件和第9.8节的状态机合同，没有找到“龙头正式行业门”专属的已批准指标单位、主备来源、窗口、最小样本、归一化、单股集中度、行业成交额、扩散/持续/回流、催化来源准入、最低完整度、缺失/过期/冲突/降级、进入/保持/退出阈值和批准身份。`leader_formal_industry_gate` 现将三个稳定文档章节、六项定性需求和15类必需政策字段输出为版本化审计合同；既有 `SectorThresholdApprovalEvidence` 只批准行业八状态机，被明确标记为 `sector_state_approval_not_applicable`，不能冒充龙头行业门审批。未知/伪造政策对象直接 `policy_input_unverified`，当前继续 `leader_formal_industry_gate_policy_unapproved`，未自创任何数值或放宽规则。
+- 最终风险生命周期+官方投影+行业门直接专项34项、研究审计/运行时/单轮编排/现场就绪相关131项全部通过；在导入 `database` 前将精确等于生产SQLite绝对路径的连接重定向到 `/private/tmp/codex-stage6-final-fulltest-ij8gubcc/isolated-stock-monitor.db`，并将 `database.DB_PATH` 固定为该临时库后，完整后端1956项全部通过，保护器实际重定向1次。Python全量编译、`pip check`和 `git diff --check` 通过。测试中的AI重试/来源失败文字为已有Mock分支日志，本轮没有调用付费AI或真实外部消息。
+- Git仍为 `main@4e2c7ca`，前一提交 `b330278`，相对 `origin/main` 领先17个提交；本批代码、测试、计划和本检查点共7个文件保留在未暂存工作树，未 `git add/commit/push`。`8001` 仍由既有PID 791监听，`4000` 未监听；launchd资产验证通过，FastAPI/ngrok LaunchAgent均已加载，ngrok进程未运行，`preflight` 因拒绝重复安装既有LaunchAgent正常返回75。本轮未读写生产SQLite，未改环境变量、依赖、服务、调度、开关、迁移或部署，没有进入阶段7/8/9。
+
+下一步：1）下一个合法A股连续交易窗口从唯一顺序前态 `/private/tmp/stage6-live-prefreeze-resume-20260825/sector-state-20260828T133853483985.json` 继续同一入口，重新冻结真实行情、候选和五源证据；2）只有当轮候选存在同计划可重放D8/D9、从上市日至今的正式覆盖证明，以及龙头正式行业门专属数值政策与可信批准时，才能分别继续TDD评估风险过滤和行业门启用；3）任一来源、证据、完整度或批准不齐继续失败关闭，不进入阶段7/8/9。
 
 ## 2026-08-28阶段6行业与父池横截面证据链收口
 

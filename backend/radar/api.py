@@ -1,14 +1,17 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Union
+from typing import Iterator, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Path as ApiPath, Query, Request, Response
 
 import market_calendar
 from radar.api_contracts import (
     RadarEtfsResponse,
+    RadarFormalReadiness,
+    RadarFormalShadowProgress,
     RadarLeadersResponse,
     RadarLeaderReviewQueueResponse,
     RadarLeaderReviewDocumentResponse,
@@ -19,13 +22,27 @@ from radar.api_contracts import (
     RadarLeaderReviewVersionPreflightResponse,
     RadarLeaderReviewVersionResponse,
     RadarOverviewResponse,
+    RadarReplayEtfResearchResponse,
+    RadarReplayQualityResponse,
     RadarSectorsResponse,
     RadarSectorHistoryResponse,
     RadarStockResponse,
 )
 from radar.config import load_radar_settings
 from radar.etf_repository import EtfRepository
+from radar.formal_readiness_contracts import (
+    FORMAL_MODULE_REQUIRED_TRADING_DAYS,
+    FROZEN_REQUIRED_FORMAL_GATES,
+    FormalGateState,
+    FormalModuleReadiness,
+    FormalShadowProgressModule,
+    RadarFormalFreshnessPolicy,
+    formal_readiness_freshness_reason,
+)
+from radar.formal_readiness_store import load_latest_formal_readiness
+from radar.formal_shadow_ledger_store import load_latest_formal_shadow_ledger
 from radar.leader_repository import LeaderRepository
+from radar.leader_observation_store import load_latest_leader_observation
 from radar.leader_risk_review_repository import LeaderRiskReviewRepository
 from radar.leader_risk_review_service import (
     build_manual_review_version,
@@ -35,6 +52,13 @@ from radar.leader_risk_review_service import (
 from radar.migrations import validate_applied_migrations
 from radar.read_service import RadarReadService
 from radar.repository import RadarRepository
+from radar.replay_store import (
+    DEFAULT_RADAR_REPLAY_STORE_DIR,
+    load_latest_replay_report,
+)
+from radar.replay_etf_research_store import (
+    load_latest_replay_etf_research,
+)
 from radar.sector_history_store import (
     DEFAULT_SECTOR_HISTORY_STORE_DIR,
     load_latest_sector_history_evidence,
@@ -46,6 +70,15 @@ from radar.sector_threshold_review import (
 
 
 router = APIRouter(prefix="/api/radar", tags=["Mainline Radar"])
+DEFAULT_RADAR_FORMAL_READINESS_STORE_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "radar-formal-readiness"
+)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _database_path() -> Union[str, Path]:
@@ -56,6 +89,30 @@ def _database_path() -> Union[str, Path]:
 
 def _sector_history_store_path() -> Path:
     return DEFAULT_SECTOR_HISTORY_STORE_DIR
+
+
+def _replay_store_path() -> Path:
+    return DEFAULT_RADAR_REPLAY_STORE_DIR
+
+
+def _formal_readiness_store_path() -> Path:
+    return DEFAULT_RADAR_FORMAL_READINESS_STORE_DIR
+
+
+def _formal_shadow_ledger_store_path() -> Optional[Path]:
+    """读取显式临时台账路径；未配置不回退到任何生产目录。"""
+
+    raw = os.environ.get("RADAR_FORMAL_SHADOW_LEDGER_DIR", "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise ValueError("formal_shadow_progress_store_unverified")
+    resolved = path.resolve(strict=False)
+    private_tmp = Path("/private/tmp").resolve(strict=True)
+    if resolved != private_tmp and private_tmp not in resolved.parents:
+        raise ValueError("formal_shadow_progress_store_unverified")
+    return resolved
 
 
 @contextmanager
@@ -109,11 +166,205 @@ def _service(connection: sqlite3.Connection) -> RadarReadService:
         etf_repository=etf_repository,
         leader_repository=leader_repository,
         risk_review_repository=risk_review_repository,
+        leader_observation_loader=load_latest_leader_observation,
     )
 
 
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store, max-age=0"
+
+
+def _unavailable_formal_readiness(
+    *,
+    checked_at: datetime,
+    state: str,
+    reason_codes: tuple[str, ...],
+    freshness_policy: Optional[RadarFormalFreshnessPolicy] = None,
+) -> RadarFormalReadiness:
+    gate_state = "failed" if state == "failed" else "not_ready"
+    modules = tuple(
+        FormalModuleReadiness(
+            module=module,
+            state=state,
+            requested=False,
+            configuredEnabled=False,
+            formalEnabled=False,
+            observedTradingDays=0,
+            requiredTradingDays=FORMAL_MODULE_REQUIRED_TRADING_DAYS[module],
+            gates=tuple(
+                FormalGateState(
+                    gate=gate,
+                    state=gate_state,
+                    reasonCodes=reason_codes,
+                )
+                for gate in FROZEN_REQUIRED_FORMAL_GATES
+            ),
+            reasonCodes=reason_codes,
+        )
+        for module in FORMAL_MODULE_REQUIRED_TRADING_DAYS
+    )
+    return RadarFormalReadiness(
+        checkedAt=checked_at,
+        freshnessPolicy=freshness_policy,
+        state=state,
+        anyFormalEnabled=False,
+        allModulesFormalEnabled=False,
+        stage9QualityState=gate_state,
+        modules=modules,
+        reasonCodes=reason_codes,
+    )
+
+
+def _unavailable_formal_shadow_progress(
+    *,
+    checked_at: datetime,
+    state: str,
+    reason_codes: tuple[str, ...],
+) -> RadarFormalShadowProgress:
+    return RadarFormalShadowProgress(
+        checkedAt=checked_at,
+        state=state,
+        modules=(),
+        reasonCodes=reason_codes,
+    )
+
+
+@router.get(
+    "/formal-shadow-progress",
+    response_model=RadarFormalShadowProgress,
+)
+def get_radar_formal_shadow_progress(response: Response):
+    """只读投影已验证的 v2 影子台账，不表达正式启用结论。"""
+
+    _no_store(response)
+    checked_at = _utc_now()
+    if checked_at.tzinfo is None or checked_at.utcoffset() is None:
+        return _unavailable_formal_shadow_progress(
+            checked_at=datetime.fromtimestamp(0, timezone.utc),
+            state="failed",
+            reason_codes=("formal_clock_unverified",),
+        )
+    try:
+        store_path = _formal_shadow_ledger_store_path()
+    except Exception:
+        return _unavailable_formal_shadow_progress(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=("formal_shadow_progress_store_unverified",),
+        )
+    if store_path is None:
+        return _unavailable_formal_shadow_progress(
+            checked_at=checked_at,
+            state="missing",
+            reason_codes=("formal_shadow_progress_store_unconfigured",),
+        )
+    try:
+        stored = load_latest_formal_shadow_ledger(store_path, now=checked_at)
+    except Exception:
+        return _unavailable_formal_shadow_progress(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=("formal_shadow_progress_store_unverified",),
+        )
+    if stored.status == "missing":
+        return _unavailable_formal_shadow_progress(
+            checked_at=checked_at,
+            state="missing",
+            reason_codes=stored.reason_codes or ("formal_shadow_ledger_missing",),
+        )
+    if (
+        stored.status != "available"
+        or stored.ledger is None
+        or stored.stored_ref is None
+        or not stored.stored_ref.content_sha256
+    ):
+        return _unavailable_formal_shadow_progress(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=(
+                stored.reason_codes
+                or ("formal_shadow_ledger_report_unverified",)
+            ),
+        )
+    ledger = stored.ledger
+    return RadarFormalShadowProgress(
+        checkedAt=checked_at,
+        state="available",
+        ledgerSha256=stored.stored_ref.content_sha256,
+        modules=tuple(
+            FormalShadowProgressModule(
+                module=module,
+                observedTradingDays=ledger.ready_trading_days_by_module[module],
+                requiredTradingDays=ledger.required_trading_days_by_module[module],
+                latestReadyStreak=ledger.latest_ready_streak_by_module[module],
+                latestReadyTradingDate=(
+                    ledger.latest_ready_trading_date_by_module[module]
+                ),
+            )
+            for module in FORMAL_MODULE_REQUIRED_TRADING_DAYS
+        ),
+    )
+
+
+@router.get(
+    "/formal-readiness",
+    response_model=RadarFormalReadiness,
+)
+def get_radar_formal_readiness(response: Response):
+    """只读取内容寻址正式就绪仓，不访问SQLite或外部来源。"""
+
+    _no_store(response)
+    checked_at = _utc_now()
+    clock_verified = (
+        checked_at.tzinfo is not None
+        and checked_at.utcoffset() is not None
+    )
+    if not clock_verified:
+        return _unavailable_formal_readiness(
+            checked_at=datetime.fromtimestamp(0, timezone.utc),
+            state="failed",
+            reason_codes=("formal_clock_unverified",),
+        )
+    try:
+        stored = load_latest_formal_readiness(
+            _formal_readiness_store_path(),
+        )
+    except Exception:
+        return _unavailable_formal_readiness(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=("formal_readiness_store_unverified",),
+        )
+    if stored.status == "missing":
+        return _unavailable_formal_readiness(
+            checked_at=checked_at,
+            state="not_ready",
+            reason_codes=(
+                stored.reason_codes
+                or ("formal_readiness_report_missing",)
+            ),
+        )
+    if stored.status != "available" or stored.report is None:
+        return _unavailable_formal_readiness(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=(
+                stored.reason_codes
+                or ("formal_readiness_report_unverified",)
+            ),
+        )
+    freshness_reason = formal_readiness_freshness_reason(
+        stored.report,
+        now=checked_at,
+    )
+    if freshness_reason:
+        return _unavailable_formal_readiness(
+            checked_at=checked_at,
+            state="failed",
+            reason_codes=(freshness_reason,),
+            freshness_policy=stored.report.freshness_policy,
+        )
+    return stored.report
 
 
 @router.get("/overview", response_model=RadarOverviewResponse)
@@ -262,6 +513,131 @@ def get_radar_sector_history(response: Response):
         ),
         gate=payload["gate"],
         reasonCodes=list(payload["reasons"]),
+    )
+
+
+@router.get(
+    "/replays/latest/etfs",
+    response_model=RadarReplayEtfResearchResponse,
+)
+def get_latest_radar_replay_etfs(response: Response):
+    """读取已发布的ETF逐产品研究分流，不访问SQLite。"""
+
+    _no_store(response)
+    checked_at = datetime.now(timezone.utc)
+    stored = load_latest_replay_etf_research(
+        _replay_store_path(),
+        checked_at=checked_at,
+    )
+    if stored.status != "available" or stored.snapshot is None:
+        return RadarReplayEtfResearchResponse(
+            checkedAt=checked_at,
+            state=("failed" if stored.status == "failed" else "not_ready"),
+            quality="unavailable",
+            evidenceSha256=stored.evidence_sha256,
+            snapshot=None,
+            reasonCodes=list(stored.reasons),
+        )
+    snapshot = stored.snapshot
+    quality = (
+        "complete"
+        if snapshot.evidence_incomplete_count == 0
+        else "partial"
+    )
+    return RadarReplayEtfResearchResponse(
+        checkedAt=checked_at,
+        state="available",
+        quality=quality,
+        evidenceSha256=stored.evidence_sha256,
+        snapshot=snapshot,
+        reasonCodes=list(snapshot.reason_codes),
+    )
+
+
+@router.get(
+    "/replays/latest",
+    response_model=RadarReplayQualityResponse,
+)
+def get_latest_radar_replay(response: Response):
+    """读取已发布的严格时点回放质量报告，不访问SQLite。"""
+
+    _no_store(response)
+    checked_at = datetime.now(timezone.utc)
+    stored = load_latest_replay_report(
+        store_dir=_replay_store_path(),
+        checked_at=checked_at,
+    )
+    if stored.status != "available" or stored.report is None:
+        store_failed = stored.status == "failed"
+        return RadarReplayQualityResponse(
+            checkedAt=checked_at,
+            state=("failed" if store_failed else "not_ready"),
+            quality="unavailable",
+            engineeringState=("failed" if store_failed else "not_ready"),
+            validationState=("failed" if store_failed else "not_started"),
+            shadowCollectionAllowed=False,
+            stage9QualityGatePassed=False,
+            reasonCodes=list(stored.reasons),
+        )
+
+    report = stored.report
+    quality = (
+        "complete"
+        if report.status == "ready"
+        else ("partial" if report.status == "not_ready" else "unavailable")
+    )
+    return RadarReplayQualityResponse(
+        checkedAt=checked_at,
+        state=report.status,
+        quality=quality,
+        engineeringState={
+            "ready": "complete",
+            "not_ready": "not_ready",
+            "failed": "failed",
+        }[report.pipeline_status],
+        validationState=(
+            "validated"
+            if report.effectiveness_status == "ready"
+            else ("failed" if report.status == "failed" else "collecting")
+        ),
+        shadowCollectionAllowed=(report.pipeline_status == "ready"),
+        stage9QualityGatePassed=(report.status == "ready"),
+        replayRunId=report.replay_run_id,
+        createdAt=report.created_at,
+        evidenceSha256=stored.evidence_sha256,
+        sampleCounts=report.sample_counts,
+        includedCount=report.included_count,
+        excludedCount=report.excluded_count,
+        scopedExclusionCount=report.scoped_exclusion_count,
+        scopedExclusionCounts=report.scoped_exclusion_counts,
+        missingCount=report.missing_count,
+        unverifiableCount=report.unverifiable_count,
+        failedCount=report.failed_count,
+        futureViolationCount=report.future_violation_count,
+        duplicateStateViolationCount=(
+            report.duplicate_state_violation_count
+        ),
+        multiStateViolationCount=report.multi_state_violation_count,
+        labelCounts=report.label_counts,
+        outputCounts=report.output_counts,
+        etfReadinessCounts=report.etf_readiness_counts,
+        comparableLabelCount=report.comparable_label_count,
+        incomparableLabelCount=report.incomparable_label_count,
+        disputedLabelCount=report.disputed_label_count,
+        unverifiableLabelCount=report.unverifiable_label_count,
+        unlabeledOutputTargetCount=report.unlabeled_output_target_count,
+        unlabeledOutputTargetCounts=report.unlabeled_output_target_counts,
+        partitionChronologyValid=report.partition_chronology_valid,
+        missingDomains=report.missing_domains,
+        missingPartitions=report.missing_partitions,
+        missingLabelDomains=report.missing_label_domains,
+        missingOutputDomains=report.missing_output_domains,
+        unverifiableOutputDomains=report.unverifiable_output_domains,
+        failedOutputDomains=report.failed_output_domains,
+        readyOutputDomains=report.ready_output_domains,
+        missingLabelPartitions=report.missing_label_partitions,
+        reasonCodes=report.reason_codes,
+        metrics=report.metrics,
     )
 
 

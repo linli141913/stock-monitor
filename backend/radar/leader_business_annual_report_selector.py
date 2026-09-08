@@ -27,7 +27,8 @@ ANNUAL_REPORT_SELECTOR_CONTRACT_ID = (
 )
 LeaderBusinessAnnualReportSelectionStatus = AutomaticBusinessEvidenceStatus
 REPORT_TITLE_PATTERN = re.compile(
-    r"(?<!\d)(20\d{2})年年度报告"
+    r"(?<!\d)(20\d{2})年(?:度)?年度报告"
+    r"(?:全文)?"
     r"(?:[（(](?:修订版|更新后|修正版)[）)])?$"
 )
 EXCLUDED_TITLE_MARKERS = (

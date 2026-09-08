@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from radar.sector_history_automatic_backfill import (
@@ -13,6 +14,7 @@ from radar.sector_history_automatic_backfill import (
 from radar.sector_history_backfill_collector import (
     SectorHistoryMinuteFrozenBatch,
 )
+from radar.sector_history_backfill import HistoricalDailyTradingProof
 from radar.sector_history_trading_presence import (
     HistoricalTradingPresenceBatch,
 )
@@ -154,6 +156,114 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
             1,
         )
         self.assertNotIn("sourceHashesBySymbol", payload)
+
+    def test_exact_daily_proof_survives_sparse_series_checkpoint_reuse(self):
+        value, series = request()
+        symbol = next(iter(series))
+        target_day = value.expected_trade_dates[0]
+        sparse_bars = tuple(
+            replace(bar, volume_shares=100)
+            for bar in series[symbol].bars
+            if not (
+                bar.occurred_at.date() == target_day
+                and bar.occurred_at.hour == 9
+                and bar.occurred_at.minute == 35
+            )
+        )
+        sparse = replace(
+            series[symbol],
+            source_contract_id="sina-a-share-5m-history-v1",
+            source_url=(
+                "https://quotes.sina.cn/cn/api/jsonp_v2.php/=/"
+                "CN_MarketDataService.getKLineData"
+            ),
+            bars=sparse_bars,
+        )
+        final_close = next(
+            bar.close
+            for bar in sparse_bars
+            if (
+                bar.occurred_at.date() == target_day
+                and bar.occurred_at.hour == 15
+            )
+        )
+        proof = HistoricalDailyTradingProof(
+            trade_date=target_day,
+            close=Decimal(str(final_close)),
+            volume_shares=200,
+            source_contract_id="tencent-qfq-daily-trading-presence-v1",
+            source_url=(
+                "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
+            ),
+            fetched_at=value.as_of - timedelta(seconds=1),
+            content_sha256="sha256:" + "d" * 64,
+        )
+
+        loader_calls = []
+
+        def minute_loader(symbols, dates):
+            loader_calls.append(symbols)
+            return SectorHistoryMinuteFrozenBatch(
+                expected_trade_dates=dates,
+                series_by_symbol={
+                    item: sparse if item == symbol else series[item]
+                    for item in symbols
+                },
+                source_status="ready",
+                failure_count=0,
+                requested_count=len(symbols),
+            )
+
+        def presence_loader(targets, **_kwargs):
+            return HistoricalTradingPresenceBatch(
+                verified_trading_dates_by_symbol={symbol: (target_day,)},
+                verified_non_trading_dates_by_symbol={symbol: ()},
+                source_hashes_by_symbol={symbol: proof.content_sha256},
+                source_status="ready",
+                requested_count=1,
+                failure_count=0,
+                daily_trading_proofs_by_symbol={symbol: (proof,)},
+            )
+
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            first = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=minute_loader,
+                presence_loader=presence_loader,
+            )
+            second = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=minute_loader,
+                presence_loader=presence_loader,
+            )
+            checkpoint = next(root.rglob(f"series-{symbol}.json"))
+            checkpoint_payload = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )
+            checkpoint_payload["bars"] = [
+                row[:3] for row in checkpoint_payload["bars"]
+            ]
+            checkpoint.write_text(
+                json.dumps(checkpoint_payload),
+                encoding="utf-8",
+            )
+            third = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=minute_loader,
+                presence_loader=presence_loader,
+            )
+
+        self.assertEqual(first.status, "ready", first.reasons)
+        self.assertEqual(second.status, "ready", second.reasons)
+        self.assertEqual(second.reused_count, 40)
+        self.assertEqual(third.status, "ready", third.reasons)
+        self.assertEqual(third.fetched_count, 1)
+        self.assertEqual(third.reused_count, 39)
+        self.assertEqual(loader_calls[-1], (symbol,))
 
     def test_complete_batch_checkpoints_and_second_run_reuses_every_symbol(self):
         value, series = request()
@@ -443,6 +553,82 @@ class SectorHistoryAutomaticBackfillTests(unittest.TestCase):
         self.assertEqual(second.fetched_count, 0)
         self.assertEqual(second.reused_count, 40)
         self.assertEqual(len(calls), 1)
+
+    def test_stale_terminal_checkpoint_refetches_intervening_trading_day(self):
+        value, series = request()
+        symbol = next(iter(series))
+        traded_gap = value.expected_trade_dates[-2]
+        latest = value.expected_trade_dates[-1]
+        value = replace(
+            value,
+            terminal_non_trading_symbols=(symbol,),
+            verified_non_trading_dates_by_symbol={symbol: (latest,)},
+        )
+        calls = []
+
+        def loader(symbols, dates):
+            calls.append(symbols)
+            return SectorHistoryMinuteFrozenBatch(
+                expected_trade_dates=dates,
+                series_by_symbol={item: series[item] for item in symbols},
+                source_status="ready",
+                failure_count=0,
+                requested_count=len(symbols),
+            )
+
+        proof = HistoricalDailyTradingProof(
+            trade_date=traded_gap,
+            close=Decimal("1"),
+            volume_shares=1,
+            source_contract_id="tencent-qfq-daily-trading-presence-v1",
+            source_url=(
+                "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
+            ),
+            fetched_at=value.as_of - timedelta(seconds=1),
+            content_sha256="sha256:" + "b" * 64,
+        )
+
+        def presence_loader(targets, **_kwargs):
+            return HistoricalTradingPresenceBatch(
+                verified_trading_dates_by_symbol={symbol: (traded_gap,)},
+                verified_non_trading_dates_by_symbol={symbol: (latest,)},
+                source_hashes_by_symbol={symbol: proof.content_sha256},
+                source_status="ready",
+                requested_count=1,
+                failure_count=0,
+                daily_trading_proofs_by_symbol={symbol: (proof,)},
+            )
+
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            first = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=loader,
+            )
+            checkpoint = next(root.rglob(f"series-{symbol}.json"))
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            payload["bars"] = [
+                row for row in payload["bars"]
+                if not (
+                    row[0].startswith(traded_gap.isoformat())
+                    or row[0].startswith(latest.isoformat())
+                )
+            ]
+            checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+            second = run_sector_history_automatic_backfill(
+                value,
+                artifact_dir=root,
+                minute_loader=loader,
+                presence_loader=presence_loader,
+            )
+
+        self.assertEqual(first.status, "ready", first.reasons)
+        self.assertEqual(second.status, "ready", second.reasons)
+        self.assertEqual(second.fetched_count, 1)
+        self.assertEqual(second.reused_count, 39)
+        self.assertEqual(calls[-1], (symbol,))
+        self.assertEqual(len(calls), 2)
 
     def test_failed_source_keeps_success_checkpoints_and_never_emits_gate_packet(self):
         value, series = request()

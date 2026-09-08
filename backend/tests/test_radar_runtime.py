@@ -1,4 +1,5 @@
 import sqlite3
+import inspect
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -77,7 +78,7 @@ def market_provider(status_code="trading", day_kind="full"):
 
 class RadarRuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir="/private/tmp")
         self.database_path = Path(self.temp_dir.name) / "radar-runtime.db"
         self.lock_path = Path(self.temp_dir.name) / "radar-shadow.lock"
         self.sector_lock_path = (
@@ -333,6 +334,7 @@ class RadarRuntimeTests(unittest.TestCase):
         leader_sector_rule_input_provider=None,
         leader_research_input_provider=None,
         leader_formal_research_source_provenance_provider=None,
+        leader_observation_publisher=None,
     ):
         kwargs = {}
         if connection_factory is not None:
@@ -365,6 +367,7 @@ class RadarRuntimeTests(unittest.TestCase):
             leader_formal_research_source_provenance_provider=(
                 leader_formal_research_source_provenance_provider
             ),
+            leader_observation_publisher=leader_observation_publisher,
             **kwargs,
         )
 
@@ -684,6 +687,34 @@ class RadarRuntimeTests(unittest.TestCase):
             "leader_formal_research_production_acceptance_missing",
             leader_health["lastDegradationReasons"],
         )
+
+    def test_stage6_publishes_observation_before_formal_research_is_ready(self):
+        self.seed_universes()
+        self.seed_industry_classification()
+        observation_publisher = Mock()
+        runtime = self.runtime(
+            settings=self.leader_stage6_settings(),
+            leader_observation_publisher=observation_publisher,
+        )
+
+        runtime.execute_sector("sector-run", TRADE_AS_OF)
+        market_result = runtime.execute_market("market-run", TRADE_AS_OF)
+
+        self.assertEqual(market_result.leader_stage6_status, "missing")
+        observation_publisher.assert_called_once()
+        plan, quote_items, security_records, published_at = (
+            observation_publisher.call_args.args
+        )
+        self.assertEqual(plan.status.value, "ready")
+        self.assertEqual(tuple(item.symbol for item in plan.items), ("000001",))
+        self.assertIn("000001", tuple(item.symbol for item in quote_items))
+        self.assertEqual(
+            tuple(item.symbol for item in security_records),
+            ("000001",),
+        )
+        self.assertEqual(published_at, TRADE_AS_OF)
+        self.assertFalse(plan.formal_usable)
+        self.assertFalse(plan.state_transition_allowed)
 
     def test_stage6_default_provider_uses_read_only_d8_bridge_when_available(self):
         from radar.leader_formal_research_runtime_bridge import (
@@ -1508,6 +1539,101 @@ class RadarRuntimeTests(unittest.TestCase):
         self.assertEqual(state["status"], "healthy")
         self.assertEqual(state["lastOutcome"], "skipped")
         self.assertEqual(state["lastSkipReason"], "market_closed")
+
+
+class RadarFormalRuntimeSeamTests(unittest.TestCase):
+    def test_formal_request_settings_default_false_and_parse_strict_booleans(self):
+        from radar.config import load_radar_settings
+
+        defaults = load_radar_settings({})
+        self.assertFalse(defaults.formal_trend_requested)
+        self.assertFalse(defaults.formal_etf_requested)
+        self.assertFalse(defaults.formal_leader_requested)
+
+        enabled = load_radar_settings({
+            "RADAR_FORMAL_TREND_REQUESTED": "true",
+            "RADAR_FORMAL_ETF_REQUESTED": "1",
+            "RADAR_FORMAL_LEADER_REQUESTED": "yes",
+        })
+        self.assertTrue(enabled.formal_trend_requested)
+        self.assertTrue(enabled.formal_etf_requested)
+        self.assertTrue(enabled.formal_leader_requested)
+
+        disabled = load_radar_settings({
+            "RADAR_FORMAL_TREND_REQUESTED": "false",
+            "RADAR_FORMAL_ETF_REQUESTED": "0",
+            "RADAR_FORMAL_LEADER_REQUESTED": "no",
+        })
+        self.assertFalse(disabled.formal_trend_requested)
+        self.assertFalse(disabled.formal_etf_requested)
+        self.assertFalse(disabled.formal_leader_requested)
+
+        for name in (
+            "RADAR_FORMAL_TREND_REQUESTED",
+            "RADAR_FORMAL_ETF_REQUESTED",
+            "RADAR_FORMAL_LEADER_REQUESTED",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, name):
+                    load_radar_settings({name: "enabled"})
+
+    def test_runtime_formal_seam_registers_no_default_jobs_or_executors(self):
+        from radar.formal_readiness_store import FormalReadinessLoadResult
+        from radar.runtime import register_production_formal_jobs
+        from radar.scheduler import FormalJobSpec
+
+        self.assertIn(
+            "clock",
+            inspect.signature(register_production_formal_jobs).parameters,
+        )
+
+        scheduler = Mock()
+        executor = Mock()
+        settings_provider = Mock()
+        readiness_loader = Mock(return_value=FormalReadinessLoadResult(
+            status="missing",
+            reason_codes=("formal_readiness_report_missing",),
+        ))
+
+        self.assertEqual(
+            register_production_formal_jobs(
+                scheduler,
+                specs=(),
+                settings_provider=settings_provider,
+                readiness_loader=readiness_loader,
+            ),
+            (),
+        )
+        settings_provider.assert_not_called()
+        readiness_loader.assert_not_called()
+        scheduler.get_job.assert_not_called()
+        scheduler.add_job.assert_not_called()
+
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            registrations = register_production_formal_jobs(
+                scheduler,
+                specs=(FormalJobSpec(
+                    module="trendRotation",
+                    job_id="test-explicit-formal-trend",
+                    executor=executor,
+                    config_sha256="c" * 64,
+                    binding_loader=Mock(),
+                    lock_path=Path(directory) / "formal.lock",
+                    interval_seconds=180,
+                ),),
+                settings_provider=settings_provider,
+                readiness_loader=readiness_loader,
+            )
+
+        self.assertEqual(
+            [item.state for item in registrations],
+            [ScheduleRegistrationState.DISABLED],
+        )
+        executor.assert_not_called()
+        settings_provider.assert_not_called()
+        readiness_loader.assert_not_called()
+        scheduler.get_job.assert_not_called()
+        scheduler.add_job.assert_not_called()
 
 
 if __name__ == "__main__":

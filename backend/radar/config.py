@@ -16,6 +16,9 @@ class RadarSettings:
     etf_stage5_enabled: bool = False
     leader_stage6_enabled: bool = False
     leader_d8_review_write_enabled: bool = False
+    formal_trend_requested: bool = False
+    formal_etf_requested: bool = False
+    formal_leader_requested: bool = False
     stock_scan_interval_seconds: int = 180
     etf_scan_interval_seconds: int = 300
     sector_scan_interval_seconds: int = 180
@@ -90,6 +93,21 @@ def load_radar_settings(
         leader_d8_review_write_enabled=_read_bool(
             values,
             "RADAR_LEADER_D8_REVIEW_WRITE_ENABLED",
+            False,
+        ),
+        formal_trend_requested=_read_bool(
+            values,
+            "RADAR_FORMAL_TREND_REQUESTED",
+            False,
+        ),
+        formal_etf_requested=_read_bool(
+            values,
+            "RADAR_FORMAL_ETF_REQUESTED",
+            False,
+        ),
+        formal_leader_requested=_read_bool(
+            values,
+            "RADAR_FORMAL_LEADER_REQUESTED",
             False,
         ),
         stock_scan_interval_seconds=_read_int(
